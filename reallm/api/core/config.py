@@ -65,7 +65,8 @@ class ModelShardID:
     mp_rank: int
     pp_rank: int
     topo: topology.PipeModelDataParallelTopology = dataclasses.field(
-        default_factory=lambda: topology.PipeModelDataParallelTopology(1, 1, 1))
+        default_factory=lambda: topology.PipeModelDataParallelTopology(1, 1, 1)
+    )
 
     def __post_init__(self):
         assert self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
@@ -77,7 +78,9 @@ class ModelShardID:
 
     @property
     def parallelism_rank(self):
-        return self.topo.get_rank(data=self.dp_rank, model=self.mp_rank, pipe=self.pp_rank)
+        return self.topo.get_rank(
+            data=self.dp_rank, model=self.mp_rank, pipe=self.pp_rank
+        )
 
     @classmethod
     def from_parallelism_rank(cls, model_name, topo, parallelism_rank):
@@ -99,8 +102,12 @@ class ModelShardID:
     def __eq__(self, other):
         # Compare the key attribute for equality
         if isinstance(other, ModelShardID):
-            return (self.model_name == other.model_name and self.dp_rank == other.dp_rank
-                    and self.mp_rank == other.mp_rank and self.pp_rank == other.pp_rank)
+            return (
+                self.model_name == other.model_name
+                and self.dp_rank == other.dp_rank
+                and self.mp_rank == other.mp_rank
+                and self.pp_rank == other.pp_rank
+            )
         return False
 
 
@@ -111,5 +118,7 @@ class StandaloneModelShard:
     backend: ModelBackend
     # evaluation
     eval_datasets: Optional[List[Dataset]] = None
-    eval_dataloader: Optional[DataLoader] = DataLoader("packed_eval", args=dict(batch_size=128))
+    eval_dataloader: Optional[DataLoader] = DataLoader(
+        "packed_eval", args=dict(batch_size=128)
+    )
     should_instantiate: bool = True

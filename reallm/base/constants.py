@@ -51,12 +51,22 @@ MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"
 LOG_ROOT = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}"
 RECOVER_ROOT = f"{cluster_spec.fileroot}/recover/{getpass.getuser()}"
 SLURM_LOCK_FILE_NAME = f"{cluster_spec.fileroot}/logs/slurm_scheduler.lock"
-PYTORCH_KERNEL_CACHE_PATH = (f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels")
+PYTORCH_KERNEL_CACHE_PATH = (
+    f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/kernels"
+)
 TRITON_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/triton"
-DATASET_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets"
-PROFILER_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/profiler"
-TORCH_EXTENSIONS_DIR = (f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions")
-QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/"
+DATASET_CACHE_PATH = (
+    f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/datasets"
+)
+PROFILER_CACHE_PATH = (
+    f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/profiler"
+)
+TORCH_EXTENSIONS_DIR = (
+    f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions"
+)
+QUICKSTART_EXPR_CACHE_PATH = (
+    f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/"
+)
 
 # make directories if does not exist
 os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
@@ -77,8 +87,9 @@ _experiment_name = None
 _trial_name = None
 
 _grids: Dict["ModelName", "ParallelGrid"] = {}
-_pgroups: Dict["ModelName",
-               Any] = ({})  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
+_pgroups: Dict["ModelName", Any] = (
+    {}
+)  # torch.distributed.ProcessGroup, not type hint here to avoid importing torch
 _pgroup_ranks: Dict["ModelName", List[int]] = {}
 _self_group = None
 _rank_mapping: Dict["ModelName", Dict["ModelShardID", int]] = {}
@@ -129,7 +140,9 @@ def set_grid(model_name: "ModelName", grid: "ParallelGrid"):
 def set_parallelism_group(model_name: "ModelName", pgroup, ranks):
     global _pgroups
     if model_name in _pgroups:
-        raise RuntimeError(f"Parallelism group for model {model_name} is already set.")
+        raise RuntimeError(
+            f"Parallelism group for model {model_name} is already set."
+        )
     _pgroups[model_name] = pgroup
     _pgroup_ranks[model_name] = ranks
 
@@ -148,13 +161,19 @@ def set_rank_mapping(
 ):
     global _rank_mapping
     if model_name in _rank_mapping:
-        raise RuntimeError(f"Rank mapping for model {model_name} is already set.")
+        raise RuntimeError(
+            f"Rank mapping for model {model_name} is already set."
+        )
     if msid2mwid is None:
         _rank_mapping[model_name] = {i: i for i in range(topo.world_size())}
     else:
-        msid2mwid = {k: v for k, v in msid2mwid.items() if k.model_name == model_name}
+        msid2mwid = {
+            k: v for k, v in msid2mwid.items() if k.model_name == model_name
+        }
         _rank_mapping[model_name] = {
-            topo.get_rank(data=s.dp_rank, model=s.mp_rank, pipe=s.pp_rank): mw_id
+            topo.get_rank(
+                data=s.dp_rank, model=s.mp_rank, pipe=s.pp_rank
+            ): mw_id
             for s, mw_id in msid2mwid.items()
         }
 
@@ -194,25 +213,33 @@ def self_group():
 
 def model_name():
     if _model_name == None:
-        raise RuntimeError("Global constant `model_name` should be accessed in the `model_scope` context.")
+        raise RuntimeError(
+            "Global constant `model_name` should be accessed in the `model_scope` context."
+        )
     return _model_name
 
 
 def experiment_name():
     if _experiment_name == None:
-        raise RuntimeError("Global constant `experiment_name` is accessed before set.")
+        raise RuntimeError(
+            "Global constant `experiment_name` is accessed before set."
+        )
     return _experiment_name
 
 
 def trial_name():
     if _trial_name == None:
-        raise RuntimeError("Global constant `trial_name` is accessed before set.")
+        raise RuntimeError(
+            "Global constant `trial_name` is accessed before set."
+        )
     return _trial_name
 
 
 def grid() -> "ParallelGrid":
     if _model_name is None:
-        raise RuntimeError("Global constant `model_name` is accessed before set.")
+        raise RuntimeError(
+            "Global constant `model_name` is accessed before set."
+        )
     if _grids.get(_model_name, None) is None:
         raise RuntimeError(f"Grid for model {_model_name} is not set.")
     return _grids[_model_name]
@@ -227,17 +254,25 @@ def grid_of_model(model_name: str) -> "ParallelGrid":
 def parallelism_group():
     """Returns the 3D parallelism group of a specific model."""
     if _model_name is None:
-        raise RuntimeError("Global constant `model_name` is accessed before set.")
+        raise RuntimeError(
+            "Global constant `model_name` is accessed before set."
+        )
     if _pgroups.get(_model_name, None) is None:
-        raise RuntimeError(f"Parallelism group for model {_model_name} is not set.")
+        raise RuntimeError(
+            f"Parallelism group for model {_model_name} is not set."
+        )
     return _pgroups[_model_name]
 
 
 def parallelism_group_ranks():
     if _model_name is None:
-        raise RuntimeError("Global constant `model_name` is accessed before set.")
+        raise RuntimeError(
+            "Global constant `model_name` is accessed before set."
+        )
     if _pgroup_ranks.get(_model_name, None) is None:
-        raise RuntimeError(f"Parallelism group ranks for model {_model_name} is not set.")
+        raise RuntimeError(
+            f"Parallelism group ranks for model {_model_name} is not set."
+        )
     return _pgroup_ranks[_model_name]
 
 
@@ -294,7 +329,9 @@ def next_pipe_stage():
 
 
 def prev_pipe_stage():
-    return (pipe_parallel_world_size() + pipe_parallel_rank() - 1) % pipe_parallel_world_size()
+    return (
+        pipe_parallel_world_size() + pipe_parallel_rank() - 1
+    ) % pipe_parallel_world_size()
 
 
 def model_parallel_rank() -> int:

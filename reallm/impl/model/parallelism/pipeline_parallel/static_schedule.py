@@ -153,18 +153,26 @@ class InferenceSchedule(PipeSchedule):
             if _is_even(self.stage_id):
                 if self._valid_stage(self.next_stage):
                     if self._valid_micro_batch(micro_batch_id - 1):
-                        cmds.append(SendActivation(self.stage_id, micro_batch_id - 1))
+                        cmds.append(
+                            SendActivation(self.stage_id, micro_batch_id - 1)
+                        )
                 if self._valid_stage(self.prev_stage):
                     if self._valid_micro_batch(micro_batch_id):
-                        cmds.append(RecvActivation(self.stage_id, micro_batch_id))
+                        cmds.append(
+                            RecvActivation(self.stage_id, micro_batch_id)
+                        )
             else:
                 if self._valid_stage(self.prev_stage):
                     if self._valid_micro_batch(micro_batch_id):
-                        cmds.append(RecvActivation(self.stage_id, micro_batch_id))
+                        cmds.append(
+                            RecvActivation(self.stage_id, micro_batch_id)
+                        )
 
                 if self._valid_stage(self.next_stage):
                     if self._valid_micro_batch(micro_batch_id - 1):
-                        cmds.append(SendActivation(self.stage_id, micro_batch_id - 1))
+                        cmds.append(
+                            SendActivation(self.stage_id, micro_batch_id - 1)
+                        )
 
             if self._valid_micro_batch(micro_batch_id):
                 cmds.append(ForwardPass(self.stage_id, micro_batch_id))
@@ -191,8 +199,11 @@ class GenerateSchedule(PipeSchedule):
         self.prev_stage = self.prev_stage % self.stages
         self.next_stage = self.next_stage % self.stages
         self.max_new_tokens = max_new_tokens
-        self.max_steps = (max_new_tokens * max(self.num_micro_batches, self.stages) + self.num_micro_batches -
-                          1)  # a configurable upper bound
+        self.max_steps = (
+            max_new_tokens * max(self.num_micro_batches, self.stages)
+            + self.num_micro_batches
+            - 1
+        )  # a configurable upper bound
 
     def _valid_token_id(self, token_id):
         return token_id < self.max_new_tokens
@@ -203,42 +214,99 @@ class GenerateSchedule(PipeSchedule):
         for step_id in range(self.max_steps):
             cmds = []
             micro_batch_id = (
-                (step_id - self.stage_id) % max(self.num_micro_batches, self.stages) if step_id -
-                self.stage_id >= 0 else -1)  # micro batch id for current stage
-            first_round = (step_id < self.num_micro_batches)  # whether it is the first round of generate
-            last_stage_last_mbid = ((step_id - self.stages) % max(self.num_micro_batches, self.stages)
-                                    if step_id >= self.stages else -1)
+                (step_id - self.stage_id)
+                % max(self.num_micro_batches, self.stages)
+                if step_id - self.stage_id >= 0
+                else -1
+            )  # micro batch id for current stage
+            first_round = (
+                step_id < self.num_micro_batches
+            )  # whether it is the first round of generate
+            last_stage_last_mbid = (
+                (step_id - self.stages)
+                % max(self.num_micro_batches, self.stages)
+                if step_id >= self.stages
+                else -1
+            )
             # the micro_batch_id of the last stage on last step
-            token_id = (step_id - self.stage_id) // max(self.num_micro_batches, self.stages)
+            token_id = (step_id - self.stage_id) // max(
+                self.num_micro_batches, self.stages
+            )
             # token id in current round
 
             # TODO: from last stage to first stage, need one buffer for each microbatch?
             if _is_even(self.stage_id):
-                if (self._valid_micro_batch(last_micro_batch_id) and self._valid_token_id(last_token_id)
-                        and not self.is_last_stage):
-                    cmds.append(SendActivation(self.stage_id, last_micro_batch_id, step_id=token_id))
+                if (
+                    self._valid_micro_batch(last_micro_batch_id)
+                    and self._valid_token_id(last_token_id)
+                    and not self.is_last_stage
+                ):
+                    cmds.append(
+                        SendActivation(
+                            self.stage_id, last_micro_batch_id, step_id=token_id
+                        )
+                    )
                 # intermediate stage recv
-                if (self._valid_micro_batch(micro_batch_id) and self._valid_token_id(token_id)
-                        and not self.is_first_stage):
-                    cmds.append(RecvActivation(self.stage_id, micro_batch_id, step_id=token_id))
+                if (
+                    self._valid_micro_batch(micro_batch_id)
+                    and self._valid_token_id(token_id)
+                    and not self.is_first_stage
+                ):
+                    cmds.append(
+                        RecvActivation(
+                            self.stage_id, micro_batch_id, step_id=token_id
+                        )
+                    )
             else:
                 # odd stage could not be first stage
-                if self._valid_micro_batch(micro_batch_id) and self._valid_token_id(token_id):
-                    cmds.append(RecvActivation(self.stage_id, micro_batch_id, step_id=token_id))
+                if self._valid_micro_batch(
+                    micro_batch_id
+                ) and self._valid_token_id(token_id):
+                    cmds.append(
+                        RecvActivation(
+                            self.stage_id, micro_batch_id, step_id=token_id
+                        )
+                    )
                 # last stage should not send activation except first stage requires
-                if (self._valid_micro_batch(last_micro_batch_id) and self._valid_token_id(last_token_id)
-                        and not self.is_last_stage):
-                    cmds.append(SendActivation(self.stage_id, last_micro_batch_id, step_id=token_id))
+                if (
+                    self._valid_micro_batch(last_micro_batch_id)
+                    and self._valid_token_id(last_token_id)
+                    and not self.is_last_stage
+                ):
+                    cmds.append(
+                        SendActivation(
+                            self.stage_id, last_micro_batch_id, step_id=token_id
+                        )
+                    )
 
             # last stage send next tokens when first stage requires.
-            if (self.is_last_stage and self._valid_micro_batch(last_micro_batch_id)
-                    and self._valid_token_id(last_token_id)):
-                cmds.append(SendNextTokens(self.stage_id, last_micro_batch_id, step_id=last_token_id))
-            if self.is_first_stage and self._valid_micro_batch(last_stage_last_mbid):
-                cmds.append(RecvNextTokens(self.stage_id, last_stage_last_mbid, step_id=token_id))
+            if (
+                self.is_last_stage
+                and self._valid_micro_batch(last_micro_batch_id)
+                and self._valid_token_id(last_token_id)
+            ):
+                cmds.append(
+                    SendNextTokens(
+                        self.stage_id,
+                        last_micro_batch_id,
+                        step_id=last_token_id,
+                    )
+                )
+            if self.is_first_stage and self._valid_micro_batch(
+                last_stage_last_mbid
+            ):
+                cmds.append(
+                    RecvNextTokens(
+                        self.stage_id, last_stage_last_mbid, step_id=token_id
+                    )
+                )
 
-            if self._valid_micro_batch(micro_batch_id) and self._valid_token_id(token_id):
-                cmds.append(ForwardPass(self.stage_id, micro_batch_id, step_id=token_id))
+            if self._valid_micro_batch(micro_batch_id) and self._valid_token_id(
+                token_id
+            ):
+                cmds.append(
+                    ForwardPass(self.stage_id, micro_batch_id, step_id=token_id)
+                )
 
             last_micro_batch_id = micro_batch_id
             last_token_id = token_id
@@ -274,27 +342,53 @@ class TrainSchedule(PipeSchedule):
 
             # Exchange activations
             if is_forward:
-                if self._valid_micro_batch(prev_micro_batch_id) and self._valid_stage(self.prev_stage):
-                    cmds.append(SendGrad(self.stage_id, prev_micro_batch_id, step_id=0))
-                if self._valid_micro_batch(micro_batch_id) and self._valid_stage(self.prev_stage):
-                    cmds.append(RecvActivation(self.stage_id, micro_batch_id, step_id=0))
+                if self._valid_micro_batch(
+                    prev_micro_batch_id
+                ) and self._valid_stage(self.prev_stage):
+                    cmds.append(
+                        SendGrad(self.stage_id, prev_micro_batch_id, step_id=0)
+                    )
+                if self._valid_micro_batch(
+                    micro_batch_id
+                ) and self._valid_stage(self.prev_stage):
+                    cmds.append(
+                        RecvActivation(self.stage_id, micro_batch_id, step_id=0)
+                    )
             else:
-                if self._valid_micro_batch(micro_batch_id) and self._valid_stage(self.next_stage):
-                    cmds.append(RecvGrad(self.stage_id, micro_batch_id, step_id=0))
-                if self._valid_micro_batch(prev_micro_batch_id) and self._valid_stage(self.next_stage):
-                    cmds.append(SendActivation(self.stage_id, prev_micro_batch_id, step_id=0))
+                if self._valid_micro_batch(
+                    micro_batch_id
+                ) and self._valid_stage(self.next_stage):
+                    cmds.append(
+                        RecvGrad(self.stage_id, micro_batch_id, step_id=0)
+                    )
+                if self._valid_micro_batch(
+                    prev_micro_batch_id
+                ) and self._valid_stage(self.next_stage):
+                    cmds.append(
+                        SendActivation(
+                            self.stage_id, prev_micro_batch_id, step_id=0
+                        )
+                    )
 
             # Computation
             if self._valid_micro_batch(micro_batch_id):
                 if is_forward:
-                    cmds.append(ForwardPass(self.stage_id, micro_batch_id, step_id=0))
+                    cmds.append(
+                        ForwardPass(self.stage_id, micro_batch_id, step_id=0)
+                    )
                 else:
-                    cmds.append(BackwardPass(self.stage_id, micro_batch_id, step_id=0))
+                    cmds.append(
+                        BackwardPass(self.stage_id, micro_batch_id, step_id=0)
+                    )
 
             # Model step at the end of the batch
             if step_id == total_steps - 1:
-                cmds.append(ReduceGrads(self.stage_id, micro_batch_id, step_id=0))
-                cmds.append(OptimizerStep(self.stage_id, micro_batch_id, step_id=0))
+                cmds.append(
+                    ReduceGrads(self.stage_id, micro_batch_id, step_id=0)
+                )
+                cmds.append(
+                    OptimizerStep(self.stage_id, micro_batch_id, step_id=0)
+                )
 
             # Prepare state for next time
             prev_micro_batch_id = micro_batch_id
@@ -368,10 +462,12 @@ class DataParallelSchedule(PipeSchedule):
                 BackwardPass(self.stage_id, step_id, step_id=0),
             ]
             if step_id == self.micro_batches - 1:
-                cmds.extend([
-                    ReduceGrads(self.stage_id, step_id, step_id=0),
-                    OptimizerStep(self.stage_id, step_id, step_id=0),
-                ])
+                cmds.extend(
+                    [
+                        ReduceGrads(self.stage_id, step_id, step_id=0),
+                        OptimizerStep(self.stage_id, step_id, step_id=0),
+                    ]
+                )
             yield cmds
 
     def num_pipe_buffers(self):

@@ -3,11 +3,17 @@ from typing import *
 import torch
 import transformers
 
-from reallm.api.core.model_api import ReaLModelConfig, register_hf_family, register_hf_path
+from reallm.api.core.model_api import (
+    ReaLModelConfig,
+    register_hf_family,
+    register_hf_path,
+)
 from reallm.base.constants import use_te_impl
 
 
-def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig,) -> ReaLModelConfig:
+def convert_config_starcoder(
+    starcoder_config: transformers.GPTBigCodeConfig,
+) -> ReaLModelConfig:
     return ReaLModelConfig(
         n_layers=starcoder_config.n_layer,
         n_kv_heads=1,
@@ -23,7 +29,9 @@ def convert_config_starcoder(starcoder_config: transformers.GPTBigCodeConfig,) -
     )
 
 
-def to_starcoder_config(config: ReaLModelConfig) -> transformers.GPTBigCodeConfig:
+def to_starcoder_config(
+    config: ReaLModelConfig,
+) -> transformers.GPTBigCodeConfig:
     return transformers.GPTBigCodeConfig(
         vocab_size=config.vocab_size,
         n_positions=config.n_positions,
@@ -50,18 +58,40 @@ def _starcoder_key_mapping_fn(config: ReaLModelConfig) -> Dict[str, str]:
         "lm_head.weight": f"{config.n_layers+1}.weight",
     }
     for i in range(config.n_layers):
-        key_mappings[f"transformer.h.{i}.ln_1.weight"] = (f"{i + 1}.attn.c_attn.ln.weight")
-        key_mappings[f"transformer.h.{i}.ln_1.bias"] = f"{i + 1}.attn.c_attn.ln.bias"
-        key_mappings[f"transformer.h.{i}.attn.c_attn.weight"] = (f"{i + 1}.attn.c_attn.linear.weight")
-        key_mappings[f"transformer.h.{i}.attn.c_attn.bias"] = (f"{i + 1}.attn.c_attn.linear.bias")
-        key_mappings[f"transformer.h.{i}.attn.c_proj.weight"] = (f"{i + 1}.attn.c_proj.weight")
-        key_mappings[f"transformer.h.{i}.attn.c_proj.bias"] = (f"{i + 1}.attn.c_proj.bias")
-        key_mappings[f"transformer.h.{i}.ln_2.weight"] = f"{i + 1}.mlp.ln.weight"
+        key_mappings[f"transformer.h.{i}.ln_1.weight"] = (
+            f"{i + 1}.attn.c_attn.ln.weight"
+        )
+        key_mappings[f"transformer.h.{i}.ln_1.bias"] = (
+            f"{i + 1}.attn.c_attn.ln.bias"
+        )
+        key_mappings[f"transformer.h.{i}.attn.c_attn.weight"] = (
+            f"{i + 1}.attn.c_attn.linear.weight"
+        )
+        key_mappings[f"transformer.h.{i}.attn.c_attn.bias"] = (
+            f"{i + 1}.attn.c_attn.linear.bias"
+        )
+        key_mappings[f"transformer.h.{i}.attn.c_proj.weight"] = (
+            f"{i + 1}.attn.c_proj.weight"
+        )
+        key_mappings[f"transformer.h.{i}.attn.c_proj.bias"] = (
+            f"{i + 1}.attn.c_proj.bias"
+        )
+        key_mappings[f"transformer.h.{i}.ln_2.weight"] = (
+            f"{i + 1}.mlp.ln.weight"
+        )
         key_mappings[f"transformer.h.{i}.ln_2.bias"] = f"{i + 1}.mlp.ln.bias"
-        key_mappings[f"transformer.h.{i}.mlp.c_fc.weight"] = f"{i + 1}.mlp.c_fc.weight"
-        key_mappings[f"transformer.h.{i}.mlp.c_fc.bias"] = f"{i + 1}.mlp.c_fc.bias"
-        key_mappings[f"transformer.h.{i}.mlp.c_proj.weight"] = (f"{i + 1}.mlp.c_proj.weight")
-        key_mappings[f"transformer.h.{i}.mlp.c_proj.bias"] = f"{i + 1}.mlp.c_proj.bias"
+        key_mappings[f"transformer.h.{i}.mlp.c_fc.weight"] = (
+            f"{i + 1}.mlp.c_fc.weight"
+        )
+        key_mappings[f"transformer.h.{i}.mlp.c_fc.bias"] = (
+            f"{i + 1}.mlp.c_fc.bias"
+        )
+        key_mappings[f"transformer.h.{i}.mlp.c_proj.weight"] = (
+            f"{i + 1}.mlp.c_proj.weight"
+        )
+        key_mappings[f"transformer.h.{i}.mlp.c_proj.bias"] = (
+            f"{i + 1}.mlp.c_proj.bias"
+        )
     return key_mappings
 
 
@@ -81,8 +111,12 @@ def state_dict_from_starcoder(state_dict, config):
             w = new_state_dict[f"{i + 1}.attn.c_attn.linear.{k}"]
             assert w.shape[0] == qdim + kvdim * 2
             new_state_dict[f"{i + 1}.attn.c_attn.q_attn.{k}"] = w[:qdim]
-            new_state_dict[f"{i + 1}.attn.c_attn.k_attn.{k}"] = w[qdim:qdim + kvdim]
-            new_state_dict[f"{i + 1}.attn.c_attn.v_attn.{k}"] = w[qdim + kvdim:]
+            new_state_dict[f"{i + 1}.attn.c_attn.k_attn.{k}"] = w[
+                qdim : qdim + kvdim
+            ]
+            new_state_dict[f"{i + 1}.attn.c_attn.v_attn.{k}"] = w[
+                qdim + kvdim :
+            ]
             new_state_dict.pop(f"{i + 1}.attn.c_attn.linear.{k}")
     return new_state_dict
 
@@ -117,7 +151,9 @@ def starcoder_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
     return ["transformer.wte.weight", "transformer.wpe.weight"]
 
 
-def starcoder_tblock_param_name(config: ReaLModelConfig, layer_idx: int) -> List[str]:
+def starcoder_tblock_param_name(
+    config: ReaLModelConfig, layer_idx: int
+) -> List[str]:
     names = [
         f"transformer.h.{layer_idx}.ln_1.weight",
         f"transformer.h.{layer_idx}.ln_1.bias",

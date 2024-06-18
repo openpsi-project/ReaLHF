@@ -12,14 +12,26 @@ from reallm.api.core import model_api, system_api
 from reallm.api.core.config import ModelName
 from reallm.base import constants, topology
 from reallm.impl.model.comm.global_comm import filter_match_mwids
-from reallm.impl.model.nn.flatten_param import (build_param_spec, ContiguousParamSpec,
-                                                CUDA_INTERVAL_OP_CHUNK_SIZE, MAX_PYTORCH_N_INTERVALS,
-                                                param_intervals_from_keys)
-from reallm.impl.model.nn.real_llm_base import (keys_from_layer_indices, real_model_embed_param_count,
-                                                real_model_head_param_count, real_model_tblock_param_count)
-from reallm.impl.model.nn.real_llm_parallel import (get_real_model_param_shape, mp_partition_key,
-                                                    partition_pipeline_layers, pipeline_repartition_strategy,
-                                                    shape_partition_fn)
+from reallm.impl.model.nn.flatten_param import (
+    build_param_spec,
+    ContiguousParamSpec,
+    CUDA_INTERVAL_OP_CHUNK_SIZE,
+    MAX_PYTORCH_N_INTERVALS,
+    param_intervals_from_keys,
+)
+from reallm.impl.model.nn.real_llm_base import (
+    keys_from_layer_indices,
+    real_model_embed_param_count,
+    real_model_head_param_count,
+    real_model_tblock_param_count,
+)
+from reallm.impl.model.nn.real_llm_parallel import (
+    get_real_model_param_shape,
+    mp_partition_key,
+    partition_pipeline_layers,
+    pipeline_repartition_strategy,
+    shape_partition_fn,
+)
 
 _TRAINABLE: Dict[ModelName, bool] = {}
 _TRAINABLE_PARAM_CACHE: Dict[ModelName, Any] = {}
@@ -86,8 +98,9 @@ def _squeeze_mwids_by_node(ranks: List[int]) -> List[int]:
     return [ranks[0] for ranks in node2ranks.values()]
 
 
-def _assign_src_to_dsts(node2srcs: Dict[int, List[int]], node2dsts: Dict[int,
-                                                                         List[int]]) -> Dict[int, List[int]]:
+def _assign_src_to_dsts(
+    node2srcs: Dict[int, List[int]], node2dsts: Dict[int, List[int]]
+) -> Dict[int, List[int]]:
     """Assign nodes with a greedy algorithm.
 
     All ranks in the values of node2srcs have the data required by all dst ranks.
@@ -130,7 +143,9 @@ def _assign_src_to_dsts(node2srcs: Dict[int, List[int]], node2dsts: Dict[int,
     for src_node, dst_nodes in src_dst_nodes.items():
         assigned = False
         src_ranks = node2srcs[src_node]
-        dst_ranks = sum([node2dsts[dst_node] for dst_node in dst_nodes], start=[])
+        dst_ranks = sum(
+            [node2dsts[dst_node] for dst_node in dst_nodes], start=[]
+        )
         for s in src_ranks:
             if s in dst_ranks:
                 assignment[s] = dst_ranks
@@ -139,7 +154,9 @@ def _assign_src_to_dsts(node2srcs: Dict[int, List[int]], node2dsts: Dict[int,
         if not assigned:
             assignment[src_ranks[0]] = dst_ranks
     assert len(set(assignment.keys())) == len(assignment.keys())
-    assert len(set(sum(assignment.values(), []))) == len(sum(assignment.values(), []))
+    assert len(set(sum(assignment.values(), []))) == len(
+        sum(assignment.values(), [])
+    )
 
     return assignment
 
@@ -150,30 +167,47 @@ def _create_param_realloc_groups(
     src: ModelName,
     dst: ModelName,
     msid2mwid: Dict[system_api.ModelShardID, int],
-    param_realloc_groups: Dict[ParamReallocPair, torch.distributed.ProcessGroup],
+    param_realloc_groups: Dict[
+        ParamReallocPair, torch.distributed.ProcessGroup
+    ],
     param_realloc_src_ranks: Dict[ParamReallocPair, int],
     param_realloc_dst_ranks: Dict[ParamReallocPair, List[int]],
 ):
-    mwid2msid: Dict[int, Dict[ModelName, system_api.ModelShardID]] = defaultdict(dict)
+    mwid2msid: Dict[int, Dict[ModelName, system_api.ModelShardID]] = (
+        defaultdict(dict)
+    )
     for k, v in msid2mwid.items():
         mwid2msid[v][k.model_name] = k
-    for pp_i, pp_j in itertools.product(range(from_topo.get_dim("pipe")), range(to_topo.get_dim("pipe"))):
+    for pp_i, pp_j in itertools.product(
+        range(from_topo.get_dim("pipe")), range(to_topo.get_dim("pipe"))
+    ):
         # create tensor reshard groups
         src_mp_size = from_topo.get_dim("model")
         dst_mp_size = to_topo.get_dim("model")
 
         for mp_j in range(dst_mp_size):
-            _all_dst_ranks = filter_match_mwids(dst, to_topo, msid2mwid, pipe=pp_j, model=mp_j)
+            _all_dst_ranks = filter_match_mwids(
+                dst, to_topo, msid2mwid, pipe=pp_j, model=mp_j
+            )
             if src_mp_size > dst_mp_size:
                 factor = src_mp_size // dst_mp_size
                 mp_is = list(range(factor * mp_j, factor * (mp_j + 1)))
                 _all_src_ranks = [
-                    filter_match_mwids(src, from_topo, msid2mwid, model=mp_i, pipe=pp_i) for mp_i in mp_is
+                    filter_match_mwids(
+                        src, from_topo, msid2mwid, model=mp_i, pipe=pp_i
+                    )
+                    for mp_i in mp_is
                 ]
             else:
                 factor = dst_mp_size // src_mp_size
                 _all_src_ranks = [
-                    filter_match_mwids(src, from_topo, msid2mwid, model=mp_j // factor, pipe=pp_i)
+                    filter_match_mwids(
+                        src,
+                        from_topo,
+                        msid2mwid,
+                        model=mp_j // factor,
+                        pipe=pp_i,
+                    )
                 ]
             # All GPUs in _src_ranks have the data required by (pp_j, mp_j)
             for _src_ranks in _all_src_ranks:
@@ -189,8 +223,12 @@ def _create_param_realloc_groups(
                 _idle_src_ranks = [r for r in _src_ranks if r not in assignment]
                 for _src_rank in _idle_src_ranks:
                     dp_i, mp_i = (
-                        from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).data,
-                        from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).model,
+                        from_topo.get_coord(
+                            mwid2msid[_src_rank][src].parallelism_rank
+                        ).data,
+                        from_topo.get_coord(
+                            mwid2msid[_src_rank][src].parallelism_rank
+                        ).model,
                     )
                     key = ParamReallocPair(
                         src=src,
@@ -206,8 +244,12 @@ def _create_param_realloc_groups(
                     param_realloc_src_ranks[key] = _src_rank
                 for _src_rank, _dst_ranks in assignment.items():
                     dp_i, mp_i = (
-                        from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).data,
-                        from_topo.get_coord(mwid2msid[_src_rank][src].parallelism_rank).model,
+                        from_topo.get_coord(
+                            mwid2msid[_src_rank][src].parallelism_rank
+                        ).data,
+                        from_topo.get_coord(
+                            mwid2msid[_src_rank][src].parallelism_rank
+                        ).model,
                     )
                     key = ParamReallocPair(
                         src=src,
@@ -224,7 +266,9 @@ def _create_param_realloc_groups(
                     assert len(set(_dst_ranks)) == len(_dst_ranks)
                     if len(_dst_ranks) > 1:
                         if torch.distributed.is_initialized():
-                            param_realloc_groups[key] = topology.new_or_get_group(_dst_ranks)
+                            param_realloc_groups[key] = (
+                                topology.new_or_get_group(_dst_ranks)
+                            )
                         else:
                             # for estimating parameter realloc cost
                             param_realloc_groups[key] = 1
@@ -234,7 +278,9 @@ def _create_param_realloc_groups(
 
 
 def setup_param_realloc(
-    model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
+    model_topos: Optional[
+        Dict[str, topology.PipeModelDataParallelTopology]
+    ] = None,
     msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
     param_realloc_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
 ) -> ParamReallocInfo:
@@ -326,7 +372,9 @@ def param_size_from_keys(
     for k in sd_keys:
         new_shape = mp_partition_key(
             k,
-            get_real_model_param_shape(k, config, src_mp_size, sequence_parallel),
+            get_real_model_param_shape(
+                k, config, src_mp_size, sequence_parallel
+            ),
             src2dst_tp_rank,
             src2dst_tp_size,
             config,
@@ -351,16 +399,20 @@ def _derive_reparallelize_comm_plan(
     assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
     for k, v in dataclasses.asdict(to_model_config).items():
         if k not in [
-                "is_critic",
-                "sequence_parallel",
-                "gradient_accumulation_fusion",
+            "is_critic",
+            "sequence_parallel",
+            "gradient_accumulation_fusion",
         ] and v != getattr(from_model_config, k):
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
-                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`).")
-    if from_model_config.n_kv_heads > 1 and (from_model_config.n_kv_heads % src_mp_size
-                                             == 0) != (from_model_config.n_kv_heads % dst_mp_size == 0):
-        raise ValueError("Whether to partition kv heads should remain the same.")
+                f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`)."
+            )
+    if from_model_config.n_kv_heads > 1 and (
+        from_model_config.n_kv_heads % src_mp_size == 0
+    ) != (from_model_config.n_kv_heads % dst_mp_size == 0):
+        raise ValueError(
+            "Whether to partition kv heads should remain the same."
+        )
 
     from_layer_mapping = partition_pipeline_layers(
         from_model_config,
@@ -369,7 +421,9 @@ def _derive_reparallelize_comm_plan(
         real_model_tblock_param_count,
         real_model_head_param_count,
     )
-    from_layer_mapping = {k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()}
+    from_layer_mapping = {
+        k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()
+    }
     to_layer_mapping = partition_pipeline_layers(
         to_model_config,
         to_topo.get_dim("pipe"),
@@ -377,12 +431,18 @@ def _derive_reparallelize_comm_plan(
         real_model_tblock_param_count,
         real_model_head_param_count,
     )
-    to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
-    repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
+    to_layer_mapping = {
+        k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()
+    }
+    repart_strat = pipeline_repartition_strategy(
+        from_layer_mapping, to_layer_mapping
+    )
 
     if constants.has_model_name(from_model_name):
         with constants.model_scope(from_model_name):
-            from_layer_indices = from_layer_mapping[constants.pipe_parallel_rank()]
+            from_layer_indices = from_layer_mapping[
+                constants.pipe_parallel_rank()
+            ]
             from_model_param_specs, _ = build_param_spec(
                 from_layer_indices,
                 from_model_config,
@@ -433,10 +493,16 @@ def _derive_reparallelize_comm_plan(
                     group = pg_info.param_realloc_groups[key]
                     dst_ranks = pg_info.param_realloc_dst_ranks[key]
 
-                    param_intervals = param_keys = receiver_param_intervals = None
-                    max_param_interval_size = max_receiver_param_interval_size = -1
+                    param_intervals = param_keys = receiver_param_intervals = (
+                        None
+                    )
+                    max_param_interval_size = (
+                        max_receiver_param_interval_size
+                    ) = -1
                     param_intervals_cpu = receiver_param_intervals_cpu = None
-                    param_keys = keys_from_layer_indices(from_model_config, layer_indices)
+                    param_keys = keys_from_layer_indices(
+                        from_model_config, layer_indices
+                    )
                     param_size = param_size_from_keys(
                         config=from_model_config,
                         src_mp_size=src_mp_size,
@@ -458,35 +524,57 @@ def _derive_reparallelize_comm_plan(
                                 portion_rank=sender_mp_portion_id,
                                 sequence_parallel=from_topo.sequence_parallel,
                             )
-                            if len(param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
-                                param_intervals_cpu = _split_intervals(param_intervals_cpu,
-                                                                       CUDA_INTERVAL_OP_CHUNK_SIZE)
-                                max_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
+                            if (
+                                len(param_intervals_cpu)
+                                > MAX_PYTORCH_N_INTERVALS
+                            ):
+                                param_intervals_cpu = _split_intervals(
+                                    param_intervals_cpu,
+                                    CUDA_INTERVAL_OP_CHUNK_SIZE,
+                                )
+                                max_param_interval_size = (
+                                    CUDA_INTERVAL_OP_CHUNK_SIZE
+                                )
                             else:
-                                max_param_interval_size = max(j - i for i, j in param_intervals_cpu)
-                            param_intervals = torch.tensor(param_intervals_cpu,
-                                                           dtype=torch.long,
-                                                           device="cuda")
-                        if torch.distributed.get_rank() in dst_ranks:
-                            receiver_param_intervals_cpu = param_intervals_from_keys(
-                                model_name=to_model_name,
-                                config=to_model_config,
-                                mp_size=dst_mp_size,
-                                param_spec=to_model_param_specs,
-                                sd_keys=param_keys,
-                                portion_size=max(src_mp_size // dst_mp_size, 1),
-                                portion_rank=receiver_mp_portion_id,
-                                sequence_parallel=to_topo.sequence_parallel,
+                                max_param_interval_size = max(
+                                    j - i for i, j in param_intervals_cpu
+                                )
+                            param_intervals = torch.tensor(
+                                param_intervals_cpu,
+                                dtype=torch.long,
+                                device="cuda",
                             )
-                            if (len(receiver_param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS):
+                        if torch.distributed.get_rank() in dst_ranks:
+                            receiver_param_intervals_cpu = (
+                                param_intervals_from_keys(
+                                    model_name=to_model_name,
+                                    config=to_model_config,
+                                    mp_size=dst_mp_size,
+                                    param_spec=to_model_param_specs,
+                                    sd_keys=param_keys,
+                                    portion_size=max(
+                                        src_mp_size // dst_mp_size, 1
+                                    ),
+                                    portion_rank=receiver_mp_portion_id,
+                                    sequence_parallel=to_topo.sequence_parallel,
+                                )
+                            )
+                            if (
+                                len(receiver_param_intervals_cpu)
+                                > MAX_PYTORCH_N_INTERVALS
+                            ):
                                 receiver_param_intervals_cpu = _split_intervals(
                                     receiver_param_intervals_cpu,
                                     CUDA_INTERVAL_OP_CHUNK_SIZE,
                                 )
-                                max_receiver_param_interval_size = (CUDA_INTERVAL_OP_CHUNK_SIZE)
+                                max_receiver_param_interval_size = (
+                                    CUDA_INTERVAL_OP_CHUNK_SIZE
+                                )
                             else:
                                 max_receiver_param_interval_size = max(
-                                    j - i for i, j in receiver_param_intervals_cpu)
+                                    j - i
+                                    for i, j in receiver_param_intervals_cpu
+                                )
                             receiver_param_intervals = torch.tensor(
                                 receiver_param_intervals_cpu,
                                 dtype=torch.long,
@@ -511,7 +599,8 @@ def _derive_reparallelize_comm_plan(
                                 src=src,
                                 dst_ranks=dst_ranks,
                                 group=group,
-                            ))
+                            )
+                        )
                     comm_plan.append(
                         ReparallelizeSenderStep(
                             rank=src,
@@ -524,15 +613,19 @@ def _derive_reparallelize_comm_plan(
                             param_size=param_size,
                             group=group,
                             dst_ranks=dst_ranks,
-                        ))
+                        )
+                    )
     for i, step in enumerate(comm_plan):
         if isinstance(step, ReparallelizeReceiverStep):
             continue
         step: ReparallelizeSenderStep
         required_by_nex_steps = False
-        for nex_step in comm_plan[i + 1:]:
-            if (isinstance(nex_step, ReparallelizeSenderStep) and nex_step.rank == step.rank
-                    and nex_step.param_keys == step.param_keys):
+        for nex_step in comm_plan[i + 1 :]:
+            if (
+                isinstance(nex_step, ReparallelizeSenderStep)
+                and nex_step.rank == step.rank
+                and nex_step.param_keys == step.param_keys
+            ):
                 required_by_nex_steps = True
                 break
         step.remove = not required_by_nex_steps

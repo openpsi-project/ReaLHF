@@ -25,23 +25,58 @@ def _paired_rw_loss_from_model_outputs(
     **kwargs,
 ):
     scores = scores[cu_seqlens[1:] - 1].view(-1, 2).float()
-    loss = -(torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1]) * group_factor).sum()
+    loss = -(
+        torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1])
+        * group_factor
+    ).sum()
 
     # Logging.
-    correct_predictions = (scores[:, 0] > scores[:, 1]).count_nonzero().detach().float()
-    total_predictions = torch.tensor(scores.shape[0], dtype=torch.float32, device=scores.device)
-    dist.all_reduce(correct_predictions, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(total_predictions, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    correct_predictions = (
+        (scores[:, 0] > scores[:, 1]).count_nonzero().detach().float()
+    )
+    total_predictions = torch.tensor(
+        scores.shape[0], dtype=torch.float32, device=scores.device
+    )
+    dist.all_reduce(
+        correct_predictions,
+        op=dist.ReduceOp.SUM,
+        group=constants.data_parallel_group(),
+    )
+    dist.all_reduce(
+        total_predictions,
+        op=dist.ReduceOp.SUM,
+        group=constants.data_parallel_group(),
+    )
     pos_score_sum = scores[:, 0].sum().detach()
     max_pos_score = scores[:, 0].max(dim=0).values
     neg_score_sum = scores[:, 1].sum().detach()
     min_neg_score = scores[:, 1].min(dim=0).values
-    dist.all_reduce(pos_score_sum, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(neg_score_sum, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    dist.all_reduce(
+        pos_score_sum,
+        op=dist.ReduceOp.SUM,
+        group=constants.data_parallel_group(),
+    )
+    dist.all_reduce(
+        neg_score_sum,
+        op=dist.ReduceOp.SUM,
+        group=constants.data_parallel_group(),
+    )
     loss_logging = loss.detach()
-    dist.all_reduce(loss_logging, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(max_pos_score, op=dist.ReduceOp.MAX, group=constants.data_parallel_group())
-    dist.all_reduce(min_neg_score, op=dist.ReduceOp.MIN, group=constants.data_parallel_group())
+    dist.all_reduce(
+        loss_logging,
+        op=dist.ReduceOp.SUM,
+        group=constants.data_parallel_group(),
+    )
+    dist.all_reduce(
+        max_pos_score,
+        op=dist.ReduceOp.MAX,
+        group=constants.data_parallel_group(),
+    )
+    dist.all_reduce(
+        min_neg_score,
+        op=dist.ReduceOp.MIN,
+        group=constants.data_parallel_group(),
+    )
 
     return loss, dict(
         loss=loss_logging,
@@ -72,7 +107,9 @@ class PairedRewardInterface(model_api.ModelInterface):
         seqlens_cpu = data.metadata["seqlens"]
         max_seqlen = max(seqlens_cpu)
         cu_seqlens = torch.nn.functional.pad(
-            torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0),
+            torch.tensor(
+                seqlens_cpu, dtype=torch.int32, device=model.device
+            ).cumsum(0),
             (1, 0),
         )
 
@@ -108,15 +145,23 @@ class PairedRewardInterface(model_api.ModelInterface):
         res.register_metadata(**data.metadata)
         return res
 
-    def train_step(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def train_step(
+        self, model: model_api.Model, data: NamedArray
+    ) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        pair_lens = torch.tensor(data.metadata["seqlens"], dtype=torch.int32, device=model.device)
+        pair_lens = torch.tensor(
+            data.metadata["seqlens"], dtype=torch.int32, device=model.device
+        )
         neg_input_lens = pair_lens - data["pos_input_lens"]
-        input_lens: torch.Tensor = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(-1)
+        input_lens: torch.Tensor = torch.stack(
+            [data["pos_input_lens"], neg_input_lens], 1
+        ).view(-1)
         group_factor: torch.Tensor = data["group_factor"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
+        cu_seqlens = torch.cat(
+            [input_lens.new_zeros(1), input_lens.cumsum(0)], 0
+        ).int()
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module = model.module
@@ -139,16 +184,29 @@ class PairedRewardInterface(model_api.ModelInterface):
         res = {}
         if stats:
             if constants.pipe_parallel_world_size() > 1:
-                stats["max_pos_score"] /= constants.pipe_parallel_world_size() * 2
-                stats["min_neg_score"] /= constants.pipe_parallel_world_size() * 2
+                stats["max_pos_score"] /= (
+                    constants.pipe_parallel_world_size() * 2
+                )
+                stats["min_neg_score"] /= (
+                    constants.pipe_parallel_world_size() * 2
+                )
             self.train_total_predictions += int(stats["total_predictions"])
-            self.train_total_correct_predictions += int(stats["correct_predictions"])
+            self.train_total_correct_predictions += int(
+                stats["correct_predictions"]
+            )
             res = dict(
                 loss=float(stats["loss"] / stats["total_predictions"]),
-                epoch_acc=self.train_total_correct_predictions / self.train_total_predictions,
-                batch_acc=float(stats["correct_predictions"] / stats["total_predictions"]),
-                avg_pos_score=float(stats["pos_score"] / stats["total_predictions"]),
-                avg_neg_score=float(stats["neg_score"] / stats["total_predictions"]),
+                epoch_acc=self.train_total_correct_predictions
+                / self.train_total_predictions,
+                batch_acc=float(
+                    stats["correct_predictions"] / stats["total_predictions"]
+                ),
+                avg_pos_score=float(
+                    stats["pos_score"] / stats["total_predictions"]
+                ),
+                avg_neg_score=float(
+                    stats["neg_score"] / stats["total_predictions"]
+                ),
                 total_predictions=int(stats["total_predictions"]),
                 correct_predictions=int(stats["correct_predictions"]),
                 max_pos_score=float(stats["max_pos_score"]),
@@ -158,7 +216,9 @@ class PairedRewardInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
-            self.train_total_predictions = self.train_total_correct_predictions = 0
+            self.train_total_predictions = (
+                self.train_total_correct_predictions
+            ) = 0
 
         return res
 
@@ -172,7 +232,11 @@ class PairedRewardInterface(model_api.ModelInterface):
         )
 
     @torch.no_grad()
-    def evaluate(self, model_: model_api.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+    def evaluate(
+        self,
+        model_: model_api.Model,
+        eval_dataloader: torch.utils.data.DataLoader,
+    ) -> Dict:
         device = model_.device
         model = model_.module
 
@@ -184,15 +248,21 @@ class PairedRewardInterface(model_api.ModelInterface):
         min_neg_score = float("inf")
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
-            pair_lens = torch.tensor(data.metadata["seqlens"], dtype=torch.int32, device=model.device)
+            pair_lens = torch.tensor(
+                data.metadata["seqlens"], dtype=torch.int32, device=model.device
+            )
             data = recursive_apply(data, lambda x: x.to(device))
 
             packed_input_ids: torch.Tensor = data["packed_input_ids"]
             neg_input_lens = pair_lens - data["pos_input_lens"]
             assert (neg_input_lens > 0).all()
-            input_lens = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(-1)
+            input_lens = torch.stack(
+                [data["pos_input_lens"], neg_input_lens], 1
+            ).view(-1)
             group_factor: torch.Tensor = data["group_factor"]
-            cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
+            cu_seqlens = torch.cat(
+                [input_lens.new_zeros(1), input_lens.cumsum(0)], 0
+            ).int()
             max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
             loss_fn_kwargs = dict(
@@ -215,8 +285,12 @@ class PairedRewardInterface(model_api.ModelInterface):
                 total_predictions += stats["total_predictions"].item()
                 pos_score += stats["pos_score"].item()
                 neg_score += stats["neg_score"].item()
-                max_pos_score = max(max_pos_score, stats["max_pos_score"].item())
-                min_neg_score = min(min_neg_score, stats["min_neg_score"].item())
+                max_pos_score = max(
+                    max_pos_score, stats["max_pos_score"].item()
+                )
+                min_neg_score = min(
+                    min_neg_score, stats["min_neg_score"].item()
+                )
 
         if total_predictions > 0:
             return dict(

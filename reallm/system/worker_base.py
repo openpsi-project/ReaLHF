@@ -9,7 +9,15 @@ import socket
 import threading
 import time
 
-from reallm.base import cluster, logging, monitor, name_resolve, names, network, timeutil
+from reallm.base import (
+    cluster,
+    logging,
+    monitor,
+    name_resolve,
+    names,
+    network,
+    timeutil,
+)
 from reallm.base.gpu_utils import set_cuda_device
 import reallm.api.core.system_api as system_api
 
@@ -23,7 +31,9 @@ WORKER_JOB_STATUS_LINGER_SECONDS = 60
 class WorkerException(Exception):
 
     def __init__(self, worker_name, worker_status, scenario):
-        super(WorkerException, self).__init__(f"Worker {worker_name} is {worker_status} while {scenario}")
+        super(WorkerException, self).__init__(
+            f"Worker {worker_name} is {worker_status} while {scenario}"
+        )
         self.worker_name = worker_name
         self.worker_status = worker_status
         self.scenario = scenario
@@ -111,13 +121,21 @@ class WorkerServer:
             )
 
         if controller_status != "READY":
-            raise RuntimeError(f"Abnormal controller state on experiment launch {controller_status}.")
+            raise RuntimeError(
+                f"Abnormal controller state on experiment launch {controller_status}."
+            )
 
         if experiment_name is not None and trial_name is not None:
             key = names.worker(experiment_name, trial_name, worker_name)
             address = f"{host_ip}:{self.__task_queue.port}"
-            name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
-            logger.debug("Added name_resolve entry %s for worker server at %s", key, address)
+            name_resolve.add(
+                key, address, keepalive_ttl=10, delete_on_exit=True
+            )
+            logger.debug(
+                "Added name_resolve entry %s for worker server at %s",
+                key,
+                address,
+            )
 
     def register_handler(self, command, fn):
         """Registers an RPC command. The handler `fn` shall be called when `self.handle_requests()` sees an
@@ -201,7 +219,12 @@ class WorkerControlPanel:
         result: WorkerControlPanelRequester.Future
         timed_out: bool = False
 
-    def __init__(self, experiment_name, trial_name, requester: WorkerControlPanelRequester):
+    def __init__(
+        self,
+        experiment_name,
+        trial_name,
+        requester: WorkerControlPanelRequester,
+    ):
         self.__closed = False
 
         self.__experiment_name = experiment_name
@@ -285,9 +308,13 @@ class WorkerControlPanel:
             try:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
-                self.__logger.debug(f"Connecting to worker {name}, timeout {timeout}")
+                self.__logger.debug(
+                    f"Connecting to worker {name}, timeout {timeout}"
+                )
                 server_address = name_resolve.wait(
-                    names.worker(self.__experiment_name, self.__trial_name, name),
+                    names.worker(
+                        self.__experiment_name, self.__trial_name, name
+                    ),
                     timeout=timeout,
                 )
                 self.__logger.debug(f"Connecting to worker {name} done")
@@ -307,13 +334,17 @@ class WorkerControlPanel:
             Names of successfully connected workers.
         """
         name_root = names.worker_root(self.__experiment_name, self.__trial_name)
-        worker_names = [r[len(name_root):] for r in name_resolve.find_subtree(name_root)]
+        worker_names = [
+            r[len(name_root) :] for r in name_resolve.find_subtree(name_root)
+        ]
         return self.connect(worker_names, timeout=0, raises_timeout_error=True)
 
     def request(self, worker_name: str, command, **kwargs) -> Any:
         """Sends an request to the specified worker."""
         address = self.__worker_addresses[worker_name]
-        return self.__requester.async_request(worker_name, address, command, **kwargs).result()
+        return self.__requester.async_request(
+            worker_name, address, command, **kwargs
+        ).result()
 
     def group_request(
         self,
@@ -350,7 +381,9 @@ class WorkerControlPanel:
             assert worker_names is not None
             assert worker_regex is None
             assert len(kwargs) == 0
-            assert len(worker_names) == len(worker_kwargs), f"{len(worker_names)} != {len(worker_kwargs)}"
+            assert len(worker_names) == len(
+                worker_kwargs
+            ), f"{len(worker_names)} != {len(worker_kwargs)}"
         else:
             worker_kwargs = [kwargs for _ in selected]
 
@@ -359,12 +392,18 @@ class WorkerControlPanel:
         deadline = time.monotonic() + (timeout or 0)
         for j in range(0, len(selected), _MAX_SOCKET_CONCURRENCY):
             sub_rs: List[WorkerControlPanel.Response] = []
-            sub_selected = selected[j:j + _MAX_SOCKET_CONCURRENCY]
-            sub_worker_kwargs = worker_kwargs[j:j + _MAX_SOCKET_CONCURRENCY]
+            sub_selected = selected[j : j + _MAX_SOCKET_CONCURRENCY]
+            sub_worker_kwargs = worker_kwargs[j : j + _MAX_SOCKET_CONCURRENCY]
             for name, kwargs in zip(sub_selected, sub_worker_kwargs):
                 address = self.__worker_addresses[name]
-                result_fut = self.__requester.async_request(name, address, command, wait_response, **kwargs)
-                sub_rs.append(WorkerControlPanel.Response(worker_name=name, result=result_fut))
+                result_fut = self.__requester.async_request(
+                    name, address, command, wait_response, **kwargs
+                )
+                sub_rs.append(
+                    WorkerControlPanel.Response(
+                        worker_name=name, result=result_fut
+                    )
+                )
 
             if not wait_response:
                 continue
@@ -407,7 +446,9 @@ class WorkerControlPanel:
         return status
 
     def pulse(self):
-        return {name: self.get_worker_status(name) for name in self.worker_names}
+        return {
+            name: self.get_worker_status(name) for name in self.worker_names
+        }
 
 
 @dataclasses.dataclass
@@ -508,16 +549,24 @@ class Worker:
                     experiment_name=r.experiment_name,
                     trial_name=r.trial_name,
                     key=r.host_key,
-                ))
+                )
+            )
         if r.watch_keys is not None:
-            keys = [r.watch_keys] if isinstance(r.watch_keys, str) else r.watch_keys
-            self.__watch_keys([
-                names.worker_key(
-                    experiment_name=r.experiment_name,
-                    trial_name=r.trial_name,
-                    key=k,
-                ) for k in keys
-            ])
+            keys = (
+                [r.watch_keys]
+                if isinstance(r.watch_keys, str)
+                else r.watch_keys
+            )
+            self.__watch_keys(
+                [
+                    names.worker_key(
+                        experiment_name=r.experiment_name,
+                        trial_name=r.trial_name,
+                        key=k,
+                    )
+                    for k in keys
+                ]
+            )
 
         self.__is_configured = True
         self.logger.debug("Configured successfully")
@@ -581,7 +630,9 @@ class Worker:
                 wait_seconds = 0.0
                 if self.__last_successful_poll_time is not None:
                     # Account the waiting time since the last successful step.
-                    wait_seconds = (start_time - self.__last_successful_poll_time) / 1e9
+                    wait_seconds = (
+                        start_time - self.__last_successful_poll_time
+                    ) / 1e9
                 self.__last_successful_poll_time = time.monotonic_ns()
 
                 if r.sample_count == r.batch_count == 0:
@@ -589,9 +640,13 @@ class Worker:
                     pass
                 else:
                     now = time.monotonic_ns()
-                    if (self.__last_update_ns is not None):  # Update new stats with 10 seconds frequency.
+                    if (
+                        self.__last_update_ns is not None
+                    ):  # Update new stats with 10 seconds frequency.
                         if (now - self.__last_update_ns) / 1e9 >= 10:
-                            duration = (time.monotonic_ns() - self._start_time_ns) / 1e9
+                            duration = (
+                                time.monotonic_ns() - self._start_time_ns
+                            ) / 1e9
                             self.__last_update_ns = now
                     else:
                         self.__last_update_ns = now
@@ -607,7 +662,9 @@ class Worker:
 
     def __host_key(self, key: str):
         self.logger.info(f"Hosting key: {key}")
-        name_resolve.add(key, "up", keepalive_ttl=15, replace=True, delete_on_exit=True)
+        name_resolve.add(
+            key, "up", keepalive_ttl=15, replace=True, delete_on_exit=True
+        )
 
     def __watch_keys(self, keys: List[str]):
         self.logger.info(f"Watching keys: {keys}")

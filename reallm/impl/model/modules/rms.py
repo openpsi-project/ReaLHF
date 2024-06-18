@@ -22,11 +22,18 @@ class ExponentialRunningMeanStd(nn.Module):
 
         self.__dtype = torch.float64 if high_precision else torch.float32
 
-        self.__mean = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False)
-        self.__mean_sq = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
-                                      requires_grad=False)
-        self.__debiasing_term = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
-                                             requires_grad=False)
+        self.__mean = nn.Parameter(
+            torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+            requires_grad=False,
+        )
+        self.__mean_sq = nn.Parameter(
+            torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+            requires_grad=False,
+        )
+        self.__debiasing_term = nn.Parameter(
+            torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+            requires_grad=False,
+        )
 
         self.reset_parameters()
 
@@ -46,7 +53,9 @@ class ExponentialRunningMeanStd(nn.Module):
         if mask is not None:
             mask = mask.to(self.__dtype)
         if mask is None:
-            factor = torch.tensor(np.prod(x.shape), dtype=self.__dtype, device=x.device)
+            factor = torch.tensor(
+                np.prod(x.shape), dtype=self.__dtype, device=x.device
+            )
         else:
             x = x * mask
             factor = mask.sum()
@@ -54,20 +63,36 @@ class ExponentialRunningMeanStd(nn.Module):
         x_sum = x.sum()
         x_sum_sq = x.square().sum()
         if dist.is_initialized():
-            dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=data_parallel_group())
-            dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group())
-            dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group())
+            dist.all_reduce(
+                factor, op=dist.ReduceOp.SUM, group=data_parallel_group()
+            )
+            dist.all_reduce(
+                x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group()
+            )
+            dist.all_reduce(
+                x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group()
+            )
         batch_mean = x_sum / factor
         batch_sq_mean = x_sum_sq / factor
 
-        self.__mean.data[:] = self.__beta * self.__mean.data[:] + batch_mean * (1.0 - self.__beta)
-        self.__mean_sq.data[:] = self.__beta * self.__mean_sq.data[:] + batch_sq_mean * (1.0 - self.__beta)
-        self.__debiasing_term.data[:] = (self.__beta * self.__debiasing_term.data[:] + 1.0 - self.__beta)
+        self.__mean.data[:] = self.__beta * self.__mean.data[:] + batch_mean * (
+            1.0 - self.__beta
+        )
+        self.__mean_sq.data[:] = self.__beta * self.__mean_sq.data[
+            :
+        ] + batch_sq_mean * (1.0 - self.__beta)
+        self.__debiasing_term.data[:] = (
+            self.__beta * self.__debiasing_term.data[:] + 1.0 - self.__beta
+        )
 
     @torch.no_grad()
     def mean_std(self):
-        debiased_mean = self.__mean / self.__debiasing_term.clamp(min=self.__eps)
-        debiased_mean_sq = self.__mean_sq / self.__debiasing_term.clamp(min=self.__eps)
+        debiased_mean = self.__mean / self.__debiasing_term.clamp(
+            min=self.__eps
+        )
+        debiased_mean_sq = self.__mean_sq / self.__debiasing_term.clamp(
+            min=self.__eps
+        )
         debiased_var = (debiased_mean_sq - debiased_mean**2).clamp(min=1e-2)
         return debiased_mean, debiased_var.sqrt()
 
@@ -75,7 +100,9 @@ class ExponentialRunningMeanStd(nn.Module):
     def normalize(self, x):
         x = x.to(self.__dtype)
         mean, std = self.mean_std()
-        return (((x - mean) / std).clip(-5, 5).float())  # clipping is a trick from hide and seek
+        return (
+            ((x - mean) / std).clip(-5, 5).float()
+        )  # clipping is a trick from hide and seek
 
     @torch.no_grad()
     def denormalize(self, x):
@@ -91,9 +118,14 @@ class MovingAverageRunningMeanStd(nn.Module):
 
         self.__dtype = torch.float64 if high_precision else torch.float32
 
-        self.__mean = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"), requires_grad=False)
-        self.__mean_sq = nn.Parameter(torch.zeros((1,), dtype=self.__dtype, device="cuda"),
-                                      requires_grad=False)
+        self.__mean = nn.Parameter(
+            torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+            requires_grad=False,
+        )
+        self.__mean_sq = nn.Parameter(
+            torch.zeros((1,), dtype=self.__dtype, device="cuda"),
+            requires_grad=False,
+        )
         self.__accum_denominator = 0
 
         self.reset_parameters()
@@ -114,7 +146,9 @@ class MovingAverageRunningMeanStd(nn.Module):
         if mask is not None:
             mask = mask.to(self.__dtype)
         if mask is None:
-            factor = torch.tensor(np.prod(x.shape), dtype=self.__dtype, device=x.device)
+            factor = torch.tensor(
+                np.prod(x.shape), dtype=self.__dtype, device=x.device
+            )
         else:
             x = x * mask
             factor = mask.sum()
@@ -122,14 +156,22 @@ class MovingAverageRunningMeanStd(nn.Module):
         x_sum = x.sum()
         x_sum_sq = x.square().sum()
         if dist.is_initialized():
-            dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=data_parallel_group())
-            dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group())
-            dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group())
+            dist.all_reduce(
+                factor, op=dist.ReduceOp.SUM, group=data_parallel_group()
+            )
+            dist.all_reduce(
+                x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group()
+            )
+            dist.all_reduce(
+                x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group()
+            )
 
-        self.__mean.data[:] = (self.__accum_denominator * self.__mean.data[:] +
-                               x_sum) / (self.__accum_denominator + factor)
-        self.__mean_sq.data[:] = (self.__accum_denominator * self.__mean_sq.data[:] +
-                                  x_sum_sq) / (self.__accum_denominator + factor)
+        self.__mean.data[:] = (
+            self.__accum_denominator * self.__mean.data[:] + x_sum
+        ) / (self.__accum_denominator + factor)
+        self.__mean_sq.data[:] = (
+            self.__accum_denominator * self.__mean_sq.data[:] + x_sum_sq
+        ) / (self.__accum_denominator + factor)
         self.__accum_denominator += factor
 
     @torch.no_grad()
@@ -143,7 +185,9 @@ class MovingAverageRunningMeanStd(nn.Module):
     def normalize(self, x):
         x = x.to(self.__dtype)
         mean, std = self.mean_std()
-        return (((x - mean) / std).clip(-5, 5).float())  # clipping is a trick from hide and seek
+        return (
+            ((x - mean) / std).clip(-5, 5).float()
+        )  # clipping is a trick from hide and seek
 
     @torch.no_grad()
     def denormalize(self, x):
@@ -171,13 +215,19 @@ class PopArtValueHead(nn.Module):
             rms_cls = MovingAverageRunningMeanStd
         else:
             raise NotImplementedError(f"Unknown rms type {rms_type}")
-        self.__rms = rms_cls(input_shape=(critic_dim,), epsilon=epsilon, high_precision=high_precision)
+        self.__rms = rms_cls(
+            input_shape=(critic_dim,),
+            epsilon=epsilon,
+            high_precision=high_precision,
+        )
 
         self.__weight = nn.Parameter(torch.zeros(critic_dim, input_dim))
         self.__bias = nn.Parameter(torch.zeros(critic_dim))
         # The same initialization as `nn.Linear`.
         torch.nn.init.kaiming_uniform_(self.__weight, a=math.sqrt(5))
-        torch.nn.init.uniform_(self.__bias, -1 / math.sqrt(input_dim), 1 / math.sqrt(input_dim))
+        torch.nn.init.uniform_(
+            self.__bias, -1 / math.sqrt(input_dim), 1 / math.sqrt(input_dim)
+        )
 
         self.__burn_in_updates = burn_in_updates
         self.__update_cnt = 0
@@ -201,8 +251,12 @@ class PopArtValueHead(nn.Module):
         self.__update_cnt += 1
 
         if self.__update_cnt > self.__burn_in_updates:
-            self.__weight.data[:] = self.__weight * (old_std / new_std).unsqueeze(-1)
-            self.__bias.data[:] = (old_std * self.__bias + old_mean - new_mean) / new_std
+            self.__weight.data[:] = self.__weight * (
+                old_std / new_std
+            ).unsqueeze(-1)
+            self.__bias.data[:] = (
+                old_std * self.__bias + old_mean - new_mean
+            ) / new_std
 
     @torch.no_grad()
     def normalize(self, x):

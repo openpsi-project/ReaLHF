@@ -35,7 +35,9 @@ class PromptDataset(torch.utils.data.Dataset):
         """
         self.max_length = max_length
 
-        data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
+        data = data_api.load_shuffle_split_dataset(
+            util, dataset_path, dataset_builder
+        )
 
         prompts_str = [x["prompt"] for x in data]
         util.tokenizer.padding_side = "left"
@@ -50,7 +52,9 @@ class PromptDataset(torch.utils.data.Dataset):
 
         self.prompt_lengths = prompt_encodings["length"]
         self.prompts = prompt_encodings["input_ids"]
-        assert all(len(x) == l for x, l in zip(self.prompts, self.prompt_lengths))
+        assert all(
+            len(x) == l for x, l in zip(self.prompts, self.prompt_lengths)
+        )
 
         logger.info(f"Number of prompts in the dataset: {len(self.prompts)}")
 
@@ -58,7 +62,9 @@ class PromptDataset(torch.utils.data.Dataset):
         return len(self.prompts)
 
     def __getitem__(self, idx):
-        x = namedarray.NamedArray(packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long),)
+        x = namedarray.NamedArray(
+            packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long),
+        )
         x.register_metadata(seqlens=[self.prompt_lengths[idx]])
         return x
 

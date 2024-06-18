@@ -36,7 +36,9 @@ class IndexFirstAxis(torch.autograd.Function):
         )
         # TD [2022-03-04] For some reason torch.scatter is a bit faster than indexing.
         # grad_input[indices] = grad_output
-        grad_input.scatter_(0, repeat(indices, "z -> z d", d=grad_output.shape[1]), grad_output)
+        grad_input.scatter_(
+            0, repeat(indices, "z -> z d", d=grad_output.shape[1]), grad_output
+        )
         return grad_input.reshape(ctx.first_axis_dim, *other_shape), None
 
 
@@ -54,7 +56,12 @@ class IndexPutFirstAxis(torch.autograd.Function):
         ctx.save_for_backward(indices)
         assert indices.ndim == 1
         assert values.ndim >= 2
-        output = torch.zeros(first_axis_dim, *values.shape[1:], device=values.device, dtype=values.dtype)
+        output = torch.zeros(
+            first_axis_dim,
+            *values.shape[1:],
+            device=values.device,
+            dtype=values.dtype,
+        )
         # TD [2022-03-04] For some reason torch.scatter is a bit faster than indexing.
         output[indices] = values
         # output.scatter_(0, repeat(indices, "z -> z d", d=values.shape[1]), values)
@@ -69,9 +76,13 @@ class IndexPutFirstAxis(torch.autograd.Function):
         return grad_values, None, None
 
 
-def index_put_first_axis(values: torch.Tensor, indices: torch.LongTensor, first_axis_dim: int):
+def index_put_first_axis(
+    values: torch.Tensor, indices: torch.LongTensor, first_axis_dim: int
+):
     if len(values.shape) == 1:
-        output = torch.zeros(first_axis_dim, device=values.device, dtype=values.dtype)
+        output = torch.zeros(
+            first_axis_dim, device=values.device, dtype=values.dtype
+        )
         output[indices] = values
         return output
     else:
@@ -101,7 +112,9 @@ class IndexFirstAxisResidual(torch.autograd.Function):
         assert grad_residual.shape[1:] == other_shape
         grad_input = grad_residual
         # grad_input[indices] += grad_output
-        indices = indices.reshape(indices.shape[0], *((1,) * (grad_output.ndim - 1)))
+        indices = indices.reshape(
+            indices.shape[0], *((1,) * (grad_output.ndim - 1))
+        )
         indices = indices.expand_as(grad_output)
         grad_input.scatter_add_(0, indices, grad_output)
         return grad_input.reshape(ctx.first_axis_dim, *other_shape), None
@@ -123,21 +136,27 @@ def unpad_input(hidden_states, attention_mask):
     seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
     indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
     max_seqlen_in_batch = seqlens_in_batch.max().item()
-    cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
+    cu_seqlens = F.pad(
+        torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0)
+    )
     # TD [2022-03-04] We don't want to index with a bool mask, because Pytorch will expand the
     # bool mask, then call nonzero to get the indices, then index with those. The indices is @dim
     # times larger than it needs to be, wasting memory. It's faster and more memory-efficient to
     # index with integer indices. Moreover, torch's index is a bit slower than it needs to be,
     # so we write custom forward and backward to make it a bit faster.
     return (
-        index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices),
+        index_first_axis(
+            rearrange(hidden_states, "b s ... -> (b s) ..."), indices
+        ),
         indices,
         cu_seqlens,
         max_seqlen_in_batch,
     )
 
 
-def unpad_input_for_concatenated_sequences(hidden_states, attention_mask_in_length):
+def unpad_input_for_concatenated_sequences(
+    hidden_states, attention_mask_in_length
+):
     """
     Supports concatenating short samples in one sequence.
     The attention_mask_in_length is utilized to mask other short samples.
@@ -194,20 +213,29 @@ def unpad_input_for_concatenated_sequences(hidden_states, attention_mask_in_leng
     """
     length = attention_mask_in_length.sum(dim=-1)
     seqlen = attention_mask_in_length.size(-1)
-    attention_mask_2d = torch.arange(seqlen, device=length.device,
-                                     dtype=length.dtype).expand(len(length), seqlen) < length.unsqueeze(1)
-    real_indices_idx = torch.nonzero(attention_mask_in_length.flatten(), as_tuple=False).flatten()
+    attention_mask_2d = torch.arange(
+        seqlen, device=length.device, dtype=length.dtype
+    ).expand(len(length), seqlen) < length.unsqueeze(1)
+    real_indices_idx = torch.nonzero(
+        attention_mask_in_length.flatten(), as_tuple=False
+    ).flatten()
     seqlens_in_batch = attention_mask_in_length.flatten()[real_indices_idx]
-    indices = torch.nonzero(attention_mask_2d.flatten(), as_tuple=False).flatten()
+    indices = torch.nonzero(
+        attention_mask_2d.flatten(), as_tuple=False
+    ).flatten()
     max_seqlen_in_batch = seqlens_in_batch.max().item()
-    cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
+    cu_seqlens = F.pad(
+        torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0)
+    )
     # TD [2022-03-04] We don't want to index with a bool mask, because Pytorch will expand the
     # bool mask, then call nonzero to get the indices, then index with those. The indices is @dim
     # times larger than it needs to be, wasting memory. It's faster and more memory-efficient to
     # index with integer indices. Moreover, torch's index is a bit slower than it needs to be,
     # so we write custom forward and backward to make it a bit faster.
     return (
-        index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices),
+        index_first_axis(
+            rearrange(hidden_states, "b s ... -> (b s) ..."), indices
+        ),
         indices,
         cu_seqlens,
         max_seqlen_in_batch,
@@ -229,7 +257,9 @@ def pad_input(hidden_states, indices, batch, seqlen):
     return rearrange(output, "(b s) ... -> b s ...", b=batch)
 
 
-def pad_sequence_parallel_input(packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int):
+def pad_sequence_parallel_input(
+    packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int
+):
     """Sequence parallel requires packed_input_ids has a shape of 1 dimension [total_seq_len], and
     total_seq_len should be divisible by model_parallel_world_size. This function is used to pad packed_input_ids
     to suitable length with an empty sequence, and return new packed_input_ids, cu_seqlens and max_seqlen.
@@ -246,14 +276,19 @@ def pad_sequence_parallel_input(packed_input_ids: torch.Tensor, cu_seqlens: torc
     pad_size = 0
     if len(packed_input_ids) % mp_world_size != 0:
         pad_size = mp_world_size - len(packed_input_ids) % mp_world_size
-        packed_input_ids = torch.nn.functional.pad(packed_input_ids, (0, pad_size), value=1)
-        cu_seqlens = torch.nn.functional.pad(cu_seqlens, (0, 1), value=len(packed_input_ids))
+        packed_input_ids = torch.nn.functional.pad(
+            packed_input_ids, (0, pad_size), value=1
+        )
+        cu_seqlens = torch.nn.functional.pad(
+            cu_seqlens, (0, 1), value=len(packed_input_ids)
+        )
         max_seqlen = max_seqlen if pad_size < max_seqlen else pad_size
     return packed_input_ids, cu_seqlens, max_seqlen, pad_size
 
 
-def pad_sequence_parallel_generate_input(packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor,
-                                         max_seqlen: int):
+def pad_sequence_parallel_generate_input(
+    packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int
+):
     """Only for pipeline generate input when model+seq parallel is enabled. To make sure inputs for seq parallel model
     have a shape with first dimension divisible by model_parallel_world_size, the packed_input_ids should have length
     divisible by model_parallel_world_size, and contains number of sequences divisible by model_parallel_world_size.
@@ -268,15 +303,27 @@ def pad_sequence_parallel_generate_input(packed_input_ids: torch.Tensor, cu_seql
     """
     mp_world_size = constants.model_parallel_world_size()
     pad_size, pad_seq_size = 0, 0
-    if (len(packed_input_ids) % mp_world_size != 0 or (len(cu_seqlens) - 1) % mp_world_size != 0):
+    if (
+        len(packed_input_ids) % mp_world_size != 0
+        or (len(cu_seqlens) - 1) % mp_world_size != 0
+    ):
         pad_size = mp_world_size - len(packed_input_ids) % mp_world_size
         pad_seq_size = mp_world_size - (len(cu_seqlens) - 1) % mp_world_size
         if pad_size < pad_seq_size:
             pad_size += mp_world_size
-        pad_cu_seqlens = torch.tensor(list(range(1, pad_seq_size)) + [pad_size]) + len(packed_input_ids)
-        pad_cu_seqlens = pad_cu_seqlens.to(dtype=cu_seqlens.dtype, device=cu_seqlens.device)
-        packed_input_ids = torch.nn.functional.pad(packed_input_ids, (0, pad_size), value=1)
+        pad_cu_seqlens = torch.tensor(
+            list(range(1, pad_seq_size)) + [pad_size]
+        ) + len(packed_input_ids)
+        pad_cu_seqlens = pad_cu_seqlens.to(
+            dtype=cu_seqlens.dtype, device=cu_seqlens.device
+        )
+        packed_input_ids = torch.nn.functional.pad(
+            packed_input_ids, (0, pad_size), value=1
+        )
         cu_seqlens = torch.cat([cu_seqlens, pad_cu_seqlens], dim=0)
-        max_seqlen = (max_seqlen if (pad_size - pad_seq_size + 1) < max_seqlen else
-                      (pad_size - pad_seq_size + 1))
+        max_seqlen = (
+            max_seqlen
+            if (pad_size - pad_seq_size + 1) < max_seqlen
+            else (pad_size - pad_seq_size + 1)
+        )
     return packed_input_ids, cu_seqlens, max_seqlen, pad_size, pad_seq_size

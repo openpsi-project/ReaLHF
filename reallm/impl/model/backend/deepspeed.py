@@ -6,7 +6,11 @@ import math
 from deepspeed.runtime import zero
 from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.config import DeepSpeedConfig
-from deepspeed.runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable, DeepSpeedSchedulerCallable
+from deepspeed.runtime.engine import (
+    DeepSpeedEngine,
+    DeepSpeedOptimizerCallable,
+    DeepSpeedSchedulerCallable,
+)
 import deepspeed
 import torch
 import torch.distributed as dist
@@ -39,37 +43,48 @@ class ReaLDeepSpeedEngine:
         if constants.pipe_parallel_world_size() > 1:
             self.pipe_runner = PipelineRunner(module)
 
-            assert (self.ds_engine.zero_optimization_stage()
-                    < 2), "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
+            assert (
+                self.ds_engine.zero_optimization_stage() < 2
+            ), "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
             if self.ds_engine.bfloat16_enabled():
                 assert isinstance(self.ds_engine.optimizer, BF16_Optimizer)
 
-            model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
+            model_parameters = filter(
+                lambda p: p.requires_grad, self.module.parameters()
+            )
             num_params = sum([p.numel() for p in model_parameters])
             unique_params = num_params
 
-            params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(self.device)
-            dist.all_reduce(params_tensor, group=constants.grid().get_model_parallel_group())
+            params_tensor = torch.LongTensor(
+                data=[num_params, unique_params]
+            ).to(self.device)
+            dist.all_reduce(
+                params_tensor, group=constants.grid().get_model_parallel_group()
+            )
             params_tensor = params_tensor.tolist()
             total_params = params_tensor[0]
             unique_params = params_tensor[1]
 
             if constants.parallelism_rank() == 0:
-                logger.info(f"CONFIG: default_train_mbs={self.pipe_runner.default_train_mbs} "
-                            f"default_inf_mbs={self.pipe_runner.default_inf_mbs} "
-                            f"num_layers(this stage)={self.module.num_layers} "
-                            f"pp_size={constants.pipe_parallel_world_size()} "
-                            f"dp_size={constants.data_parallel_world_size()} "
-                            f"mp_size={constants.model_parallel_world_size()} "
-                            f"bf16={self.ds_engine.bfloat16_enabled()} ")
+                logger.info(
+                    f"CONFIG: default_train_mbs={self.pipe_runner.default_train_mbs} "
+                    f"default_inf_mbs={self.pipe_runner.default_inf_mbs} "
+                    f"num_layers(this stage)={self.module.num_layers} "
+                    f"pp_size={constants.pipe_parallel_world_size()} "
+                    f"dp_size={constants.data_parallel_world_size()} "
+                    f"mp_size={constants.model_parallel_world_size()} "
+                    f"bf16={self.ds_engine.bfloat16_enabled()} "
+                )
             if constants.data_parallel_rank() == 0:
-                logger.info(f"rank={constants.parallelism_rank()} "
-                            f"stage={constants.pipe_parallel_rank()} "
-                            f"layers={self.module.num_layers} "
-                            f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
-                            f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
-                            f"total_params={total_params} ({total_params/1e6:0.3f}M) "
-                            f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)")
+                logger.info(
+                    f"rank={constants.parallelism_rank()} "
+                    f"stage={constants.pipe_parallel_rank()} "
+                    f"layers={self.module.num_layers} "
+                    f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
+                    f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
+                    f"total_params={total_params} ({total_params/1e6:0.3f}M) "
+                    f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)"
+                )
 
     def train(self, mode: bool = True):
         self.ds_engine.train(mode)
@@ -112,9 +127,13 @@ class ReaLDeepSpeedEngine:
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             ).logits
-            loss, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
+            loss, stat = loss_fn(
+                model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs
+            )
             self.ds_engine.backward(loss)
-            lr_kwargs = {"epoch": version_steps} if version_steps is not None else None
+            lr_kwargs = (
+                {"epoch": version_steps} if version_steps is not None else None
+            )
             self.ds_engine.step(lr_kwargs=lr_kwargs)
             return stat
 
@@ -146,7 +165,9 @@ class ReaLDeepSpeedEngine:
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             ).logits
-            _, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
+            _, stat = loss_fn(
+                model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs
+            )
             return stat
 
     def forward(
@@ -178,7 +199,9 @@ class ReaLDeepSpeedEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        gconfig: GenerationConfig = dataclasses.field(
+            default_factory=GenerationConfig
+        ),
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:
@@ -294,15 +317,23 @@ def get_optimizer_grouped_parameters(
     optimizer_grouped_parameters = [
         {
             "params": [
-                p for n, p in model.named_parameters()
-                if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
+                p
+                for n, p in model.named_parameters()
+                if (
+                    not any(nd in n for nd in no_decay_name_list)
+                    and p.requires_grad
+                )
             ],
             "weight_decay": weight_decay,
         },
         {
             "params": [
-                p for n, p in model.named_parameters()
-                if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
+                p
+                for n, p in model.named_parameters()
+                if (
+                    any(nd in n for nd in no_decay_name_list)
+                    and p.requires_grad
+                )
             ],
             "weight_decay": 0.0,
         },
@@ -313,18 +344,24 @@ def get_optimizer_grouped_parameters(
 def deepspeed_initialize(
     model: torch.nn.Module,
     config: Dict,
-    optimizer: Optional[Union[torch.optim.Optimizer, DeepSpeedOptimizerCallable]] = None,
+    optimizer: Optional[
+        Union[torch.optim.Optimizer, DeepSpeedOptimizerCallable]
+    ] = None,
     model_parameters: Optional[torch.nn.Module] = None,
-    lr_scheduler: Optional[Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]] = None,
+    lr_scheduler: Optional[
+        Union[torch.optim.lr_scheduler._LRScheduler, DeepSpeedSchedulerCallable]
+    ] = None,
     mpu=None,
 ) -> Tuple[DeepSpeedEngine, torch.optim.Optimizer, Any, Any]:
     """A simple wrapper around deepspeed.initialize."""
     if mpu is None:
         mpu = constants.grid()
     config_class = DeepSpeedConfig(config, mpu)
-    logger.info(f"DeepSpeedEngine Config: train_batch_size={config_class.train_batch_size}, "
-                f"train_micro_batch_size_per_gpu={config_class.train_micro_batch_size_per_gpu}, "
-                f"gradient_accumulation_steps={config_class.gradient_accumulation_steps}")
+    logger.info(
+        f"DeepSpeedEngine Config: train_batch_size={config_class.train_batch_size}, "
+        f"train_micro_batch_size_per_gpu={config_class.train_micro_batch_size_per_gpu}, "
+        f"gradient_accumulation_steps={config_class.gradient_accumulation_steps}"
+    )
 
     # Disable zero.Init context if it's currently enabled
     zero.partition_parameters.shutdown_init_context()
@@ -366,7 +403,10 @@ def deepspeed_initialize(
 class DeepspeedBackend(model_api.ModelBackend):
     optimizer_name: str = "adam"
     optimizer_config: dict = dataclasses.field(
-        default_factory=lambda: dict(lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5))
+        default_factory=lambda: dict(
+            lr=1e-5, weight_decay=0.1, betas=(0.9, 0.95), eps=1e-5
+        )
+    )
     lr_scheduler_type: str = "cosine"
     warmup_steps_proportion: float = 0.0
     min_lr_ratio: float = 0.0  # will be used for linear and cosine schedule
@@ -392,7 +432,9 @@ class DeepspeedBackend(model_api.ModelBackend):
                 **self.optimizer_config,
             )
         else:
-            raise NotImplementedError(f"Unsupported optimizer: {self.optimizer_name}.")
+            raise NotImplementedError(
+                f"Unsupported optimizer: {self.optimizer_name}."
+            )
 
         ds_config = get_train_ds_config(
             offload_param=self.offload_param,
@@ -406,22 +448,31 @@ class DeepspeedBackend(model_api.ModelBackend):
         # NOTE: Just a fake batch size to make DeepSpeed happy.
         ds_config["train_batch_size"] = constants.data_parallel_world_size()
 
-        def warmup_then_cosine_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
+        def warmup_then_cosine_anneal(
+            step, warmup_steps_proportion, total_steps, min_lr_ratio
+        ):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
             cosine_steps = total_steps - warmup_steps
             if step < warmup_steps:
                 return 1.0 / warmup_steps * step
-            return min_lr_ratio + 0.5 * (1.0 - min_lr_ratio) * (1 + math.cos(
-                (step - warmup_steps) / cosine_steps * math.pi))
+            return min_lr_ratio + 0.5 * (1.0 - min_lr_ratio) * (
+                1 + math.cos((step - warmup_steps) / cosine_steps * math.pi)
+            )
 
-        def warmup_then_linear_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
+        def warmup_then_linear_anneal(
+            step, warmup_steps_proportion, total_steps, min_lr_ratio
+        ):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
             linear_steps = total_steps - warmup_steps
             if step < warmup_steps:
                 return 1.0 / warmup_steps * step
-            return 1.0 - (1.0 - min_lr_ratio) / linear_steps * (step - warmup_steps)
+            return 1.0 - (1.0 - min_lr_ratio) / linear_steps * (
+                step - warmup_steps
+            )
 
-        def warmup_then_constant_anneal(step, warmup_steps_proportion, total_steps, min_lr_ratio):
+        def warmup_then_constant_anneal(
+            step, warmup_steps_proportion, total_steps, min_lr_ratio
+        ):
             warmup_steps = max(5, int(total_steps * warmup_steps_proportion))
             if step < warmup_steps:
                 return 1.0 / warmup_steps * step
@@ -434,7 +485,9 @@ class DeepspeedBackend(model_api.ModelBackend):
         elif self.lr_scheduler_type == "constant":
             lr_scheduler_fn = warmup_then_constant_anneal
         else:
-            raise NotImplementedError(f"Unknown lr_scheduler_type {self.lr_scheduler_type}.")
+            raise NotImplementedError(
+                f"Unknown lr_scheduler_type {self.lr_scheduler_type}."
+            )
 
         lr_lambda = functools.partial(
             lr_scheduler_fn,

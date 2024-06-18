@@ -84,7 +84,9 @@ def actor_loss_fn(
         loss_mask_count = loss_mask.count_nonzero()
         # For numerical stability.
         ratio = torch.where(loss_mask, torch.exp(logprobs - old_logprobs), 0)
-        approx_kl = torch.where(loss_mask, (logprobs - old_logprobs).detach(), 0.0)
+        approx_kl = torch.where(
+            loss_mask, (logprobs - old_logprobs).detach(), 0.0
+        )
     else:
         ratio = torch.exp(logprobs - old_logprobs)
         approx_kl = (logprobs - old_logprobs).detach()
@@ -94,14 +96,21 @@ def actor_loss_fn(
     pg_loss2 = -advantages * clipped_ratio
 
     if loss_mask is not None:
-        pg_loss = (torch.where(loss_mask, torch.max(pg_loss1, pg_loss2), 0).sum() / loss_mask_count)
+        pg_loss = (
+            torch.where(loss_mask, torch.max(pg_loss1, pg_loss2), 0).sum()
+            / loss_mask_count
+        )
     else:
         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
     clip_mask = pg_loss1.detach() < pg_loss2.detach()
     if loss_mask is not None:
-        proportion_clipped = (clip_mask.logical_and_(loss_mask).count_nonzero() / loss_mask_count)
-        importance_weight = (torch.where(loss_mask, ratio.detach(), 0).sum() / loss_mask_count)
+        proportion_clipped = (
+            clip_mask.logical_and_(loss_mask).count_nonzero() / loss_mask_count
+        )
+        importance_weight = (
+            torch.where(loss_mask, ratio.detach(), 0).sum() / loss_mask_count
+        )
         approx_kl = approx_kl.sum() / loss_mask_count
     else:
         proportion_clipped = clip_mask.count_nonzero()
@@ -131,7 +140,9 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         eps_clip,
     ):
 
-        target = labels = torch.nn.functional.pad(packed_input_ids[1:], (0, 1), value=0.0)
+        target = labels = torch.nn.functional.pad(
+            packed_input_ids[1:], (0, 1), value=0.0
+        )
         # Maximum value along vocab dimension across all GPUs.
         logits_max = torch.max(vocab_parallel_logits, dim=-1)[0]
         torch.distributed.all_reduce(
@@ -140,14 +151,18 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
             group=constants.model_parallel_group(),
         )
         # Subtract the maximum value.
-        vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
+        vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(
+            dim=-1
+        )
 
         # Get the partition's vocab indecies
         get_vocab_range = VocabUtility.vocab_range_from_per_partition_vocab_size
         partition_vocab_size = vocab_parallel_logits.size()[-1]
         rank = constants.model_parallel_rank()
         world_size = constants.model_parallel_world_size()
-        vocab_start_index, vocab_end_index = get_vocab_range(partition_vocab_size, rank, world_size)
+        vocab_start_index, vocab_end_index = get_vocab_range(
+            partition_vocab_size, rank, world_size
+        )
 
         # Create a mask of valid vocab ids (1 means it needs to be masked).
         target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
@@ -159,7 +174,9 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         # [*, partition-vocab-size] and target to a 1-D tensor of size [*].
         logits_2d = vocab_parallel_logits.view(-1, partition_vocab_size)
         masked_target_1d = masked_target.view(-1)
-        arange_1d = torch.arange(start=0, end=logits_2d.size()[0], device=logits_2d.device)
+        arange_1d = torch.arange(
+            start=0, end=logits_2d.size()[0], device=logits_2d.device
+        )
         predicted_logits_1d = logits_2d[arange_1d, masked_target_1d]
         predicted_logits_1d = predicted_logits_1d.clone().contiguous()
         predicted_logits = predicted_logits_1d.view_as(target)
@@ -192,19 +209,31 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         new_logprobs = new_logprobs.float()
 
         # For numerical stability.
-        ratio = torch.where(ppo_loss_mask, torch.exp(new_logprobs - old_logprobs), 0)
+        ratio = torch.where(
+            ppo_loss_mask, torch.exp(new_logprobs - old_logprobs), 0
+        )
 
         loss_mask_count = ppo_loss_mask.count_nonzero()
-        approx_kl = (torch.where(ppo_loss_mask,
-                                 (old_logprobs - new_logprobs).detach(), 0.0).sum() / loss_mask_count)
-        importance_weight = (torch.where(ppo_loss_mask, ratio.detach(), 0).sum() / loss_mask_count)
+        approx_kl = (
+            torch.where(
+                ppo_loss_mask, (old_logprobs - new_logprobs).detach(), 0.0
+            ).sum()
+            / loss_mask_count
+        )
+        importance_weight = (
+            torch.where(ppo_loss_mask, ratio.detach(), 0).sum()
+            / loss_mask_count
+        )
 
         clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
         pg_loss1 = -advantages * ratio
         pg_loss2 = -advantages * clipped_ratio
 
         clip_mask = (pg_loss1 < pg_loss2).detach()
-        proportion_clipped = (clip_mask.logical_and_(ppo_loss_mask).count_nonzero() / loss_mask_count)
+        proportion_clipped = (
+            clip_mask.logical_and_(ppo_loss_mask).count_nonzero()
+            / loss_mask_count
+        )
 
         # Store softmax, target-mask and masked-target for backward pass.
         ctx.save_for_backward(
@@ -249,7 +278,9 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         g_ = -grad_output * advantages
         grad_ratio = torch.where(pg_loss1_larger_mask & unclip_mask, g_, 0.0)
         grad_new_logp = torch.where(ppo_loss_mask, grad_ratio * ratio, 0.0)
-        _grad_new_logp = grad_new_logp.new_zeros(softmax.shape[0], dtype=torch.float16)
+        _grad_new_logp = grad_new_logp.new_zeros(
+            softmax.shape[0], dtype=torch.float16
+        )
         _grad_new_logp[leave_one_indices] = grad_new_logp.half()
 
         # All the inputs have softmax as thier gradient.
@@ -259,7 +290,9 @@ class _VocabParallelMemoryEfficientPPOLoss(torch.autograd.Function):
         grad_2d = grad_input.view(-1, partition_vocab_size)
 
         # Add the gradient from matching classes.
-        arange_1d = torch.arange(start=0, end=grad_2d.size()[0], device=grad_2d.device)
+        arange_1d = torch.arange(
+            start=0, end=grad_2d.size()[0], device=grad_2d.device
+        )
 
         softmax_update = 1.0 - target_mask.view(-1).float()
         grad_2d[arange_1d, masked_target_1d] -= softmax_update
@@ -284,29 +317,49 @@ class _MemoryEfficientPPOActorLossFn(torch.autograd.Function):
         advantages,
         eps_clip,
     ):
-        labels = torch.nn.functional.pad(packed_input_ids[1:], (0, 1), value=0.0)
+        labels = torch.nn.functional.pad(
+            packed_input_ids[1:], (0, 1), value=0.0
+        )
         _new_logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
-        new_logprobs_labels = _new_logprobs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
+        new_logprobs_labels = _new_logprobs.gather(
+            dim=-1, index=labels.unsqueeze(-1)
+        ).squeeze(-1)
         leave_one_indices = build_leave_one_indices(logits, cu_seqlens)
-        new_logprobs = torch.where(ppo_loss_mask, new_logprobs_labels[leave_one_indices], 0.0)
+        new_logprobs = torch.where(
+            ppo_loss_mask, new_logprobs_labels[leave_one_indices], 0.0
+        )
         new_logprobs = new_logprobs.float()
 
         # For numerical stability.
-        ratio = torch.where(ppo_loss_mask, torch.exp(new_logprobs - old_logprobs), 0)
+        ratio = torch.where(
+            ppo_loss_mask, torch.exp(new_logprobs - old_logprobs), 0
+        )
 
         loss_mask_count = ppo_loss_mask.count_nonzero()
-        approx_kl = (torch.where(ppo_loss_mask,
-                                 (old_logprobs - new_logprobs).detach(), 0.0).sum() / loss_mask_count)
-        importance_weight = (torch.where(ppo_loss_mask, ratio.detach(), 0).sum() / loss_mask_count)
+        approx_kl = (
+            torch.where(
+                ppo_loss_mask, (old_logprobs - new_logprobs).detach(), 0.0
+            ).sum()
+            / loss_mask_count
+        )
+        importance_weight = (
+            torch.where(ppo_loss_mask, ratio.detach(), 0).sum()
+            / loss_mask_count
+        )
 
         clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
         pg_loss1 = -advantages * ratio
         pg_loss2 = -advantages * clipped_ratio
 
         clip_mask = (pg_loss1 < pg_loss2).detach()
-        proportion_clipped = (clip_mask.logical_and_(ppo_loss_mask).count_nonzero() / loss_mask_count)
+        proportion_clipped = (
+            clip_mask.logical_and_(ppo_loss_mask).count_nonzero()
+            / loss_mask_count
+        )
 
-        ctx.save_for_backward(logits, leave_one_indices, labels, ppo_loss_mask, ratio, advantages)
+        ctx.save_for_backward(
+            logits, leave_one_indices, labels, ppo_loss_mask, ratio, advantages
+        )
         ctx.eps_clip = eps_clip
 
         return (
@@ -319,7 +372,9 @@ class _MemoryEfficientPPOActorLossFn(torch.autograd.Function):
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_output, g1, g2, g3):
-        logits, leave_one_indices, labels, ppo_loss_mask, ratio, advantages = (ctx.saved_tensors)
+        logits, leave_one_indices, labels, ppo_loss_mask, ratio, advantages = (
+            ctx.saved_tensors
+        )
         eps_clip = ctx.eps_clip
 
         clipped_ratio = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip)
@@ -331,11 +386,15 @@ class _MemoryEfficientPPOActorLossFn(torch.autograd.Function):
         g_ = -grad_output * advantages
         grad_ratio = torch.where(pg_loss1_larger_mask & unclip_mask, g_, 0.0)
         grad_new_logp = torch.where(ppo_loss_mask, grad_ratio * ratio, 0.0)
-        _grad_new_logp = grad_new_logp.new_zeros(logits.shape[0], dtype=torch.float16)
+        _grad_new_logp = grad_new_logp.new_zeros(
+            logits.shape[0], dtype=torch.float16
+        )
         _grad_new_logp[leave_one_indices] = grad_new_logp.half()
 
         grad_logits = torch.nn.functional.softmax(logits, dim=-1)
-        grad_logits.scatter_add_(1, labels.view(-1, 1), torch.full_like(grad_logits, fill_value=-1))
+        grad_logits.scatter_add_(
+            1, labels.view(-1, 1), torch.full_like(grad_logits, fill_value=-1)
+        )
         grad_logits.mul_(_grad_new_logp.unsqueeze(1))
 
         return grad_logits, None, None, None, None, None, None, None
@@ -374,11 +433,13 @@ def memory_efficient_ppo_loss_fn(
 
 def _huber_loss(x: torch.Tensor, y: torch.Tensor, delta: float):
     diff = torch.abs(x - y)
-    return torch.where(diff < delta, 0.5 * diff**2, delta * (diff - 0.5 * delta))
+    return torch.where(
+        diff < delta, 0.5 * diff**2, delta * (diff - 0.5 * delta)
+    )
 
 
 def _mse_loss(x: torch.Tensor, y: torch.Tensor):
-    return 0.5 * (x - y)**2
+    return 0.5 * (x - y) ** 2
 
 
 def critic_loss_fn(
@@ -423,7 +484,9 @@ def critic_loss_fn(
 
     value_loss_original = loss_fn(value, target_value)
 
-    value_clipped = old_value + (value - old_value).clamp(-value_eps_clip, value_eps_clip)
+    value_clipped = old_value + (value - old_value).clamp(
+        -value_eps_clip, value_eps_clip
+    )
 
     value_loss_clipped = loss_fn(value_clipped, target_value)
 
@@ -433,7 +496,9 @@ def critic_loss_fn(
         clip_mask = value_loss_clipped.detach() > value_loss_original.detach()
         if loss_mask is not None:
             mask_count = loss_mask.count_nonzero()
-            proportion_clipped = (clip_mask.logical_and_(loss_mask).count_nonzero() / mask_count)
+            proportion_clipped = (
+                clip_mask.logical_and_(loss_mask).count_nonzero() / mask_count
+            )
         else:
             proportion_clipped = clip_mask.count_nonzero()
 
@@ -479,13 +544,19 @@ def compute_rewards(
         # Set KL rewards *at EOS* and after EOS to 0.
         # The final *state* is the sequence without EOS, so the final KL reward is assigned to this state.
         # The next "environment step" indicates a "done" by outputting an EOS token, therefore no rewards afterwards.
-        kl_rewards[i, eos_indices[i]:] = 0.0
+        kl_rewards[i, eos_indices[i] :] = 0.0
 
-    reward_clip = torch.clamp(reward_score, -clip_reward_value, clip_reward_value)
+    reward_clip = torch.clamp(
+        reward_score, -clip_reward_value, clip_reward_value
+    )
     score_rewards = torch.zeros_like(kl_rewards)
     # This is assigned to the token before EOS, which rewards the output of the EOS token.
-    score_rewards.scatter_(-1, (eos_indices - 1).unsqueeze(-1), reward_clip.unsqueeze(-1))
-    score_rewards = score_rewards * (1 - seq_no_eos_mask.unsqueeze(1))  # only compute final rewards with EOS
+    score_rewards.scatter_(
+        -1, (eos_indices - 1).unsqueeze(-1), reward_clip.unsqueeze(-1)
+    )
+    score_rewards = score_rewards * (
+        1 - seq_no_eos_mask.unsqueeze(1)
+    )  # only compute final rewards with EOS
     return kl_rewards, kl_rewards + score_rewards
 
 
@@ -544,7 +615,9 @@ def get_packed_rewards(
     tot_rewards = -kl_ctl * (log_probs - ref_log_probs)
     kl_rewards = tot_rewards.clone()
     reward_score = reward_score.clip(-clip_reward_value, clip_reward_value)
-    tot_rewards[short1cu_seqlens[1:] - 1] += torch.where(seq_no_eos_mask, 0, reward_score)
+    tot_rewards[short1cu_seqlens[1:] - 1] += torch.where(
+        seq_no_eos_mask, 0, reward_score
+    )
     return kl_rewards, tot_rewards
 
 
@@ -597,7 +670,11 @@ def pygae1d_nolp_misalign(
             nextvalues = values[v_offset + t + 1]
             if t == r_end - r_offset - 1:
                 nextvalues *= bootstrap[i]
-            delta = rewards[r_offset + t] + gamma * nextvalues - values[v_offset + t]
+            delta = (
+                rewards[r_offset + t]
+                + gamma * nextvalues
+                - values[v_offset + t]
+            )
             lastgaelam = delta + gamma * lam * lastgaelam
             advantages_reversed.append(lastgaelam)
             returns_reversed.append(lastgaelam + values[v_offset + t])
@@ -618,7 +695,9 @@ def pygae2d_nolp(
     on_reset = on_reset.float()
     truncates = truncates.float()
     episode_length = int(rewards.shape[1])
-    delta = rewards + gamma * values[:, 1:] * (1 - on_reset[:, 1:]) - values[:, :-1]
+    delta = (
+        rewards + gamma * values[:, 1:] * (1 - on_reset[:, 1:]) - values[:, :-1]
+    )
 
     gae = torch.zeros_like(rewards[:, 0])
     adv = torch.zeros_like(rewards)
@@ -675,7 +754,9 @@ def cugae1d_nolp_misalign_func(
 
     assert len(rewards.shape) == len(values.shape) == len(cu_seqlens.shape) == 1
     assert cu_seqlens[0] == 0 and cu_seqlens[-1] == rewards.shape[0]
-    return gae_cuda.gae_1d_nolp_misalign(rewards, values, cu_seqlens, truncate, gamma, lam)
+    return gae_cuda.gae_1d_nolp_misalign(
+        rewards, values, cu_seqlens, truncate, gamma, lam
+    )
 
 
 def cugae2d_olp_func(
@@ -722,7 +803,9 @@ def cugae2d_olp_func(
     done_indices = dones.nonzero()
     num_dones = dones.float().sum(1)
     max_num_dones = int(num_dones.max())
-    cu_num_dones = torch.nn.functional.pad(num_dones.cumsum(0), (1, 0), value=0).int()
+    cu_num_dones = torch.nn.functional.pad(
+        num_dones.cumsum(0), (1, 0), value=0
+    ).int()
     is_truncate = truncates[done_indices[:, 0], done_indices[:, 1]]
     return gae_cuda.gae_2d_olp(
         rewards,
@@ -779,8 +862,12 @@ def cugae2d_nolp_func(
     on_reset_indices = on_reset.nonzero()
     num_resets = on_reset.float().sum(1)
     max_num_resets = int(num_resets.max())
-    cu_num_resets = torch.nn.functional.pad(num_resets.cumsum(0), (1, 0), value=0).int()
-    truncates = torch.cat([torch.zeros_like(truncates[:, 0:1]), truncates[:, :-1]], dim=1)
+    cu_num_resets = torch.nn.functional.pad(
+        num_resets.cumsum(0), (1, 0), value=0
+    ).int()
+    truncates = torch.cat(
+        [torch.zeros_like(truncates[:, 0:1]), truncates[:, :-1]], dim=1
+    )
     bootstrap = truncates[on_reset_indices[:, 0], on_reset_indices[:, 1]]
     return gae_cuda.gae_2d_nolp(
         rewards,
@@ -805,7 +892,15 @@ def get_packed_advantages_and_returns(
     seq_no_eos_mask: torch.FloatTensor,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
     try:
-        return cugae1d_nolp_misalign_func(rewards, values, short1cu_seqlens.int(), seq_no_eos_mask.bool(),
-                                          gamma, lam)
+        return cugae1d_nolp_misalign_func(
+            rewards,
+            values,
+            short1cu_seqlens.int(),
+            seq_no_eos_mask.bool(),
+            gamma,
+            lam,
+        )
     except ModuleNotFoundError:
-        return pygae1d_nolp_misalign(rewards, values, short1cu_seqlens, seq_no_eos_mask, gamma, lam)
+        return pygae1d_nolp_misalign(
+            rewards, values, short1cu_seqlens, seq_no_eos_mask, gamma, lam
+        )

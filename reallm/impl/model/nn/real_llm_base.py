@@ -11,9 +11,18 @@ import torch.utils.checkpoint
 import transformers
 
 from reallm.api.core import model_api
-from reallm.impl.model.modules import CausalSelfAttentionLayer, LayerNormMLP, LlamaLayerNormMLP, LlamaRMSNorm
-from reallm.impl.model.parallelism.model_parallel.modules import (ColumnParallelLinear, parallel_lm_logits,
-                                                                  ParallelEmbedding, RowParallelLinear)
+from reallm.impl.model.modules import (
+    CausalSelfAttentionLayer,
+    LayerNormMLP,
+    LlamaLayerNormMLP,
+    LlamaRMSNorm,
+)
+from reallm.impl.model.parallelism.model_parallel.modules import (
+    ColumnParallelLinear,
+    parallel_lm_logits,
+    ParallelEmbedding,
+    RowParallelLinear,
+)
 from reallm.impl.model.utils.functional import compute_varlen_position_indices
 import reallm.base.constants as constants
 import reallm.base.logging as logging
@@ -159,7 +168,9 @@ class ReaLModelBlock(nn.Module):
                 device=device,
             )
 
-    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
+    def forward(
+        self, x: PipeTransferData, y: PipeCacheData
+    ) -> PipeTransferData:
         pp_input = x.pp_input
         cu_seqlens = x.cu_seqlens
         k_cache = y.k_cache
@@ -239,11 +250,18 @@ class VocabPositionEmbedding(nn.Module):
         else:
             embed_cls = nn.Embedding
 
-        self.wte = embed_cls(config.vocab_size, config.hidden_dim, dtype=dtype, device=device)
+        self.wte = embed_cls(
+            config.vocab_size, config.hidden_dim, dtype=dtype, device=device
+        )
 
         self.apply_abs_pos_embed = not config.apply_rotary
         if self.apply_abs_pos_embed:
-            self.wpe = embed_cls(config.n_positions, config.hidden_dim, dtype=dtype, device=device)
+            self.wpe = embed_cls(
+                config.n_positions,
+                config.hidden_dim,
+                dtype=dtype,
+                device=device,
+            )
 
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
@@ -252,9 +270,12 @@ class VocabPositionEmbedding(nn.Module):
                 (config.n_positions, config.n_positions),
                 dtype=torch.bool,
                 device=device,
-            ))
+            )
+        )
 
-    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
+    def forward(
+        self, x: PipeTransferData, y: PipeCacheData
+    ) -> PipeTransferData:
         # Set position ids.
         # if y.packed_position_ids is not None:
         #     raise ValueError("In our use cases, position_ids must be None.")
@@ -264,7 +285,9 @@ class VocabPositionEmbedding(nn.Module):
             seqlen_offsets=y.cache_seqlens,
         )
         if x.max_seqlen > self.n_positions:
-            raise ValueError(f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions}).")
+            raise ValueError(
+                f"max_seqlen ({x.max_seqlen}) must be <= n_positions ({self.n_positions})."
+            )
         assert y.packed_position_ids.shape == y.packed_input_ids.shape, (
             y.packed_position_ids.shape,
             y.packed_input_ids.shape,
@@ -274,12 +297,16 @@ class VocabPositionEmbedding(nn.Module):
         x.pp_output = self._forward(y.packed_input_ids, y.packed_position_ids)
         return x
 
-    def _forward(self, input_ids: torch.LongTensor, position_ids: torch.LongTensor) -> torch.Tensor:
+    def _forward(
+        self, input_ids: torch.LongTensor, position_ids: torch.LongTensor
+    ) -> torch.Tensor:
         inputs_embeds = self.wte(input_ids)
         if self.apply_abs_pos_embed:
             inputs_embeds = inputs_embeds + self.wpe(position_ids)
         if constants.sequence_parallel():
-            inputs_embeds = tensor_parallel.scatter_to_sequence_parallel_region(inputs_embeds)
+            inputs_embeds = tensor_parallel.scatter_to_sequence_parallel_region(
+                inputs_embeds
+            )
             # `scatter_to_sequence_parallel_region` returns a view, which prevents
             # the original tensor from being garbage collected. Clone to facilitate GC.
             # Has a small runtime cost (~0.5%).
@@ -293,7 +320,9 @@ class VocabPositionEmbedding(nn.Module):
 
 class OutputHead(nn.Linear):
 
-    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
+    def forward(
+        self, x: PipeTransferData, y: PipeCacheData
+    ) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
@@ -303,9 +332,15 @@ class OutputHead(nn.Linear):
 
 class SequenceParallelCriticHead(nn.Linear):
 
-    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
-        all_gather_buffer = tensor_parallel.gather_from_sequence_parallel_region(x.pp_input)
-        x.pp_output = nn.functional.linear(all_gather_buffer, self.weight, self.bias)
+    def forward(
+        self, x: PipeTransferData, y: PipeCacheData
+    ) -> PipeTransferData:
+        all_gather_buffer = (
+            tensor_parallel.gather_from_sequence_parallel_region(x.pp_input)
+        )
+        x.pp_output = nn.functional.linear(
+            all_gather_buffer, self.weight, self.bias
+        )
         return x
 
     def _forward(self, x: torch.Tensor):
@@ -315,7 +350,9 @@ class SequenceParallelCriticHead(nn.Linear):
 
 class SequenceParallelActorHead(ColumnParallelLinear):
 
-    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
+    def forward(
+        self, x: PipeTransferData, y: PipeCacheData
+    ) -> PipeTransferData:
         x.pp_output = parallel_lm_logits(
             x.pp_input,
             self.weight,
@@ -355,7 +392,9 @@ def real_model_embedding_param_keys(config: model_api.ReaLModelConfig) -> int:
     return keys
 
 
-def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -> int:
+def real_model_tblock_param_count(
+    config: model_api.ReaLModelConfig, idx: int
+) -> int:
     count = 0
     nq = config.hidden_dim // config.head_dim
 
@@ -369,7 +408,10 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
         raise NotImplementedError()
 
     # layernorm qkv linear
-    count += (ln_count + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim)
+    count += (
+        ln_count
+        + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim
+    )
     if config.use_attention_bias:
         count += config.head_dim * (nq + config.n_kv_heads * 2)
 
@@ -393,7 +435,9 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
     return count
 
 
-def real_model_tblock_param_keys(config: model_api.ReaLModelConfig, idx: int) -> List[str]:
+def real_model_tblock_param_keys(
+    config: model_api.ReaLModelConfig, idx: int
+) -> List[str]:
     keys = [
         f"{idx + 1}.attn.c_attn.ln.weight",
         f"{idx + 1}.attn.c_attn.q_attn.weight",
@@ -447,7 +491,9 @@ def real_model_head_param_keys(config: model_api.ReaLModelConfig) -> List[str]:
     return [f"{config.n_layers + 1}.weight"]
 
 
-def keys_from_layer_indices(config: model_api.ReaLModelConfig, layer_indices: List[int]) -> List[str]:
+def keys_from_layer_indices(
+    config: model_api.ReaLModelConfig, layer_indices: List[int]
+) -> List[str]:
     # assert _is_integer_list_contiguous(layer_indices)
     sd_keys = []
     for layer_idx in layer_indices:

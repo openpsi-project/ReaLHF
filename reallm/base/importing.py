@@ -4,9 +4,11 @@ import importlib.util
 import os
 import re
 import sys
+
 from .logging import getLogger
 
-logger =  getLogger("importing")
+logger = getLogger("importing")
+
 
 def import_module(path: str, pattern: re.Pattern):
     dirname = Path(path)
@@ -17,7 +19,9 @@ def import_module(path: str, pattern: re.Pattern):
         assert "reallm" in module_path
         start_idx = path.index("reallm")
         module_path = module_path[start_idx:]
-        module_path = "reallm." + module_path.replace(os.sep, ".").replace("reallm.", "")
+        module_path = "reallm." + module_path.replace(os.sep, ".").replace(
+            "reallm.", ""
+        )
         logger.info(f"Automatically importing module {module_path}.")
         importlib.import_module(module_path)
 

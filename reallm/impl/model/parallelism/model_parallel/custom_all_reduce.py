@@ -42,9 +42,11 @@ def init_custom_ar() -> None:
         )
         return
     if not _can_p2p(rank, world_size):
-        logger.warn("Custom allreduce is disabled because your platform lacks GPU P2P"
-                    " capability. To silence this warning, specify"
-                    "disable_custom_all_reduce=True explicitly.")
+        logger.warn(
+            "Custom allreduce is disabled because your platform lacks GPU P2P"
+            " capability. To silence this warning, specify"
+            "disable_custom_all_reduce=True explicitly."
+        )
         return
     _CA_HANDLE = CustomAllreduce(rank, world_size)
 
@@ -126,8 +128,10 @@ def _is_full_nvlink(rank, world_size):
                 if not link_state:
                     return False
             except pynvml.NVMLError as error:
-                logger.info(f'NVLink detection failed with message "{str(error)}". '
-                            "This is normal if your machine has no NVLink equipped")
+                logger.info(
+                    f'NVLink detection failed with message "{str(error)}". '
+                    "This is normal if your machine has no NVLink equipped"
+                )
                 return False
     return True
 
@@ -149,7 +153,9 @@ class CustomAllreduce:
         # meta data composes of two parts: meta data for synchronization
         # (256 bytes) and a temporary buffer for storing intermediate
         # allreduce results.
-        self.meta = torch.zeros(custom_ar.meta_size() + max_size, dtype=torch.uint8, device="cuda")
+        self.meta = torch.zeros(
+            custom_ar.meta_size() + max_size, dtype=torch.uint8, device="cuda"
+        )
         # This is a pre-registered IPC buffer. In eager mode, input tensors
         # are first copied into this buffer before allreduce is performed
         self.buffer = torch.empty(max_size, dtype=torch.uint8, device="cuda")
@@ -158,13 +164,16 @@ class CustomAllreduce:
         # 8*world_size bytes where world_size is at most 8. Allocating 8MB
         # is enough for 131072 such tuples. The largest model I've seen only
         # needs less than 10000 of registered tuples.
-        self.rank_data = torch.empty(8 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+        self.rank_data = torch.empty(
+            8 * 1024 * 1024, dtype=torch.uint8, device="cuda"
+        )
         self.max_size = max_size
         self.world_size = world_size
         handles, offsets = self._get_ipc_meta(self.meta)
         self.full_nvlink = _is_full_nvlink(rank, world_size)
-        self._ptr = custom_ar.init_custom_ar(self.meta, self.rank_data, handles, offsets, rank,
-                                             self.full_nvlink)
+        self._ptr = custom_ar.init_custom_ar(
+            self.meta, self.rank_data, handles, offsets, rank, self.full_nvlink
+        )
         self.fast_cond = self.full_nvlink or world_size <= 2
         self.register_buffer(self.buffer)
 
@@ -198,7 +207,9 @@ class CustomAllreduce:
         custom_ar.register_graph_buffers(self._ptr, handles, offsets)
 
     def should_custom_ar(self, inp: torch.Tensor):
-        return custom_ar.should_custom_ar(inp, self.max_size, self.world_size, self.full_nvlink)
+        return custom_ar.should_custom_ar(
+            inp, self.max_size, self.world_size, self.full_nvlink
+        )
 
     # all reduce, assuming inp tensor is IPC registered with register_buffer,
     # or, in the context of cuda graphs, register_graph_buffers

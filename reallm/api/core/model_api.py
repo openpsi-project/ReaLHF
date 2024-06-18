@@ -1,9 +1,9 @@
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 import abc
-import keyword
 import copy
 import dataclasses
+import keyword
 import os
 
 import torch
@@ -21,7 +21,7 @@ logger = logging.getLogger("model")
 @dataclasses.dataclass
 class ReaLModelConfig:
     """Configuration for ReaLModel.
-    
+
     :param n_layers: Number of transformer blocks.
     :type n_layers: int
     :param n_kv_heads: Number of key-value attention heads.
@@ -69,7 +69,7 @@ class ReaLModelConfig:
     :type rotary_scaling_type: Optional[str]
     :param is_critic: Whether the model is a critic model.
     :type is_critic: bool
-    :param gradient_accumulation_fusion: Whether to fuse 
+    :param gradient_accumulation_fusion: Whether to fuse
         gradient accumulation in Megatron.
         Currently not supported.
     :type gradient_accumulation_fusion: bool
@@ -78,6 +78,7 @@ class ReaLModelConfig:
         Currently not supported.
     :type share_embeddings_and_output_weights: bool
     """
+
     ### Architectural configurations. ###
     n_layers: int
     n_kv_heads: int
@@ -115,9 +116,11 @@ class ReaLModelConfig:
         assert not self.share_embeddings_and_output_weights
 
 
-def load_hf_tokenizer(model_name_or_path: str,
-                      fast_tokenizer=True,
-                      padding_side: Optional[str] = None) -> transformers.PreTrainedTokenizerFast:
+def load_hf_tokenizer(
+    model_name_or_path: str,
+    fast_tokenizer=True,
+    padding_side: Optional[str] = None,
+) -> transformers.PreTrainedTokenizerFast:
     kwargs = {}
     if padding_side is not None:
         kwargs["padding_side"] = padding_side
@@ -125,17 +128,17 @@ def load_hf_tokenizer(model_name_or_path: str,
         # Locally tokenizer loading has some issue, so we need to force download
         model_json = os.path.join(model_name_or_path, "config.json")
         if "codet5" in model_name_or_path:
-            tokenizer = transformers.RobertaTokenizer.from_pretrained(model_name_or_path,
-                                                                      fast_tokenizer=fast_tokenizer,
-                                                                      **kwargs)
+            tokenizer = transformers.RobertaTokenizer.from_pretrained(
+                model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
+            )
         if os.path.exists(model_json):
-            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path,
-                                                                   fast_tokenizer=fast_tokenizer,
-                                                                   **kwargs)
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
+            )
     else:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path,
-                                                               fast_tokenizer=fast_tokenizer,
-                                                               **kwargs)
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
+        )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
     return tokenizer
@@ -170,7 +173,9 @@ class Model:
             self.module = self.module.to(self.device)
         except ValueError as e:
             # 4-bit and 8-bit model may fail here
-            logger.warning(f"Failed to move model to device {self.device} because {e}. Abort to device.")
+            logger.warning(
+                f"Failed to move model to device {self.device} because {e}. Abort to device."
+            )
 
     def inc_version(self):
         self.version.global_step += 1
@@ -201,8 +206,12 @@ def null_model(name: ModelName, device: Union[str, torch.device]) -> Model:
     return Model(name, torch.nn.Identity(), None, device)
 
 
-def tokenizer_only_model(name: ModelName, device: Union[str, torch.device], tokenizer_path: str) -> Model:
-    return Model(name, torch.nn.Identity(), load_hf_tokenizer(tokenizer_path), device)
+def tokenizer_only_model(
+    name: ModelName, device: Union[str, torch.device], tokenizer_path: str
+) -> Model:
+    return Model(
+        name, torch.nn.Identity(), load_hf_tokenizer(tokenizer_path), device
+    )
 
 
 class ModelInterface(abc.ABC):
@@ -218,7 +227,9 @@ class ModelInterface(abc.ABC):
     def save(self, model: Model, save_dir: str):
         pass
 
-    def evaluate(self, model: Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+    def evaluate(
+        self, model: Model, eval_dataloader: torch.utils.data.DataLoader
+    ) -> Dict:
         return {}
 
     def inference(self, model: Model, data: NamedArray) -> NamedArray:
@@ -259,12 +270,16 @@ def register_wrapper(name, cls_):
     ALL_WRAPPER_CLASSES[name] = cls_
 
 
-def make_model_wrapper(cfg: system_api.ModelWrapper) -> Callable[[Model], Model]:
+def make_model_wrapper(
+    cfg: system_api.ModelWrapper,
+) -> Callable[[Model], Model]:
     cls_ = ALL_WRAPPER_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 
 
-def make_model(cfg: system_api.Model, name: ModelName, device: Union[str, torch.device]) -> Model:
+def make_model(
+    cfg: system_api.Model, name: ModelName, device: Union[str, torch.device]
+) -> Model:
     logger.debug(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
@@ -292,6 +307,7 @@ register_model("tokenizer", tokenizer_only_model)
 SUPPORTED_MODELS = []
 HF_MODEL_FAMILY_REGISTRY = {}
 
+
 def is_valid_function_name(name):
     if not name.isidentifier():
         return False
@@ -299,11 +315,16 @@ def is_valid_function_name(name):
         return False
     return True
 
+
 def register_hf_family(
     name: str,
     hf_cls_name: str,
-    config_from_hf_converter: Callable[[transformers.PretrainedConfig], ReaLModelConfig],
-    config_to_hf_converter: Callable[[ReaLModelConfig], transformers.PretrainedConfig],
+    config_from_hf_converter: Callable[
+        [transformers.PretrainedConfig], ReaLModelConfig
+    ],
+    config_to_hf_converter: Callable[
+        [ReaLModelConfig], transformers.PretrainedConfig
+    ],
     sd_from_hf_converter: Callable[[Dict, ReaLModelConfig], Dict],
     sd_to_hf_converter: Callable[[Dict, ReaLModelConfig], Dict],
     embedding_param_names: Callable[[ReaLModelConfig], List[str]],
@@ -313,7 +334,9 @@ def register_hf_family(
     if name in SUPPORTED_MODELS:
         raise ValueError(f"Model {name} is already registered.")
     if not is_valid_function_name(name):
-        raise ValueError(f"Model name {name} is not a valid function name in Python.")
+        raise ValueError(
+            f"Model name {name} is not a valid function name in Python."
+        )
     SUPPORTED_MODELS.append(name)
     HF_MODEL_FAMILY_REGISTRY[name] = dict(
         name=name,

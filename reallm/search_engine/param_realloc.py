@@ -10,16 +10,19 @@ import torch.distributed
 
 from reallm.api.core.config import ModelFamily, ModelName
 from reallm.api.core.model_api import ReaLModelConfig
-
 import reallm.api.core.system_api as system_api
 import reallm.base.constants as constants
 import reallm.base.topology as topology
 
 
-def bcast_cost(param_size: float, bw: float, src: int, dsts: List[int], n_nodes_per_gpu=8):
+def bcast_cost(
+    param_size: float, bw: float, src: int, dsts: List[int], n_nodes_per_gpu=8
+):
     src_node = src // n_nodes_per_gpu
     dst_nodes = [dst // n_nodes_per_gpu for dst in dsts]
-    if src_node == dst_nodes[0] and all(dst_node == dst_nodes[0] for dst_node in dst_nodes):
+    if src_node == dst_nodes[0] and all(
+        dst_node == dst_nodes[0] for dst_node in dst_nodes
+    ):
         return param_size * 2 * 8 / (1800 * 1024**3)
         # return 0.0
     else:
@@ -37,19 +40,30 @@ def compute_cost(
     bw: float,  # Gbps
     set_interval_cost: float,
 ) -> int:
-    from reallm.impl.model.comm.param_realloc import (_create_param_realloc_groups,
-                                                  _derive_reparallelize_comm_plan, ParamReallocInfo,
-                                                  ReparallelizeReceiverStep, ReparallelizeSenderStep)
+    from reallm.impl.model.comm.param_realloc import (
+        _create_param_realloc_groups,
+        _derive_reparallelize_comm_plan,
+        ParamReallocInfo,
+        ReparallelizeReceiverStep,
+        ReparallelizeSenderStep,
+    )
 
     param_sync_groups = {}
     param_sync_src_ranks = {}
     param_sync_dst_ranks = {}
     msid2mwid = {}
     for i in range(from_topo.world_size()):
-        msid2mwid[system_api.ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)] = i
+        msid2mwid[
+            system_api.ModelShardID.from_parallelism_rank(
+                from_model_name, from_topo, i
+            )
+        ] = i
     for i in range(to_topo.world_size()):
-        msid2mwid[system_api.ModelShardID.from_parallelism_rank(to_model_name, to_topo,
-                                                                i)] = (i + world_size - to_topo.world_size())
+        msid2mwid[
+            system_api.ModelShardID.from_parallelism_rank(
+                to_model_name, to_topo, i
+            )
+        ] = (i + world_size - to_topo.world_size())
     _create_param_realloc_groups(
         from_topo,
         to_topo,
@@ -80,15 +94,22 @@ def compute_cost(
     for _rank in range(world_size):
         cost = comm_volume = bcast_cnt = 0
         for step in comm_plan:
-            if isinstance(step, ReparallelizeReceiverStep) and step.rank == _rank:
+            if (
+                isinstance(step, ReparallelizeReceiverStep)
+                and step.rank == _rank
+            ):
                 if step.rank != step.src:
-                    cost += bcast_cost(step.param_size, bw, step.src, step.dst_ranks)
+                    cost += bcast_cost(
+                        step.param_size, bw, step.src, step.dst_ranks
+                    )
                     comm_volume += step.param_size
                     bcast_cnt += 1
                 cost += set_interval_cost
             if isinstance(step, ReparallelizeSenderStep) and step.rank == _rank:
                 if step.group is not None:
-                    cost += bcast_cost(step.param_size, bw, step.rank, step.dst_ranks)
+                    cost += bcast_cost(
+                        step.param_size, bw, step.rank, step.dst_ranks
+                    )
                     bcast_cnt += 1
         max_cost = max(max_cost, cost)
         max_comm_volume = max(max_comm_volume, comm_volume)
@@ -99,9 +120,9 @@ def compute_cost(
 
 def decompose_to_three_factors(n: int):
     factors = []
-    for i in range(1, int(n**(1 / 2)) + 1):
+    for i in range(1, int(n ** (1 / 2)) + 1):
         if n % i == 0:
-            for j in range(i, int((n // i)**(1 / 2)) + 1):
+            for j in range(i, int((n // i) ** (1 / 2)) + 1):
                 if (n // i) % j == 0:
                     k = (n // i) // j
                     factors += list(set(itertools.permutations([i, j, k])))
@@ -130,20 +151,43 @@ def dump_table(
     # for a, b in set(small_spaces + large_spaces):
     for a, b in sub_space:
         mtik = time.perf_counter()
-        all_configs = list(itertools.product(decompose_to_three_factors(a), decompose_to_three_factors(b)))
-        all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
-        all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
-        all_configs = list(filter(
-            lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8],
-            all_configs,
-        ))
-        all_configs = list(filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs))
-        all_configs = list(filter(lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0, all_configs))
-        for config_id, (from_pp_mp_dp, to_pp_mp_dp) in tqdm.tqdm(enumerate(all_configs)):
+        all_configs = list(
+            itertools.product(
+                decompose_to_three_factors(a), decompose_to_three_factors(b)
+            )
+        )
+        all_configs = list(
+            filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs)
+        )
+        all_configs = list(
+            filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs)
+        )
+        all_configs = list(
+            filter(
+                lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8],
+                all_configs,
+            )
+        )
+        all_configs = list(
+            filter(lambda x: x[0][0] <= 16 and x[1][0] <= 16, all_configs)
+        )
+        all_configs = list(
+            filter(
+                lambda x: x[0][1] % x[1][1] == 0 or x[1][1] % x[0][1] == 0,
+                all_configs,
+            )
+        )
+        for config_id, (from_pp_mp_dp, to_pp_mp_dp) in tqdm.tqdm(
+            enumerate(all_configs)
+        ):
             world_size = max(a, b)
 
-            from_topo = topology.PipeModelDataParallelTopology(*from_pp_mp_dp, False, False)
-            to_topo = topology.PipeModelDataParallelTopology(*to_pp_mp_dp, False, False)
+            from_topo = topology.PipeModelDataParallelTopology(
+                *from_pp_mp_dp, False, False
+            )
+            to_topo = topology.PipeModelDataParallelTopology(
+                *to_pp_mp_dp, False, False
+            )
             assert world_size >= from_topo.world_size()
             assert world_size >= to_topo.world_size()
 
@@ -166,10 +210,15 @@ def dump_table(
             #     f"Model size {model_size}: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
             #     time.perf_counter() - tik,
             # )
-            res[hash_tuple_into_str(
-                (model_family.size, *from_pp_mp_dp, *to_pp_mp_dp))] = int(cost * 1000 * 1000)
-        print(f"Time for model size {model_family.size} {a} -> {b} {rank}/{parallel}: "
-              f"{time.perf_counter() - mtik:.4f}, num res entries {len(res)}")
+            res[
+                hash_tuple_into_str(
+                    (model_family.size, *from_pp_mp_dp, *to_pp_mp_dp)
+                )
+            ] = int(cost * 1000 * 1000)
+        print(
+            f"Time for model size {model_family.size} {a} -> {b} {rank}/{parallel}: "
+            f"{time.perf_counter() - mtik:.4f}, num res entries {len(res)}"
+        )
 
     print(f"Rank {rank} of model {model_family} finished, res size {len(res)}.")
 
@@ -182,10 +231,16 @@ def dump_table(
         os.makedirs(dump_path, exist_ok=True)
     with open(os.path.join(dump_path, fn), "wb") as f:
         pickle.dump(res, f)
-    print(f"dumped table with {len(res)} entries to {model_family}-{rank}-{parallel}.")
+    print(
+        f"dumped table with {len(res)} entries to {model_family}-{rank}-{parallel}."
+    )
 
 
-def dump_table_parallel(n_nodes: int, model_family_to_path: Dict[ModelFamily, str], parallel: int = 4):
+def dump_table_parallel(
+    n_nodes: int,
+    model_family_to_path: Dict[ModelFamily, str],
+    parallel: int = 4,
+):
     import torch.multiprocessing as mp
 
     mp.set_start_method("spawn", force=True)
@@ -194,10 +249,12 @@ def dump_table_parallel(n_nodes: int, model_family_to_path: Dict[ModelFamily, st
     ps = []
     for model_family, model_path in model_family_to_path.items():
         for rank in range(parallel):
-            ps.append(mp.Process(
-                target=dump_table,
-                args=(n_nodes, model_family, model_path, rank, parallel),
-            ))
+            ps.append(
+                mp.Process(
+                    target=dump_table,
+                    args=(n_nodes, model_family, model_path, rank, parallel),
+                )
+            )
 
     for p in ps:
         p.start()
@@ -206,7 +263,11 @@ def dump_table_parallel(n_nodes: int, model_family_to_path: Dict[ModelFamily, st
         p.join()
 
 
-def merge_tables(n_nodes: int, model_family_to_path: Dict[ModelFamily, str], parallel: int = 4):
+def merge_tables(
+    n_nodes: int,
+    model_family_to_path: Dict[ModelFamily, str],
+    parallel: int = 4,
+):
     import os
     import pickle
 
@@ -225,15 +286,21 @@ def merge_tables(n_nodes: int, model_family_to_path: Dict[ModelFamily, str], par
                     r.update(pickle.load(f))
                 os.remove(path)
         if counter < parallel:
-            raise RuntimeError("missing sub-tables, probably some sub-processes failed "
-                               "during param realloc time cost estimation.")
+            raise RuntimeError(
+                "missing sub-tables, probably some sub-processes failed "
+                "during param realloc time cost estimation."
+            )
         with open(os.path.join(res_path, f"{prefix}.pkl"), "wb") as f:
             pickle.dump(r, f)
-        print(f"merged parallel tables into {prefix}.pkl, total entries {len(r)}")
+        print(
+            f"merged parallel tables into {prefix}.pkl, total entries {len(r)}"
+        )
 
 
-def estimate_param_realloc_time_cost(n_nodes: int,
-                                     model_family_to_path: Dict[ModelFamily, str],
-                                     parallel: int = 4):
+def estimate_param_realloc_time_cost(
+    n_nodes: int,
+    model_family_to_path: Dict[ModelFamily, str],
+    parallel: int = 4,
+):
     dump_table_parallel(n_nodes, model_family_to_path, parallel)
     merge_tables(n_nodes, model_family_to_path, parallel)

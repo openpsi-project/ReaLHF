@@ -46,11 +46,11 @@ from_first = true
 force_alphabetical_sort_within_sections = true
 lexicographical = true
 src_paths = ["."]
-line_length = 110
+line_length = 80
 
 [tool.yapf]
 based_on_style = "pep8"
-column_limit = 110
+column_limit = 80
 split_before_named_assigns = true
 split_before_first_argument = false
 blank_line_before_nested_class_or_def = true
@@ -60,3 +60,24 @@ allow_split_before_dict_value = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.black]
+line-length = 80
+target-version = ['py37', 'py38', 'py39', 'py310', 'py311']
+skip-string-normalization = true
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs|
+    \.git|
+    \.hg|
+    \.mypy_cache|
+    \.nox|
+    \.tox|
+    \.venv|
+    _build|
+    buck-out|
+    build|
+    dist
+)/
+'''

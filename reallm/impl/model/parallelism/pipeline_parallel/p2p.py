@@ -45,7 +45,8 @@ def _is_valid_send_recv(src_stage, dest_stage):
     first_stage = 0
     last_stage = constants.grid().pipe_parallel_size - 1
     assert (
-        abs(src_stage - dest_stage) == 1 or (src_stage == first_stage and dest_stage == last_stage)
+        abs(src_stage - dest_stage) == 1
+        or (src_stage == first_stage and dest_stage == last_stage)
         or (src_stage == last_stage and dest_stage == first_stage)
     ), f"Functionality currently limited to send and receive between adjacent ranks only (src={src_stage}, dst={dest_stage})"
 

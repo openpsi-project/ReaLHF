@@ -58,7 +58,9 @@ class PipelinableInferenceEngine:
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             ).logits
-            _, stat = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs)
+            _, stat = loss_fn(
+                model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs
+            )
             return stat
 
     def forward(
@@ -90,7 +92,9 @@ class PipelinableInferenceEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        gconfig: GenerationConfig = dataclasses.field(
+            default_factory=GenerationConfig
+        ),
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:

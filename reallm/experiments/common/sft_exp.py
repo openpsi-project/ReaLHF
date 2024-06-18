@@ -2,12 +2,21 @@ import dataclasses
 
 from omegaconf import MISSING
 
-from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
+from reallm.api.core.dfg import (
+    ModelFamily,
+    ModelInterface,
+    ModelInterfaceType,
+    ModelRPC,
+)
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptAnswerDatasetConfig
 from reallm.api.quickstart.device_mesh import AllocationConfig
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
-from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
+from reallm.api.quickstart.model import (
+    get_real_model_config,
+    ModelTrainEvalConfig,
+    OptimizerConfig,
+)
 from reallm.experiments.common.common import CommonExperimentConfig
 
 
@@ -41,9 +50,15 @@ class SFTConfig(CommonExperimentConfig):
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 50
     eval_freq_epochs: Optional[int] = 1
-    model: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
-    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    dataset: PromptAnswerDatasetConfig = dataclasses.field(default_factory=PromptAnswerDatasetConfig)
+    model: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
+    allocation: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
+    dataset: PromptAnswerDatasetConfig = dataclasses.field(
+        default_factory=PromptAnswerDatasetConfig
+    )
 
     @property
     def models(self):
@@ -101,7 +116,9 @@ class SFTConfig(CommonExperimentConfig):
 
     @property
     def eval_dataloader(self):
-        return DataLoader("packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs))
+        return DataLoader(
+            "packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs)
+        )
 
     @property
     def tokenizer_name_or_path(self):

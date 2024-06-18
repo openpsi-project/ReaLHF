@@ -92,7 +92,9 @@ class ZmqRequester(worker_base.WorkerControlPanelRequester):
             try:
                 r = pickle.loads(self.__socket.recv())
             except zmq.error.Again as e:
-                raise TimeoutError(f"Waiting for RPC server response timeout: {e}")
+                raise TimeoutError(
+                    f"Waiting for RPC server response timeout: {e}"
+                )
             if isinstance(r, Exception):
                 logger.error(f"Error configuring worker {self.__worker_name}")
                 raise r
@@ -103,7 +105,9 @@ class ZmqRequester(worker_base.WorkerControlPanelRequester):
         self.__context = zmq.Context()
         self.__context.set(zmq.MAX_SOCKETS, 20480)
 
-    def async_request(self, worker_name, address, command, wait_response=True, **kwargs):
+    def async_request(
+        self, worker_name, address, command, wait_response=True, **kwargs
+    ):
         return self.ZmqFuture(
             pickle.dumps((command, kwargs)),
             self.__context,
@@ -125,11 +129,19 @@ class RayRequester(worker_base.WorkerControlPanelRequester):
             try:
                 return self.__queue.get(timeout=timeout)
             except rq.Empty:
-                raise TimeoutError(f"Waiting for Ray worker {self.__worker_name} response timeout.")
+                raise TimeoutError(
+                    f"Waiting for Ray worker {self.__worker_name} response timeout."
+                )
             except Exception as e:
-                raise RuntimeError(f"Error waiting for Ray queue future {self.__worker_name}.") from e
+                raise RuntimeError(
+                    f"Error waiting for Ray queue future {self.__worker_name}."
+                ) from e
 
-    def __init__(self, request_comms: Dict[str, rq.Queue], reply_comms: Dict[str, rq.Queue]):
+    def __init__(
+        self,
+        request_comms: Dict[str, rq.Queue],
+        reply_comms: Dict[str, rq.Queue],
+    ):
         self.__request_comms: Dict[str, rq.Queue] = request_comms
         self.__reply_comms: Dict[str, rq.Queue] = reply_comms
 
@@ -157,4 +169,6 @@ def make_control(type_, experiment_name, trial_name, **kwargs):
         requester = RayRequester(**kwargs)
     else:
         raise NotImplementedError(type_)
-    return worker_base.WorkerControlPanel(experiment_name, trial_name, requester)
+    return worker_base.WorkerControlPanel(
+        experiment_name, trial_name, requester
+    )

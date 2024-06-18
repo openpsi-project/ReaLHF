@@ -2,9 +2,15 @@ from typing import List
 
 from reallm.api.core.dfg import build_graph as build_dfg
 from reallm.api.core.dfg import ModelInterfaceType, ModelRPC
-from reallm.api.quickstart.device_mesh import DeviceMesh, find_parallel_strategies
+from reallm.api.quickstart.device_mesh import (
+    DeviceMesh,
+    find_parallel_strategies,
+)
 from reallm.api.quickstart.search import ModelRPC, RPCExecution, RPCInstance
-from reallm.search_engine.estimate import estimate_rpc_memory_cost, estimate_rpc_time_cost
+from reallm.search_engine.estimate import (
+    estimate_rpc_memory_cost,
+    estimate_rpc_time_cost,
+)
 
 MEM_INDEX = 1.0  # heuristic value to scale estimated memory
 
@@ -29,15 +35,19 @@ def enumerate_rpc_executions(
             num_mp = parallel.model_parallel_size
             bs = rpc.min_n_seqs
             # seq_len = seq_len
-            min_bs = (2 * num_dp * num_pp *
-                      n_ppo_minibatches if rpc.interface_type == ModelInterfaceType.TRAIN_STEP else num_dp *
-                      num_pp)
+            min_bs = (
+                2 * num_dp * num_pp * n_ppo_minibatches
+                if rpc.interface_type == ModelInterfaceType.TRAIN_STEP
+                else num_dp * num_pp
+            )
             if min_bs > bs:
                 # batch size too small
                 continue
             # heuristic to filter out inherent slow configurations
-            if (num_mp * num_dp > device_mesh.n_gpus_per_node
-                    and rpc.interface_type == ModelInterfaceType.TRAIN_STEP):
+            if (
+                num_mp * num_dp > device_mesh.n_gpus_per_node
+                and rpc.interface_type == ModelInterfaceType.TRAIN_STEP
+            ):
                 continue
             if num_mp > 8:
                 continue
@@ -67,7 +77,16 @@ def enumerate_rpc_executions(
             )
             time_cost = int(time_cost)
             if mem_cost < device_mesh.gpu_memory_capacity:
-                feasible.append(RPCExecution(rpc, sub_device_mesh, parallel, time_cost, mem_cost, static_mem))
+                feasible.append(
+                    RPCExecution(
+                        rpc,
+                        sub_device_mesh,
+                        parallel,
+                        time_cost,
+                        mem_cost,
+                        static_mem,
+                    )
+                )
     return feasible
 
 
@@ -101,12 +120,32 @@ def build_graph(
             parents = []
             if rpc.is_src and epoch_id >= epoch_dependency_interval:
                 for other in rpcs:
-                    if other.is_dst and other.model_name.role == rpc.model_name.role:
-                        parents.append(RPCInstance(rpc, epoch_id - epoch_dependency_interval, [], []))
+                    if (
+                        other.is_dst
+                        and other.model_name.role == rpc.model_name.role
+                    ):
+                        parents.append(
+                            RPCInstance(
+                                rpc,
+                                epoch_id - epoch_dependency_interval,
+                                [],
+                                [],
+                            )
+                        )
             if rpc.is_dst and rpc.model_name.role == rpc.model_name.role:
                 for other in rpcs:
-                    if (other.is_src and epoch_id + epoch_dependency_interval < num_epoch):
-                        children.append(RPCInstance(rpc, epoch_id + epoch_dependency_interval, [], []))
+                    if (
+                        other.is_src
+                        and epoch_id + epoch_dependency_interval < num_epoch
+                    ):
+                        children.append(
+                            RPCInstance(
+                                rpc,
+                                epoch_id + epoch_dependency_interval,
+                                [],
+                                [],
+                            )
+                        )
             for parent in rpc.parents:
                 p = rpc_names_mapping[parent]
                 parents.append(RPCInstance(p, epoch_id, [], []))

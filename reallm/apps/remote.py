@@ -13,8 +13,18 @@ import torch
 
 multiprocessing.set_start_method("spawn", force=True)
 
-from reallm.api.quickstart.entrypoint import QUICKSTART_CONFIG_CLASSES, QUICKSTART_EXPR_CACHE_PATH
-from reallm.base import cluster, gpu_utils, importing, logging, name_resolve, names
+from reallm.api.quickstart.entrypoint import (
+    QUICKSTART_CONFIG_CLASSES,
+    QUICKSTART_EXPR_CACHE_PATH,
+)
+from reallm.base import (
+    cluster,
+    gpu_utils,
+    importing,
+    logging,
+    name_resolve,
+    names,
+)
 
 RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
@@ -28,7 +38,9 @@ def _patch_external_impl(exp_name, trial_name):
             target_cache_name = f"{exp_name}_{trial_name}.json"
             if exp_cache != target_cache_name:
                 continue
-            cache_file = os.path.join(QUICKSTART_EXPR_CACHE_PATH, target_cache_name)
+            cache_file = os.path.join(
+                QUICKSTART_EXPR_CACHE_PATH, target_cache_name
+            )
             with open(cache_file, "r") as f:
                 cache = json.load(f)
             usercode_path = cache["usercode_path"]
@@ -38,26 +50,36 @@ def _patch_external_impl(exp_name, trial_name):
             importing.import_usercode(usercode_path, "_reallm_user_code")
             # Register the internal experiment.
             exp_cls = QUICKSTART_CONFIG_CLASSES[config_name]
-            system_api.register_experiment(exp_name, functools.partial(exp_cls, **exp_cls_args))
+            system_api.register_experiment(
+                exp_name, functools.partial(exp_cls, **exp_cls_args)
+            )
+
 
 def main_worker(args):
     import reallm.base.constants as constants
+
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
     _patch_external_impl(args.experiment_name, args.trial_name)
 
-    worker_index_start = args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
+    worker_index_start = (
+        args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
+    )
     worker_index_end = min(
         worker_index_start + args.wprocs_per_jobstep,
         args.wprocs_in_job + args.wproc_offset,
     )
 
     group_name = f"{args.worker_type}-{args.worker_submission_index}"
-    logger.debug(f"{args.worker_type} group id {args.jobstep_id}, "
-                 f"worker index {worker_index_start}:{worker_index_end}")
+    logger.debug(
+        f"{args.worker_type} group id {args.jobstep_id}, "
+        f"worker index {worker_index_start}:{worker_index_end}"
+    )
 
     # Isolate within the same slurm job, among different jobsteps.
     if torch.cuda.is_initialized():
-        raise RuntimeError("CUDA already initialized before isolating CUDA devices. This should not happen.")
+        raise RuntimeError(
+            "CUDA already initialized before isolating CUDA devices. This should not happen."
+        )
     gpu_utils.isolate_cuda_device(
         group_name,
         args.jobstep_id,
@@ -66,7 +88,9 @@ def main_worker(args):
         args.trial_name,
     )
     if os.environ.get("CUDA_VISIBLE_DEVICES", None):
-        logger.debug("CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"])
+        logger.debug(
+            "CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"]
+        )
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     # profiler.import_profiler_registers()
@@ -76,7 +100,8 @@ def main_worker(args):
 
     logger.debug(f"Run {args.worker_type} worker with args: %s", args)
     assert not args.experiment_name.startswith(
-        "/"), f'Invalid experiment_name "{args.experiment_name}" starts with "/"'
+        "/"
+    ), f'Invalid experiment_name "{args.experiment_name}" starts with "/"'
     if args.wprocs_per_jobstep == 1:
         reallm.system.run_worker(
             worker_type=args.worker_type,
@@ -95,7 +120,9 @@ def main_worker(args):
                 worker_name=f"{args.worker_type}/{wid}",
                 worker_server_type="zmq",
             )
-            p = multiprocessing.Process(target=reallm.system.run_worker, kwargs=worker_args)
+            p = multiprocessing.Process(
+                target=reallm.system.run_worker, kwargs=worker_args
+            )
             p.name = f"{args.worker_type}/{wid}"
             p.start()
             workers.append(p)
@@ -156,9 +183,18 @@ def main_controller(args):
             addr = match.group(1)
             logger.info("Found ray address: '%s'", addr)
         else:
-            raise RuntimeError(f"Address not found in ray start output: {output}.")
-        ray_addr_name = names.ray_cluster(args.experiment_name, args.trial_name, "address")
-        name_resolve.add(ray_addr_name, addr, delete_on_exit=True, keepalive_ttl=RAY_HEAD_WAIT_TIME)
+            raise RuntimeError(
+                f"Address not found in ray start output: {output}."
+            )
+        ray_addr_name = names.ray_cluster(
+            args.experiment_name, args.trial_name, "address"
+        )
+        name_resolve.add(
+            ray_addr_name,
+            addr,
+            delete_on_exit=True,
+            keepalive_ttl=RAY_HEAD_WAIT_TIME,
+        )
 
     controller = system.make_controller(
         type_=args.type,
@@ -171,13 +207,14 @@ def main_controller(args):
         ignore_worker_error=args.ignore_worker_error,
     )
 
-
     if args.type == "ray":
         subprocess.check_output(f"ray stop", shell=True)
 
 
 def main_ray(args):
-    ray_addr_name = names.ray_cluster(args.experiment_name, args.trial_name, "address")
+    ray_addr_name = names.ray_cluster(
+        args.experiment_name, args.trial_name, "address"
+    )
     try:
         address = name_resolve.wait(ray_addr_name, timeout=RAY_HEAD_WAIT_TIME)
     except TimeoutError:
@@ -186,7 +223,9 @@ def main_ray(args):
 
     cmd = f"ray start {' '.join(ray_flags)}"
     _ = subprocess.check_output(cmd, shell=True).decode("ascii")
-    logger.info(f"Successfully launched nodes for {args.worker_type} in Ray cluster.")
+    logger.info(
+        f"Successfully launched nodes for {args.worker_type} in Ray cluster."
+    )
 
     host_ip = socket.gethostbyname(socket.gethostname())
     name_resolve.add(
@@ -202,7 +241,9 @@ def main_ray(args):
 
     while True:
         try:
-            ray_exiting_name = names.ray_cluster(args.experiment_name, args.trial_name, "exiting")
+            ray_exiting_name = names.ray_cluster(
+                args.experiment_name, args.trial_name, "exiting"
+            )
             try:
                 name_resolve.wait(ray_exiting_name, timeout=10)
                 break
@@ -219,11 +260,15 @@ def main():
     subparsers = parser.add_subparsers(dest="cmd", help="sub-command help")
     subparsers.required = True
 
-    subparser = subparsers.add_parser("controller", help="run a controller of experiment")
+    subparser = subparsers.add_parser(
+        "controller", help="run a controller of experiment"
+    )
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
     subparser.add_argument("--ignore_worker_error", action="store_true")
-    subparser.add_argument("--raise_worker_error", dest="ignore_worker_error", action="store_false")
+    subparser.add_argument(
+        "--raise_worker_error", dest="ignore_worker_error", action="store_false"
+    )
     subparser.add_argument("--type", type=str, default="zmq")
     subparser.add_argument("--ray_port", type=int, default=8777)
     subparser.set_defaults(feature=False)
@@ -280,7 +325,9 @@ def main():
     )
     subparser.set_defaults(func=main_worker)
 
-    subparser = subparsers.add_parser("ray", help="launch ray cluster write ray address to name_resolve")
+    subparser = subparsers.add_parser(
+        "ray", help="launch ray cluster write ray address to name_resolve"
+    )
     subparser.add_argument("--experiment_name", "-e", type=str, required=True)
     subparser.add_argument("--trial_name", "-f", type=str, required=True)
     subparser.add_argument("--worker_type", "-w", type=str, required=True)

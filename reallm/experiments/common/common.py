@@ -8,10 +8,19 @@ from omegaconf import MISSING
 import numpy as np
 
 from reallm.api.core.config import Dataset
-from reallm.api.core.dfg import ModelInterfaceType, ModelRPC, OffloadHook, SyncParamHook
+from reallm.api.core.dfg import (
+    ModelInterfaceType,
+    ModelRPC,
+    OffloadHook,
+    SyncParamHook,
+)
 from reallm.api.core.system_api import *
-from reallm.api.quickstart.device_mesh import (AllocationConfig, DeviceMesh, make_device_mesh_from_name,
-                                               RPCAllocation)
+from reallm.api.quickstart.device_mesh import (
+    AllocationConfig,
+    DeviceMesh,
+    make_device_mesh_from_name,
+    RPCAllocation,
+)
 from reallm.api.quickstart.model import ModelTrainEvalConfig
 from reallm.experiments.common.check import *
 from reallm.experiments.common.utils import *
@@ -120,11 +129,15 @@ class CommonExperimentConfig(Experiment):
 
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
-        raise NotImplementedError(f"models is not implemented in {self.__class__}")
+        raise NotImplementedError(
+            f"models is not implemented in {self.__class__}"
+        )
 
     @property
     def rpcs(self) -> Dict[str, ModelRPC]:
-        raise NotImplementedError(f"rpcs is not implemented in {self.__class__}")
+        raise NotImplementedError(
+            f"rpcs is not implemented in {self.__class__}"
+        )
 
     @property
     def datasets(self) -> List[Dataset]:
@@ -140,11 +153,15 @@ class CommonExperimentConfig(Experiment):
 
     @property
     def tokenizer_name_or_path(self) -> str:
-        raise NotImplementedError(f"tokenizer_name_or_path is not implemented in {self.__class__}")
+        raise NotImplementedError(
+            f"tokenizer_name_or_path is not implemented in {self.__class__}"
+        )
 
     @property
     def exp_ctrl(self) -> ExperimentSaveEvalControl:
-        raise NotImplementedError(f"expr_ctrl is not implemented in {self.__class__}")
+        raise NotImplementedError(
+            f"expr_ctrl is not implemented in {self.__class__}"
+        )
 
     @property
     def max_prompt_len(self) -> int:
@@ -163,17 +180,23 @@ class CommonExperimentConfig(Experiment):
         return DeviceMesh(
             n_nodes=self.n_nodes,
             n_gpus_per_node=self.n_gpus_per_node,
-            mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
+            mapping=np.ones(
+                (self.n_nodes, self.n_gpus_per_node), dtype=np.int32
+            ),
             global_mesh_name=self.nodelist,
             name=self.nodelist,
         )
 
     def _heuristic_rpc_allocation(self) -> List[RPCAllocation]:
-        raise NotImplementedError(f"_heuristic_rpc_allocation is not implemented in {self.__class__}")
+        raise NotImplementedError(
+            f"_heuristic_rpc_allocation is not implemented in {self.__class__}"
+        )
 
     def _search(self):
         # called in both api.main and controller
-        gradient_checkpointing = any(model.gradient_checkpointing for model in self.models.values())
+        gradient_checkpointing = any(
+            model.gradient_checkpointing for model in self.models.values()
+        )
         rpc_allocs: List[RPCAllocation] = search_rpc_allocations(
             device_mesh=self.global_device_mesh,
             rpcs=list(self.rpcs.values()),
@@ -187,25 +210,31 @@ class CommonExperimentConfig(Experiment):
         return ExperimentScheduling(
             master_worker=TasksGroup(
                 count=1,
-                scheduling=Scheduling.master_worker_default(cpu=4, mem=20000, nodelist=self.nodelist),
+                scheduling=Scheduling.master_worker_default(
+                    cpu=4, mem=20000, nodelist=self.nodelist
+                ),
             ),
             model_worker=TasksGroup(
                 count=self.n_nodes * self.n_gpus_per_node,
-                scheduling=Scheduling.model_worker_default(cpu=4,
-                                                           gpu=1,
-                                                           gpu_type="tesla",
-                                                           mem=100000,
-                                                           nodelist=self.nodelist),
+                scheduling=Scheduling.model_worker_default(
+                    cpu=4,
+                    gpu=1,
+                    gpu_type="tesla",
+                    mem=100000,
+                    nodelist=self.nodelist,
+                ),
             ),
         )
 
     def initial_setup(self) -> ExperimentConfig:
         if self.allocation_mode == "manual" and self.nodelist is None:
-            logger.warning("Warning: Nodelist is not set in manual allocation mode, "
-                           "in this case you cannot specify device mesh for each model RPC. "
-                           "All model RPC will be allocated on GPUs automatically "
-                           f"allocated according to n_nodes {self.n_nodes} "
-                           f"and n_gpus_per_node {self.n_gpus_per_node}.")
+            logger.warning(
+                "Warning: Nodelist is not set in manual allocation mode, "
+                "in this case you cannot specify device mesh for each model RPC. "
+                "All model RPC will be allocated on GPUs automatically "
+                f"allocated according to n_nodes {self.n_nodes} "
+                f"and n_gpus_per_node {self.n_gpus_per_node}."
+            )
         self.__check_legal_experiment()
 
         rpcs = self.rpcs
@@ -224,32 +253,49 @@ class CommonExperimentConfig(Experiment):
                         break
                 else:
                     raise ValueError(f"RPC {rpc_alloc.rpc} not found in rpcs.")
-        elif (self.allocation_mode == "pipe_data" or self.allocation_mode == "pipe_model"):
+        elif (
+            self.allocation_mode == "pipe_data"
+            or self.allocation_mode == "pipe_model"
+        ):
             rpc_allocs: List[RPCAllocation] = [
                 RPCAllocation(
                     rpc=rpc,
                     device_mesh=self.global_device_mesh,
                     parallel=ParallelismConfig(
-                        data_parallel_size=(self.n_gpus_per_node
-                                            if self.allocation_mode == "pipe_data" else 1),
+                        data_parallel_size=(
+                            self.n_gpus_per_node
+                            if self.allocation_mode == "pipe_data"
+                            else 1
+                        ),
                         pipeline_parallel_size=self.n_nodes,
-                        model_parallel_size=(self.n_gpus_per_node
-                                             if self.allocation_mode == "pipe_model" else 1),
-                        use_sequence_parallel=(rpc.interface_type == ModelInterfaceType.TRAIN_STEP
-                                               and self.allocation_mode == "pipe_model"),
+                        model_parallel_size=(
+                            self.n_gpus_per_node
+                            if self.allocation_mode == "pipe_model"
+                            else 1
+                        ),
+                        use_sequence_parallel=(
+                            rpc.interface_type == ModelInterfaceType.TRAIN_STEP
+                            and self.allocation_mode == "pipe_model"
+                        ),
                     ),
-                ) for rpc in self.rpcs.values()
+                )
+                for rpc in self.rpcs.values()
             ]
         elif self.allocation_mode == "manual":
             rpc_allocs: List[RPCAllocation] = [
                 RPCAllocation(
                     rpc=rpc,
-                    device_mesh=(make_device_mesh_from_name(
-                        self.nodelist,
-                        self.allocations[rpc_type].device_mesh,
-                    ) if self.allocations[rpc_type].device_mesh is not None else self.global_device_mesh),
+                    device_mesh=(
+                        make_device_mesh_from_name(
+                            self.nodelist,
+                            self.allocations[rpc_type].device_mesh,
+                        )
+                        if self.allocations[rpc_type].device_mesh is not None
+                        else self.global_device_mesh
+                    ),
                     parallel=self.allocations[rpc_type].parallel,
-                ) for rpc_type, rpc in self.rpcs.items()
+                )
+                for rpc_type, rpc in self.rpcs.items()
             ]
         elif self.allocation_mode == "heuristic":
             rpc_allocs: List[RPCAllocation] = self._heuristic_rpc_allocation()
@@ -257,16 +303,22 @@ class CommonExperimentConfig(Experiment):
             raise NotImplementedError()
 
         shard_counter = defaultdict(lambda: 0)
-        resolve_rpc_hooks(rpc_allocs)  # inplace modify ModelRPCs in rpc allocations
+        resolve_rpc_hooks(
+            rpc_allocs
+        )  # inplace modify ModelRPCs in rpc allocations
         import pprint
 
         pprint.pprint(rpc_allocs)
 
-        model_name_to_rpc_allocs: Dict[ModelName, List[RPCAllocation]] = defaultdict(list)
+        model_name_to_rpc_allocs: Dict[ModelName, List[RPCAllocation]] = (
+            defaultdict(list)
+        )
         for rpc_alloc in rpc_allocs:
             model_name_to_rpc_allocs[rpc_alloc.rpc.model_name].append(rpc_alloc)
 
-        for i, j in itertools.product(range(self.n_nodes), range(self.n_gpus_per_node)):
+        for i, j in itertools.product(
+            range(self.n_nodes), range(self.n_gpus_per_node)
+        ):
             mw = ModelWorker(
                 seed=self.seed,
                 shards=[],
@@ -277,26 +329,47 @@ class CommonExperimentConfig(Experiment):
             )
             # print(f"Setting up ModelWorker ({i},{j})")
 
-            for model_name, model_rpc_allocs in model_name_to_rpc_allocs.items():
+            for (
+                model_name,
+                model_rpc_allocs,
+            ) in model_name_to_rpc_allocs.items():
                 rpcs = [rpc_alloc.rpc for rpc_alloc in model_rpc_allocs]
                 rpc_alloc = model_rpc_allocs[0]
                 model_cfg = self.models[model_name.role]
                 model = make_model_config(model_cfg)
                 mapping = rpc_alloc.device_mesh.mapping
-                gradient_checkpointing = model_cfg.gradient_checkpointing and any(
-                    rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs)
+                gradient_checkpointing = (
+                    model_cfg.gradient_checkpointing
+                    and any(
+                        rpc.interface_type == ModelInterfaceType.TRAIN_STEP
+                        for rpc in rpcs
+                    )
+                )
 
                 topo = get_topo(
                     rpc_alloc.parallel,
                     gradient_checkpointing=gradient_checkpointing,
-                    max_prompt_len=(self.max_prompt_len if any(
-                        rpc.interface_type == ModelInterfaceType.GENERATE for rpc in rpcs) else None),
+                    max_prompt_len=(
+                        self.max_prompt_len
+                        if any(
+                            rpc.interface_type == ModelInterfaceType.GENERATE
+                            for rpc in rpcs
+                        )
+                        else None
+                    ),
                 )
 
-                if any(rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs):
-                    backend = make_train_backend_config(model_cfg, rpc_alloc.parallel)
+                if any(
+                    rpc.interface_type == ModelInterfaceType.TRAIN_STEP
+                    for rpc in rpcs
+                ):
+                    backend = make_train_backend_config(
+                        model_cfg, rpc_alloc.parallel
+                    )
                 else:
-                    backend = make_inf_backend_config(model_cfg, rpc_alloc.parallel)
+                    backend = make_inf_backend_config(
+                        model_cfg, rpc_alloc.parallel
+                    )
 
                 # print(f"model name {model_name}, device mesh name {rpc_alloc.device_mesh.name},"
                 #       f"mapping {mapping}")
@@ -318,7 +391,8 @@ class CommonExperimentConfig(Experiment):
                             backend=backend,
                             eval_datasets=self.eval_datasets,
                             eval_dataloader=self.eval_dataloader,
-                        ))
+                        )
+                    )
                     shard_counter[model_name] += 1
             model_worker.append(mw)
 
@@ -330,28 +404,41 @@ class CommonExperimentConfig(Experiment):
 
     def __check_legal_experiment(self):
         if self.n_nodes > 1 and self.mode == "local":
-            raise ValueError("Cannot run multi-node experiment in local mode, "
-                             "please setup slurm for distributed runs.")
+            raise ValueError(
+                "Cannot run multi-node experiment in local mode, "
+                "please setup slurm for distributed runs."
+            )
 
         if self.n_gpus_per_node != 8 and self.allocation_mode in [
-                "search",
-                "heuristic",
+            "search",
+            "heuristic",
         ]:
-            raise ValueError(f"Cannot run search or heuristic allocation with "
-                             f"n_gpus_per_node {self.n_gpus_per_node}, "
-                             "please set n_gpus_per_node to 8.")
+            raise ValueError(
+                f"Cannot run search or heuristic allocation with "
+                f"n_gpus_per_node {self.n_gpus_per_node}, "
+                "please set n_gpus_per_node to 8."
+            )
 
         for rpc_name, rpc in self.rpcs.items():
-            if not check_is_reallm_native_model_interface(rpc.interface_impl.type_) and self.allocation_mode in [
-                "search", "heuristic"
-            ]:
-                raise ValueError(f"RPC {rpc.name} interface is not a Reallm native implementation. "
-                                 f"Search and heuristic allocation mode are not available.")
-            if self.allocation_mode == "manual" and rpc_name not in self.allocations:
+            if not check_is_reallm_native_model_interface(
+                rpc.interface_impl.type_
+            ) and self.allocation_mode in ["search", "heuristic"]:
+                raise ValueError(
+                    f"RPC {rpc.name} interface is not a Reallm native implementation. "
+                    f"Search and heuristic allocation mode are not available."
+                )
+            if (
+                self.allocation_mode == "manual"
+                and rpc_name not in self.allocations
+            ):
                 if rpc_name not in self.allocations:
-                    raise ValueError(f"RPC {rpc_name} is not in allocations, please implement "
-                                     f"`allocations()` method in your config class to enable "
-                                     f"manual allocation.")
+                    raise ValueError(
+                        f"RPC {rpc_name} is not in allocations, please implement "
+                        f"`allocations()` method in your config class to enable "
+                        f"manual allocation."
+                    )
 
             if rpc.model_name.role not in self.models.keys():
-                raise ValueError(f"RPC {rpc.name} model name {rpc.model_name.role} is not in models.")
+                raise ValueError(
+                    f"RPC {rpc.name} model name {rpc.model_name.role} is not in models."
+                )

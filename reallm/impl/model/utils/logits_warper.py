@@ -19,7 +19,8 @@ class LogitsWarper:
         inplace: bool = False,
     ) -> torch.FloatTensor:
         raise NotImplementedError(
-            f"{self.__class__} is an abstract class. Only classes inheriting this class can be called.")
+            f"{self.__class__} is an abstract class. Only classes inheriting this class can be called."
+        )
 
 
 @dataclasses.dataclass
@@ -52,10 +53,16 @@ class TopPLogitsWarper(LogitsWarper):
     def __post_init__(self):
         self.top_p = top_p = float(self.top_p)
         if top_p < 0 or top_p > 1.0:
-            raise ValueError(f"`top_p` has to be a float > 0 and < 1, but is {top_p}")
-        if not isinstance(self.min_tokens_to_keep, int) or (self.min_tokens_to_keep < 1):
-            raise ValueError(f"`min_tokens_to_keep` has to be a positive integer, "
-                             f"but is {self.min_tokens_to_keep}")
+            raise ValueError(
+                f"`top_p` has to be a float > 0 and < 1, but is {top_p}"
+            )
+        if not isinstance(self.min_tokens_to_keep, int) or (
+            self.min_tokens_to_keep < 1
+        ):
+            raise ValueError(
+                f"`min_tokens_to_keep` has to be a positive integer, "
+                f"but is {self.min_tokens_to_keep}"
+            )
 
     def __call__(
         self,
@@ -69,10 +76,12 @@ class TopPLogitsWarper(LogitsWarper):
         # Remove tokens with cumulative top_p above the threshold (token with 0 are kept)
         sorted_indices_to_remove = cumulative_probs <= (1 - self.top_p)
         # Keep at least min_tokens_to_keep
-        sorted_indices_to_remove[..., -self.min_tokens_to_keep:] = 0
+        sorted_indices_to_remove[..., -self.min_tokens_to_keep :] = 0
 
         # scatter sorted tensors to original indexing
-        indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+        indices_to_remove = sorted_indices_to_remove.scatter(
+            -1, sorted_indices, sorted_indices_to_remove
+        )
         self.filter_value = torch.finfo(logits.dtype).min
         if inplace:
             logits.masked_fill_(indices_to_remove, self.filter_value)
@@ -92,7 +101,9 @@ class TopKLogitsWarper(LogitsWarper):
         min_tokens_to_keep = self.min_tokens_to_keep
         self.top_k = max(top_k, min_tokens_to_keep)
         if not isinstance(top_k, int) or top_k <= 0:
-            raise ValueError(f"`top_k` has to be a strictly positive integer, but is {top_k}")
+            raise ValueError(
+                f"`top_k` has to be a strictly positive integer, but is {top_k}"
+            )
 
     def __call__(
         self,
@@ -121,12 +132,17 @@ class EpsilonLogitsWarper(LogitsWarper):
         self.epsilon = epsilon = float(self.epsilon)
         epsilon = float(epsilon)
         if epsilon <= 0 or epsilon >= 1:
-            raise ValueError(f"`eta_cutoff` has to be a float > 0 and < 1, but is {epsilon}")
+            raise ValueError(
+                f"`eta_cutoff` has to be a float > 0 and < 1, but is {epsilon}"
+            )
 
-        self.min_tokens_to_keep = min_tokens_to_keep = int(self.min_tokens_to_keep)
+        self.min_tokens_to_keep = min_tokens_to_keep = int(
+            self.min_tokens_to_keep
+        )
         if min_tokens_to_keep < 1:
             raise ValueError(
-                f"`min_tokens_to_keep` has to be a strictly positive integer, but is {min_tokens_to_keep}")
+                f"`min_tokens_to_keep` has to be a strictly positive integer, but is {min_tokens_to_keep}"
+            )
 
     def __call__(
         self,
@@ -137,12 +153,16 @@ class EpsilonLogitsWarper(LogitsWarper):
         # Calculate the adaptive cutoff
         probabilities = logits.softmax(dim=-1)
         entropy = torch.distributions.Categorical(logits).entropy()
-        eta = torch.min(self.epsilon, torch.sqrt(self.epsilon) * torch.exp(-entropy))[..., None]
+        eta = torch.min(
+            self.epsilon, torch.sqrt(self.epsilon) * torch.exp(-entropy)
+        )[..., None]
         indices_to_remove = probabilities < eta
 
         # Keep the words with the 'min_tokens_to_keep'-highest probabilities
         top_k = min(self.min_tokens_to_keep, logits.size(-1))  # Safety check
-        indices_to_remove = indices_to_remove & (logits < torch.topk(logits, top_k)[0][..., -1, None])
+        indices_to_remove = indices_to_remove & (
+            logits < torch.topk(logits, top_k)[0][..., -1, None]
+        )
 
         self.filter_value = torch.finfo(logits.dtype).min
         if inplace:
@@ -197,5 +217,8 @@ def top_k_top_p_logits(
     if top_k >= logits.shape[-1]:
         return TopPLogitsWarper(top_p=top_p)(None, logits, inplace=inplace)
     warper_fn = unioned_logits_wraper if not ordered else chained_logits_wraper
-    p = warper_fn([TopKLogitsWarper(top_k=top_k), TopPLogitsWarper(top_p=top_p)], inplace=inplace)
+    p = warper_fn(
+        [TopKLogitsWarper(top_k=top_k), TopPLogitsWarper(top_p=top_p)],
+        inplace=inplace,
+    )
     return p(None, logits)

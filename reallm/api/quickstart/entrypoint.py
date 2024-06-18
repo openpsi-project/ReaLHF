@@ -13,22 +13,30 @@ from omegaconf import MISSING, OmegaConf
 import hydra
 import omegaconf
 
-from reallm.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
+from reallm.base.constants import (
+    LOG_ROOT,
+    MODEL_SAVE_ROOT,
+    QUICKSTART_EXPR_CACHE_PATH,
+)
 from reallm.base.slurm_utils import check_slurm_availability
 import reallm.api.core.system_api as system_api
 
 
 def kind_reminder(config_name, logger, args):
     logger.info(f"Running {config_name} experiment.")
-    logger.info(f"Logs will be dumped to {os.path.join(LOG_ROOT, args.experiment_name, args.trial_name)}")
+    logger.info(
+        f"Logs will be dumped to {os.path.join(LOG_ROOT, args.experiment_name, args.trial_name)}"
+    )
     logger.info(
         f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
     )
 
     slurm_available = check_slurm_availability()
     if slurm_available:
-        logger.warning("Slurm is available. You probably run the system on ctrl nodes. "
-                       "Using slurm to launch remote workers.")
+        logger.warning(
+            "Slurm is available. You probably run the system on ctrl nodes. "
+            "Using slurm to launch remote workers."
+        )
     else:
         logger.warning("Slurm is not available. Using local mode.")
     mode = "slurm" if slurm_available else "local"
@@ -42,7 +50,9 @@ QUICKSTART_FN = {}
 
 
 def register_quickstart_exp(config_name: str, exp_cls: Callable):
-    usercode_path = os.path.abspath(inspect.getfile(inspect.currentframe().f_back))
+    usercode_path = os.path.abspath(
+        inspect.getfile(inspect.currentframe().f_back)
+    )
 
     @hydra.main(version_base=None, config_name=config_name)
     def run(args):
@@ -53,7 +63,9 @@ def register_quickstart_exp(config_name: str, exp_cls: Callable):
 
         exp_name = args.experiment_name
         if args.trial_name == MISSING:
-            args.trial_name = trial_name = (f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}")
+            args.trial_name = trial_name = (
+                f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+            )
         else:
             trial_name = args.trial_name
         from reallm.apps.main import main_start, main_stop
@@ -63,11 +75,17 @@ def register_quickstart_exp(config_name: str, exp_cls: Callable):
         exp_fn = functools.partial(exp_cls, **args)
 
         os.makedirs(os.path.dirname(QUICKSTART_EXPR_CACHE_PATH), exist_ok=True)
-        cache_file = os.path.join(QUICKSTART_EXPR_CACHE_PATH, f"{exp_name}_{trial_name}.json")
+        cache_file = os.path.join(
+            QUICKSTART_EXPR_CACHE_PATH, f"{exp_name}_{trial_name}.json"
+        )
         with open(cache_file, "w") as f:
             dict_args = OmegaConf.to_container(args)
             json.dump(
-                dict(args=dict_args, usercode_path=usercode_path, config_name=config_name),
+                dict(
+                    args=dict_args,
+                    usercode_path=usercode_path,
+                    config_name=config_name,
+                ),
                 f,
                 indent=4,
                 ensure_ascii=False,

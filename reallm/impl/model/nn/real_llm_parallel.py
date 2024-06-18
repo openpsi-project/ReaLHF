@@ -47,7 +47,9 @@ def tensor_slice_partition_fn(
         splits = [tensor for _ in range(mp_world_size)]
     else:
         assert tensor.shape[dim] % mp_world_size == 0
-        splits = torch.split(tensor, tensor.shape[dim] // mp_world_size, dim=dim)
+        splits = torch.split(
+            tensor, tensor.shape[dim] // mp_world_size, dim=dim
+        )
     if mp_rank is None:
         return [s.contiguous() for s in splits]
     else:
@@ -77,19 +79,25 @@ def intervals_partition_fn(
     if len(shape) == 1:
         assert dim == 0
         partition_size = shape[0] // mp_world_size
-        return np.array([(partition_size * mp_rank, partition_size * (mp_rank + 1))], dtype=np.int64)
+        return np.array(
+            [(partition_size * mp_rank, partition_size * (mp_rank + 1))],
+            dtype=np.int64,
+        )
     else:
         assert len(shape) == 2, shape
         if dim == 0:
             row_start = mp_rank * shape[0] // mp_world_size
             row_end = (mp_rank + 1) * shape[0] // mp_world_size
-            return np.array([(row_start * shape[1], row_end * shape[1])], dtype=np.int64)
+            return np.array(
+                [(row_start * shape[1], row_end * shape[1])], dtype=np.int64
+            )
         else:
             assert dim == 1
             col_start = mp_rank * shape[1] // mp_world_size
             col_end = (mp_rank + 1) * shape[1] // mp_world_size
-            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[1] + np.array([(col_start, col_end)],
-                                                                                      dtype=np.int64)
+            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[
+                1
+            ] + np.array([(col_start, col_end)], dtype=np.int64)
 
 
 def shape_partition_fn(
@@ -105,7 +113,10 @@ def shape_partition_fn(
         if dim < 0:
             dim = len(shape) + dim
         assert shape[dim] % mp_world_size == 0
-        splits = [(*shape[:dim], shape[dim] // mp_world_size, *shape[dim + 1:]) for _ in range(mp_world_size)]
+        splits = [
+            (*shape[:dim], shape[dim] // mp_world_size, *shape[dim + 1 :])
+            for _ in range(mp_world_size)
+        ]
     if mp_rank is None:
         return [s for s in splits]
     else:
@@ -128,15 +139,21 @@ def mp_partition_key(
         assert "weight" in key
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif key == f"{config.n_layers + 1}.weight":  # output head
-        if (isinstance(tensor_or_shape, torch.Tensor)
-                and tensor_or_shape.shape[0] == 1) or (not isinstance(tensor_or_shape, torch.Tensor)
-                                                       and tensor_or_shape[0] == 1):
+        if (
+            isinstance(tensor_or_shape, torch.Tensor)
+            and tensor_or_shape.shape[0] == 1
+        ) or (
+            not isinstance(tensor_or_shape, torch.Tensor)
+            and tensor_or_shape[0] == 1
+        ):
             assert config.is_critic
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
         else:
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([ck in key for ck in COLUMN_LINEAR_KEYS]):
-        if (("k_attn" in key) or ("v_attn" in key)) and config.n_kv_heads % mp_size != 0:
+        if (
+            ("k_attn" in key) or ("v_attn" in key)
+        ) and config.n_kv_heads % mp_size != 0:
             # logger.warning(f"Cannot split {config.n_kv_heads} kv heads evenly among "
             #                f"{mp_size} model parallel ranks, "
             #                f"use unsplitted linear for kv heads instead")
@@ -171,13 +188,20 @@ def mp_partition_real_model_state_dict(
         new_state_dict[k] = mp_partition_key(k, v, mp_rank, mp_size, config)
 
     if mp_rank is None:
-        return [{k: v[mp_rank] for k, v in new_state_dict.items()} for mp_rank in range(mp_size)]
+        return [
+            {k: v[mp_rank] for k, v in new_state_dict.items()}
+            for mp_rank in range(mp_size)
+        ]
     else:
         return new_state_dict
 
 
-def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_size: int,
-                               sequence_parallel: bool) -> Tuple:
+def get_real_model_param_shape(
+    k: str,
+    config: model_api.ReaLModelConfig,
+    mp_size: int,
+    sequence_parallel: bool,
+) -> Tuple:
     if "wte.weight" in k:
         assert config.vocab_size % mp_size == 0
         return (config.vocab_size // mp_size, config.hidden_dim)
@@ -193,7 +217,10 @@ def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_siz
             assert config.vocab_size % mp_size == 0
             return (config.vocab_size // mp_size, config.hidden_dim)
         else:
-            return (config.vocab_size if not config.is_critic else 1, config.hidden_dim)
+            return (
+                config.vocab_size if not config.is_critic else 1,
+                config.hidden_dim,
+            )
     elif any([ck in k for ck in COLUMN_LINEAR_KEYS]):
         if "k_attn" in k or "v_attn" in k:
             if "weight" in k:
@@ -203,7 +230,10 @@ def get_real_model_param_shape(k: str, config: model_api.ReaLModelConfig, mp_siz
                         config.hidden_dim,
                     )
                 else:
-                    return (config.head_dim * config.n_kv_heads, config.hidden_dim)
+                    return (
+                        config.head_dim * config.n_kv_heads,
+                        config.hidden_dim,
+                    )
             else:
                 assert "bias" in k
                 if config.n_kv_heads % mp_size == 0:
@@ -262,7 +292,9 @@ def mp_merge_real_model_state_dict(
 
     new_state_dict = {}
     for k in state_dicts[0].keys():
-        new_state_dict[k] = mp_merge_key(k, [sd[k] for sd in state_dicts], config)
+        new_state_dict[k] = mp_merge_key(
+            k, [sd[k] for sd in state_dicts], config
+        )
 
     return new_state_dict
 
@@ -271,28 +303,43 @@ def partition_pipeline_layers(
     config: model_api.ReaLModelConfig,
     num_stages: int,
     embed_param_counter: Callable[[model_api.ReaLModelConfig], int],
-    transformer_block_param_counter: Callable[[model_api.ReaLModelConfig, int], int],
+    transformer_block_param_counter: Callable[
+        [model_api.ReaLModelConfig, int], int
+    ],
     head_param_counter: Callable[[model_api.ReaLModelConfig], int],
     method: str = "parameters_balanced",
 ) -> Dict[int, Tuple[int, int]]:
     from deepspeed.runtime import utils as ds_utils
 
-    from reallm.base.datapack import partition_balanced as true_partition_balanced
+    from reallm.base.datapack import (
+        partition_balanced as true_partition_balanced,
+    )
 
     # Each stage gets a simple uniform number of layers.
-    param_counts = ([embed_param_counter(config)] +
-                    [transformer_block_param_counter(config, i)
-                     for i in range(config.n_layers)] + [head_param_counter(config)])
+    param_counts = (
+        [embed_param_counter(config)]
+        + [
+            transformer_block_param_counter(config, i)
+            for i in range(config.n_layers)
+        ]
+        + [head_param_counter(config)]
+    )
     parts = None
     if method == "uniform":
-        parts = ds_utils.partition_uniform(num_items=config.n_layers + 2, num_parts=num_stages)
+        parts = ds_utils.partition_uniform(
+            num_items=config.n_layers + 2, num_parts=num_stages
+        )
     elif method == "parameters":
-        parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
+        parts = ds_utils.partition_balanced(
+            weights=param_counts, num_parts=num_stages
+        )
     elif method == "parameters_balanced":
         param_counts = np.array(param_counts)
         parts = true_partition_balanced(nums=param_counts, k=num_stages)
     else:
-        raise NotImplementedError(f"Partitioning method {method} not implemented.")
+        raise NotImplementedError(
+            f"Partitioning method {method} not implemented."
+        )
 
     stage_to_layer_idx = {}
     for stage in range(num_stages):
@@ -306,7 +353,9 @@ def pipeline_repartition_strategy(
     layer_mapping1: Dict[int, List[int]],
     layer_mapping2: Dict[int, List[int]],
 ):
-    assert set(sum(layer_mapping1.values(), [])) == set(sum(layer_mapping2.values(), []))
+    assert set(sum(layer_mapping1.values(), [])) == set(
+        sum(layer_mapping2.values(), [])
+    )
     assert all(isinstance(i, int) for i in layer_mapping1)
     assert all(isinstance(i, int) for i in layer_mapping2)
 
@@ -316,7 +365,8 @@ def pipeline_repartition_strategy(
     layer_map: Dict[Tuple[int, int], List[int]] = {}
     for pp_rank2, layer_indices2 in layer_mapping2.items():
         for pp_rank1, layer_indices1 in layer_mapping1.items():
-            layer_map[(pp_rank1,
-                       pp_rank2)] = sorted(list(set(layer_indices1).intersection(set(layer_indices2))))
+            layer_map[(pp_rank1, pp_rank2)] = sorted(
+                list(set(layer_indices1).intersection(set(layer_indices2)))
+            )
 
     return layer_map

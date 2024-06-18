@@ -10,13 +10,13 @@ import torch.distributed as dist
 import transformers
 
 from reallm.api.core.model_api import ReaLModelConfig
-# from base.topology import *
-
-
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
 import reallm.base.logging as logging
+
+# from base.topology import *
+
 
 try:
     from flash_attn.bert_padding import unpad_input
@@ -27,8 +27,12 @@ logger = logging.getLogger("profile layers", "system")
 
 
 def make_layers(config: ReaLModelConfig, dtype, device):
-    from reallm.impl.model.nn.real_llm_base import (OutputHead, ReaLModelBlock,
-                                                VocabPositionEmbedding)
+    from reallm.impl.model.nn.real_llm_base import (
+        OutputHead,
+        ReaLModelBlock,
+        VocabPositionEmbedding,
+    )
+
     embedding_layer = VocabPositionEmbedding(
         config,
         dtype=dtype,
@@ -41,7 +45,8 @@ def make_layers(config: ReaLModelConfig, dtype, device):
             output_layernorm=(i == 1),
             dtype=dtype,
             device=device,
-        ) for i in range(1)
+        )
+        for i in range(1)
     ]
     head = OutputHead(
         config.hidden_dim,
@@ -71,7 +76,9 @@ class ProfileLayers:
             type_="deepspeed",
             args=dict(
                 optimizer_name="adam",
-                optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
+                optimizer_config=dict(
+                    lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)
+                ),
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=1,
@@ -97,7 +104,9 @@ class ProfileLayers:
         ]
         self.backend = model_api.make_backend(self.backend_config)
         ft_spec = model_api.FinetuneSpec(10, 100, 10)
-        self.layers = [self.backend.initialize(layer, ft_spec) for layer in self.layers]
+        self.layers = [
+            self.backend.initialize(layer, ft_spec) for layer in self.layers
+        ]
         self.stats = defaultdict(list)
 
     def reset_stats(self):
@@ -112,7 +121,11 @@ class ProfileLayers:
 
     @torch.no_grad()
     def fwd_gen(self, bs, seq_len):
-        from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
+        from reallm.impl.model.nn.real_llm_base import (
+            PipeCacheData,
+            PipeTransferData,
+        )
+
         input_ids = torch.randint(
             0,
             self.config.vocab_size,
@@ -122,10 +135,16 @@ class ProfileLayers:
         )
         attention_mask = torch.ones_like(input_ids, device=self.device)
         # fwd_gen_0
-        packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+        packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(
+            input_ids, attention_mask
+        )
         cu_seqlens = cu_seqlens.to(device=self.device)
         packed_input_ids = packed_input_ids.to(device=self.device)
-        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=int(max_seqlen), store_kv_cache=True)
+        x = PipeTransferData(
+            cu_seqlens=cu_seqlens,
+            max_seqlen=int(max_seqlen),
+            store_kv_cache=True,
+        )
         ys = [PipeCacheData() for _ in range(self.num_layers)]
         ys[0].packed_input_ids = packed_input_ids
 
@@ -134,7 +153,9 @@ class ProfileLayers:
             x: PipeTransferData = layer.module(x, y)
             x.pp_input = x.pp_output
             torch.cuda.synchronize()
-            self.insert_data_point(layer_name, "fwd_gen_0", bs, seq_len, time.monotonic_ns() - st)
+            self.insert_data_point(
+                layer_name, "fwd_gen_0", bs, seq_len, time.monotonic_ns() - st
+            )
 
         prompt_logits = x.pp_output
         logits = prompt_logits[cu_seqlens[1:] - 1]
@@ -143,8 +164,15 @@ class ProfileLayers:
         layer_indices = range(len(ys))
 
         for y, layer_idx in zip(ys[1:-1], layer_indices[1:-1]):
-            assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
-            kvcache_seqlen = max(max_seqlen + self.max_new_tokens, self.hidden_dim // self.head_dim + 10)
+            assert (
+                y.k_cache is not None
+                and y.v_cache is not None
+                and y.cache_seqlens is not None
+            )
+            kvcache_seqlen = max(
+                max_seqlen + self.max_new_tokens,
+                self.hidden_dim // self.head_dim + 10,
+            )
             # fix of a flash attention bug
             k_cache = torch.zeros(
                 (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
@@ -152,8 +180,14 @@ class ProfileLayers:
                 device=self.device,
             )
             v_cache = torch.zeros_like(k_cache)
-            indices = (torch.arange(kvcache_seqlen, device=torch.cuda.current_device(),
-                                    dtype=torch.long)[None, :] < input_lens[:, None])
+            indices = (
+                torch.arange(
+                    kvcache_seqlen,
+                    device=torch.cuda.current_device(),
+                    dtype=torch.long,
+                )[None, :]
+                < input_lens[:, None]
+            )
             k_cache[indices] = y.k_cache
             v_cache[indices] = y.v_cache
             y.k_cache = k_cache
@@ -163,20 +197,34 @@ class ProfileLayers:
         ys[0].cache_seqlens = cache_seqlens
 
         # fwd_gen_1
-        new_tokens = torch.randint(0, self.config.vocab_size, (bs,), dtype=torch.long, device=self.device)
+        new_tokens = torch.randint(
+            0,
+            self.config.vocab_size,
+            (bs,),
+            dtype=torch.long,
+            device=self.device,
+        )
         ys[0].packed_input_ids = new_tokens
         ys[0].packed_position_ids = None
-        x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=self.device)
+        x.cu_seqlens = torch.arange(
+            bs + 1, dtype=torch.int32, device=self.device
+        )
         x.max_seqlen = 1
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             st = time.monotonic_ns()
             x = layer.module(x, y)
             x.pp_input = x.pp_output
             torch.cuda.synchronize()
-            self.insert_data_point(layer_name, "fwd_gen_1", bs, seq_len, time.monotonic_ns() - st)
+            self.insert_data_point(
+                layer_name, "fwd_gen_1", bs, seq_len, time.monotonic_ns() - st
+            )
 
     def fwd_bwd_opt(self, bs, seq_len):
-        from reallm.impl.model.nn.real_llm_base import (PipeCacheData, PipeTransferData)
+        from reallm.impl.model.nn.real_llm_base import (
+            PipeCacheData,
+            PipeTransferData,
+        )
+
         input_ids = torch.randint(
             0,
             self.config.vocab_size,
@@ -185,10 +233,14 @@ class ProfileLayers:
             device=self.device,
         )
         attention_mask = torch.ones_like(input_ids, device=self.device)
-        packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+        packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(
+            input_ids, attention_mask
+        )
         cu_seqlens = cu_seqlens.to(device=self.device)
         packed_input_ids = packed_input_ids.to(device=self.device)
-        x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=False)
+        x = PipeTransferData(
+            cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=False
+        )
         ys = [PipeCacheData() for _ in range(self.num_layers)]
         ys[0].packed_input_ids = packed_input_ids
 
@@ -197,19 +249,29 @@ class ProfileLayers:
             st = time.monotonic_ns()
             x: PipeTransferData = layer.module(x, y)
             torch.cuda.synchronize()
-            self.insert_data_point(layer_name, "fwd", bs, seq_len, time.monotonic_ns() - st)
+            self.insert_data_point(
+                layer_name, "fwd", bs, seq_len, time.monotonic_ns() - st
+            )
             # bwd
-            r = torch.rand(*x.pp_output.shape, device=x.pp_output.device, dtype=x.pp_output.dtype)
+            r = torch.rand(
+                *x.pp_output.shape,
+                device=x.pp_output.device,
+                dtype=x.pp_output.dtype,
+            )
             loss = torch.max(x.pp_output * r)
             st = time.monotonic_ns()
             layer.module.backward(loss)
             torch.cuda.synchronize()
-            self.insert_data_point(layer_name, "bwd", bs, seq_len, time.monotonic_ns() - st)
+            self.insert_data_point(
+                layer_name, "bwd", bs, seq_len, time.monotonic_ns() - st
+            )
             # opt
             st = time.monotonic_ns()
             layer.module.step()
             torch.cuda.synchronize()
-            self.insert_data_point(layer_name, "opt", bs, seq_len, time.monotonic_ns() - st)
+            self.insert_data_point(
+                layer_name, "opt", bs, seq_len, time.monotonic_ns() - st
+            )
             x.pp_input = x.pp_output.clone().detach()
 
     def make_dataframe_and_print(self):
@@ -223,7 +285,9 @@ class ProfileLayers:
             constants.PROFILER_CACHE_PATH,
             "layer_stats",
         )
-        dump_path = os.path.join(dump_dir, self.model_name, f"layer-stats_{world_size}_{rank}.pkl")
+        dump_path = os.path.join(
+            dump_dir, self.model_name, f"layer-stats_{world_size}_{rank}.pkl"
+        )
         os.makedirs(os.path.dirname(dump_path), exist_ok=True)
 
         with open(dump_path, "wb") as f:
@@ -239,6 +303,7 @@ def make_profile_layers(
     hf_model_type: str = "llama",
 ):
     from reallm.impl.model.nn.real_llm_api import ReaLModel
+
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
     elif dtype == "bf16":
@@ -248,10 +313,16 @@ def make_profile_layers(
     else:
         raise NotImplementedError(f"Unsupported dtype {dtype}")
     tokenizer = None
-    config: ReaLModelConfig = getattr(ReaLModel, f"config_from_{hf_model_type}")(model_path=model_path,)
+    config: ReaLModelConfig = getattr(
+        ReaLModel, f"config_from_{hf_model_type}"
+    )(
+        model_path=model_path,
+    )
     if tokenizer is None:
         tokenizer = model_api.load_hf_tokenizer(model_path)
 
-    profile_layers = ProfileLayers(model_name, config, tokenizer=tokenizer, dtype=dtype, device=device)
+    profile_layers = ProfileLayers(
+        model_name, config, tokenizer=tokenizer, dtype=dtype, device=device
+    )
 
     return profile_layers

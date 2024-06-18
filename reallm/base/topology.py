@@ -9,7 +9,9 @@ import reallm.base.logging as logging
 
 logger = logging.getLogger("Topology")
 
-GLOBAL_PROCESS_GROUP_REGISTRY: Dict[Tuple[Tuple[int], str], torch.distributed.ProcessGroup] = {}
+GLOBAL_PROCESS_GROUP_REGISTRY: Dict[
+    Tuple[Tuple[int], str], torch.distributed.ProcessGroup
+] = {}
 
 
 def new_or_get_group(ranks: List[int], backend=None):
@@ -19,7 +21,9 @@ def new_or_get_group(ranks: List[int], backend=None):
     global GLOBAL_PROCESS_GROUP_REGISTRY
     key = (ranks, backend)
     if key not in GLOBAL_PROCESS_GROUP_REGISTRY:
-        GLOBAL_PROCESS_GROUP_REGISTRY[key] = torch.distributed.new_group(ranks, backend=backend)
+        GLOBAL_PROCESS_GROUP_REGISTRY[key] = torch.distributed.new_group(
+            ranks, backend=backend
+        )
     return GLOBAL_PROCESS_GROUP_REGISTRY[key]
 
 
@@ -70,8 +74,10 @@ class ProcessTopology:
         try:
             self.ProcessCoord = PROCESS_COORD_REGISTRY["#".join(axes)]
         except KeyError as e:
-            raise KeyError(f"Corresponding coordinate namedtuple not implemented for axes {axes}. "
-                           "Check base/topology.py and implement explicitly.") from e
+            raise KeyError(
+                f"Corresponding coordinate namedtuple not implemented for axes {axes}. "
+                "Check base/topology.py and implement explicitly."
+            ) from e
 
         self.mapping = {}
         ranges = [range(d) for d in dims]
@@ -100,17 +106,23 @@ class ProcessTopology:
             1
         """
         if len(coord_kwargs) != len(self.axes):
-            raise ValueError("get_rank() does not support slices. Use filter_match())")
+            raise ValueError(
+                "get_rank() does not support slices. Use filter_match())"
+            )
 
         key = self.ProcessCoord(**coord_kwargs)
-        assert (key in self.mapping), f"key {coord_kwargs} invalid, mapping: {self.mapping}, key: {key}"
+        assert (
+            key in self.mapping
+        ), f"key {coord_kwargs} invalid, mapping: {self.mapping}, key: {key}"
         return self.mapping[key]
 
     def get_axis_names(self):
         """Return a list of the axis names in the ordering of the topology."""
         return self.axes
 
-    def get_rank_repr(self, rank, omit_axes=["data", "pipe"], inner_sep="_", outer_sep="-"):
+    def get_rank_repr(
+        self, rank, omit_axes=["data", "pipe"], inner_sep="_", outer_sep="-"
+    ):
         """Return a string representation of a rank.
 
         This method is primarily used for checkpointing model data.
@@ -248,7 +260,9 @@ class ProcessTopology:
         # This could be faster by generating the desired keys directly instead of
         # filtering.
         axis_num = self.axes.index(axis)
-        ranks = [self.mapping[k] for k in self.mapping.keys() if k[axis_num] == idx]
+        ranks = [
+            self.mapping[k] for k in self.mapping.keys() if k[axis_num] == idx
+        ]
         return ranks
 
     def world_size(self):
@@ -285,7 +299,9 @@ class PipeModelDataParallelTopology(ProcessTopology):
         gradient_checkpointing: bool,
         max_prompt_len: Optional[int] = None,
     ):
-        super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
+        super().__init__(
+            axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp]
+        )
 
         self.sequence_parallel = sequence_parallel
         self.gradient_checkpointing = gradient_checkpointing
@@ -344,7 +360,11 @@ class ParallelGrid:
         self.pipe_parallel_size = max(self._topo.get_dim("pipe"), 1)
         self.model_parallel_size = max(self._topo.get_dim("model"), 1)
         self.slice_parallel_size = self.model_parallel_size
-        assert self._is_grid_valid(), ("Invalid Grid", topology, self.world_size)
+        assert self._is_grid_valid(), (
+            "Invalid Grid",
+            topology,
+            self.world_size,
+        )
 
         self.stage_id = self.get_stage_id()
         self.data_parallel_id = self.get_data_parallel_id()
@@ -354,7 +374,9 @@ class ParallelGrid:
         self.ds_model_rank = -1
         for dp in range(self.data_parallel_size):
             ranks = sorted(self._topo.get_axis_list(axis="data", idx=dp))
-            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
+            proc_group = new_or_get_group(
+                ranks=[rank_mapping[rank] for rank in ranks]
+            )
             if self.global_rank in ranks:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
@@ -372,7 +394,9 @@ class ParallelGrid:
         self.dp_proc_group = self.dp_proc_group_gloo = None
         for g in self.dp_groups:
             proc_group = new_or_get_group(ranks=[rank_mapping[x] for x in g])
-            proc_group_gloo = new_or_get_group(ranks=[rank_mapping[x] for x in g], backend="gloo")
+            proc_group_gloo = new_or_get_group(
+                ranks=[rank_mapping[x] for x in g], backend="gloo"
+            )
             if self.global_rank in g:
                 self.dp_group = g
                 self.dp_proc_group = proc_group
@@ -392,7 +416,9 @@ class ParallelGrid:
         self.position_embedding_proc_group = None
         self.pipe_groups = self._topo.get_axis_comm_lists("pipe")
         for ranks in self.pipe_groups:
-            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
+            proc_group = new_or_get_group(
+                ranks=[rank_mapping[rank] for rank in ranks]
+            )
             if self.global_rank in ranks:
                 self.pp_group = ranks
                 self.pp_proc_group = proc_group
@@ -404,13 +430,16 @@ class ParallelGrid:
                 position_embedding_ranks = [ranks[0]]
             else:
                 embedding_ranks = position_embedding_ranks = ranks
-            embedding_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in embedding_ranks])
+            embedding_group = new_or_get_group(
+                ranks=[rank_mapping[rank] for rank in embedding_ranks]
+            )
             if self.global_rank in embedding_ranks:
                 self.embedding_proc_group = embedding_group
 
             # TODO: support pipline_model_parallel_split_rank
             position_embedding_group = new_or_get_group(
-                ranks=[rank_mapping[rank] for rank in position_embedding_ranks])
+                ranks=[rank_mapping[rank] for rank in position_embedding_ranks]
+            )
             if self.global_rank in position_embedding_ranks:
                 self.position_embedding_proc_group = position_embedding_group
 
@@ -434,7 +463,9 @@ class ParallelGrid:
         self.tp_dp_proc_group = None
         for pp in range(self.pipe_parallel_size):
             ranks = sorted(self._topo.get_axis_list(axis="pipe", idx=pp))
-            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
+            proc_group = new_or_get_group(
+                ranks=[rank_mapping[rank] for rank in ranks]
+            )
             if self.global_rank in ranks:
                 self.tp_dp_proc_group = proc_group
 
@@ -460,7 +491,9 @@ class ParallelGrid:
                 if rank in l:
                     idx = l.index(rank)
                     buddy_rank = l[(idx + 1) % self.pipe_parallel_size]
-                    p2p_lists.append([self.rank_mapping[rank], self.rank_mapping[buddy_rank]])
+                    p2p_lists.append(
+                        [self.rank_mapping[rank], self.rank_mapping[buddy_rank]]
+                    )
                     break  # next global rank
         assert len(p2p_lists) == self.world_size
         return p2p_lists
@@ -560,7 +593,11 @@ class FakeGrid:
         self.pp_id = self.coord.pipe
         self.mp_id = self.coord.model
 
-        self.world_size = (self.data_parallel_size * self.pipe_parallel_size * self.model_parallel_size)
+        self.world_size = (
+            self.data_parallel_size
+            * self.pipe_parallel_size
+            * self.model_parallel_size
+        )
 
     def get_pipe_parallel_group(self):
         raise RuntimeError("No groups in fake grid.")

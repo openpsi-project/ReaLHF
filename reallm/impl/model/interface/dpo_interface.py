@@ -27,15 +27,25 @@ def _dpo_loss_from_model_outputs(
     **kwargs,
 ):
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
+    logprobs = gather_packed_shifted_log_probs(
+        logits, cu_seqlens, packed_input_ids
+    ).float()
 
     assert (prompt_lens > 0).all(), prompt_lens
     logprob_sum = []
     offset = 0
     for i in range(prompt_lens.shape[0]):
-        logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i] - 1].sum())
+        logprob_sum.append(
+            logprobs[
+                offset + prompt_lens[i] - 1 : offset + input_lens[2 * i] - 1
+            ].sum()
+        )
         offset += input_lens[2 * i] - 1
-        logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i + 1] - 1].sum())
+        logprob_sum.append(
+            logprobs[
+                offset + prompt_lens[i] - 1 : offset + input_lens[2 * i + 1] - 1
+            ].sum()
+        )
         offset += input_lens[2 * i + 1] - 1
     assert offset == sum(input_lens) - input_lens.shape[0], (
         offset,
@@ -53,12 +63,26 @@ def _dpo_loss_from_model_outputs(
 
     # Logging.
     logging_loss = (loss * prompt_lens.shape[0]).detach()
-    n_seqs = torch.tensor([prompt_lens.shape[0]], dtype=torch.float32, device=loss.device)
-    dist.all_reduce(n_seqs, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(pos_score, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(neg_score, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(logging_loss, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(kl, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    n_seqs = torch.tensor(
+        [prompt_lens.shape[0]], dtype=torch.float32, device=loss.device
+    )
+    dist.all_reduce(
+        n_seqs, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
+    )
+    dist.all_reduce(
+        pos_score, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
+    )
+    dist.all_reduce(
+        neg_score, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
+    )
+    dist.all_reduce(
+        logging_loss,
+        op=dist.ReduceOp.SUM,
+        group=constants.data_parallel_group(),
+    )
+    dist.all_reduce(
+        kl, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
+    )
 
     return loss, dict(
         loss=logging_loss,
@@ -81,11 +105,16 @@ class DPOInterface(model_api.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         n_pairs = data["pos_input_lens"].shape[0]
-        pair_lens = torch.tensor(data.metadata["seqlens"], dtype=torch.int32, device=model.device)
+        pair_lens = torch.tensor(
+            data.metadata["seqlens"], dtype=torch.int32, device=model.device
+        )
         input_lens: torch.IntTensor = torch.stack(
-            [data["pos_input_lens"], pair_lens - data["pos_input_lens"]], 1).view(-1)
+            [data["pos_input_lens"], pair_lens - data["pos_input_lens"]], 1
+        ).view(-1)
         prompt_lens: torch.IntTensor = data["prompt_lens"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)]).int()
+        cu_seqlens = torch.cat(
+            [input_lens.new_zeros(1), input_lens.cumsum(0)]
+        ).int()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
@@ -99,15 +128,29 @@ class DPOInterface(model_api.ModelInterface):
         if logits is None:
             return None
 
-        logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_input_ids"]).float()
+        logprobs = gather_packed_shifted_log_probs(
+            logits, cu_seqlens, data["packed_input_ids"]
+        ).float()
 
         assert (prompt_lens > 0).all(), prompt_lens
         logprob_sum = []
         offset = 0
         for i in range(prompt_lens.shape[0]):
-            logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i] - 1].sum())
+            logprob_sum.append(
+                logprobs[
+                    offset + prompt_lens[i] - 1 : offset + input_lens[2 * i] - 1
+                ].sum()
+            )
             offset += input_lens[2 * i] - 1
-            logprob_sum.append(logprobs[offset + prompt_lens[i] - 1:offset + input_lens[2 * i + 1] - 1].sum())
+            logprob_sum.append(
+                logprobs[
+                    offset
+                    + prompt_lens[i]
+                    - 1 : offset
+                    + input_lens[2 * i + 1]
+                    - 1
+                ].sum()
+            )
             offset += input_lens[2 * i + 1] - 1
         assert offset == sum(input_lens) - input_lens.shape[0], (
             offset,
@@ -123,11 +166,17 @@ class DPOInterface(model_api.ModelInterface):
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        pair_lens = torch.tensor(data.metadata["seqlens"], dtype=torch.int32, device=model.device)
+        pair_lens = torch.tensor(
+            data.metadata["seqlens"], dtype=torch.int32, device=model.device
+        )
         neg_input_lens = pair_lens - data["pos_input_lens"]
-        input_lens: torch.Tensor = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(-1)
+        input_lens: torch.Tensor = torch.stack(
+            [data["pos_input_lens"], neg_input_lens], 1
+        ).view(-1)
         prompt_lens: torch.IntTensor = data["prompt_lens"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
+        cu_seqlens = torch.cat(
+            [input_lens.new_zeros(1), input_lens.cumsum(0)], 0
+        ).int()
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module = model.module

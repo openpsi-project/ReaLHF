@@ -35,7 +35,9 @@ def upcast_softmax(x: torch.Tensor, scale: float, softmax_dtype: torch.dtype):
 
 
 @torch.jit.script
-def masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor):
+def masked_softmax(
+    x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor
+):
     x = torch.where(mask, x, mask_value)
     x = torch.nn.functional.softmax(x, dim=-1)
     return x
@@ -46,8 +48,11 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     total_seqlen, n_kv_heads, head_dim = x.shape
     if n_rep == 1:
         return x
-    return (x[:, :, None, :].expand(total_seqlen, n_kv_heads, n_rep,
-                                    head_dim).reshape(total_seqlen, n_kv_heads * n_rep, head_dim))
+    return (
+        x[:, :, None, :]
+        .expand(total_seqlen, n_kv_heads, n_rep, head_dim)
+        .reshape(total_seqlen, n_kv_heads * n_rep, head_dim)
+    )
 
 
 def mask_eos_token(
@@ -60,7 +65,9 @@ def mask_eos_token(
     return logits
 
 
-def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
+def gather_shifted_log_probs(
+    logits: torch.FloatTensor, labels: torch.LongTensor
+) -> torch.FloatTensor:
     """Gather log probs of shifted labels from logits.
 
     Args:
@@ -79,7 +86,9 @@ def gather_shifted_log_probs(logits: torch.FloatTensor, labels: torch.LongTensor
     return log_probs_labels.squeeze(-1)
 
 
-def build_shift_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) -> torch.IntTensor:
+def build_shift_one_indices(
+    x: torch.HalfTensor, cu_seqlens: torch.IntTensor
+) -> torch.IntTensor:
     """Build indices for shifting labels/input_ids one step to the left.
 
     Equivalent to:
@@ -106,12 +115,20 @@ def build_shift_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) ->
     total_seqlen = x.shape[0]
     bs = cu_seqlens.shape[0] - 1
     short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
-    short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
-    indexing_t = torch.arange(total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device)
-    return indexing_t + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0)
+    short1cu_seqlens = torch.nn.functional.pad(
+        short1lens.cumsum(0), (1, 0), value=0
+    )
+    indexing_t = torch.arange(
+        total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device
+    )
+    return indexing_t + (
+        indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)
+    ).sum(0)
 
 
-def build_leave_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) -> torch.IntTensor:
+def build_leave_one_indices(
+    x: torch.HalfTensor, cu_seqlens: torch.IntTensor
+) -> torch.IntTensor:
     """Build indices for leaving one token out at the end of each sequence.
 
     Equivalent to:
@@ -138,13 +155,24 @@ def build_leave_one_indices(x: torch.HalfTensor, cu_seqlens: torch.IntTensor) ->
     total_seqlen = x.shape[0]
     bs = cu_seqlens.shape[0] - 1
     short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
-    short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
-    indexing_t = torch.arange(total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device)
-    return (indexing_t + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0) - 1)
+    short1cu_seqlens = torch.nn.functional.pad(
+        short1lens.cumsum(0), (1, 0), value=0
+    )
+    indexing_t = torch.arange(
+        total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device
+    )
+    return (
+        indexing_t
+        + (indexing_t.unsqueeze(0) >= short1cu_seqlens[:-1].unsqueeze(1)).sum(0)
+        - 1
+    )
 
 
-def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch.Tensor,
-                                    labels: torch.LongTensor) -> torch.FloatTensor:
+def gather_packed_shifted_log_probs(
+    logits: torch.FloatTensor,
+    cu_seqlens: torch.Tensor,
+    labels: torch.LongTensor,
+) -> torch.FloatTensor:
     """Gather log probs from packed input_ids and logits.
 
     Args:
@@ -164,9 +192,13 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
         # NOTE: logprobs is freaking sensitive to input_ids. If the input sequence is a natural sequence, everything will be fine.
         # However, if we input random token IDs, parallel cross entropy can produce VERY different results than the normal
         # torch.gather based version (e.g., the maximum absolute different can reach ~50).
-        from reallm.impl.model.parallelism.model_parallel.modules import vocab_parallel_cross_entropy
+        from reallm.impl.model.parallelism.model_parallel.modules import (
+            vocab_parallel_cross_entropy,
+        )
 
-        logprobs = -vocab_parallel_cross_entropy(logits, labels)[leave_one_indices]
+        logprobs = -vocab_parallel_cross_entropy(logits, labels)[
+            leave_one_indices
+        ]
         ########### sanity check ###########
         # world_size = constants.model_parallel_world_size()
         # dim_size = [logits.shape[1] * world_size, logits.shape[0]]
@@ -192,9 +224,13 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
     # ])
     # shift labels one step to the left and pad it to match the shape of logits
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-    log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
+    log_probs_labels = log_probs.gather(
+        dim=-1, index=labels.unsqueeze(-1)
+    ).squeeze(-1)
     log_probs_labels = log_probs_labels[leave_one_indices]
-    assert log_probs_labels.shape[0] == logits_shape[0] - cu_seqlens.shape[0] + 1, (
+    assert (
+        log_probs_labels.shape[0] == logits_shape[0] - cu_seqlens.shape[0] + 1
+    ), (
         log_probs_labels.shape,
         logits_shape,
         cu_seqlens.shape,
@@ -205,14 +241,19 @@ def gather_packed_shifted_log_probs(logits: torch.FloatTensor, cu_seqlens: torch
 
 
 def apply_logits_mask(logits: torch.HalfTensor, mask: torch.BoolTensor):
-    assert mask.shape[-1] == logits.shape[-1] * constants.model_parallel_world_size(), (
+    assert (
+        mask.shape[-1]
+        == logits.shape[-1] * constants.model_parallel_world_size()
+    ), (
         constants.model_parallel_world_size(),
         logits.shape,
         mask.shape,
     )
     parallel_vocab_size = logits.shape[-1]
     mp_rank = constants.model_parallel_rank()
-    mask = mask[:, mp_rank * parallel_vocab_size:(mp_rank + 1) * parallel_vocab_size]
+    mask = mask[
+        :, mp_rank * parallel_vocab_size : (mp_rank + 1) * parallel_vocab_size
+    ]
     logits.masked_fill_(mask, torch.finfo(logits.dtype).min)
 
 
@@ -251,7 +292,9 @@ def masked_normalization(
     if dim is None:
         dim = tuple(range(len(x.shape)))
     if mask is None:
-        factor = torch.tensor(np.prod([x.shape[d] for d in dim]), dtype=dtype, device=x.device)
+        factor = torch.tensor(
+            np.prod([x.shape[d] for d in dim]), dtype=dtype, device=x.device
+        )
     else:
         mask = mask.to(dtype)
         assert len(mask.shape) == len(x.shape), (mask.shape, x.shape, dim)
@@ -265,9 +308,17 @@ def masked_normalization(
     x_sum = x.sum(dim=dim, keepdim=True)
     x_sum_sq = x.square().sum(dim=dim, keepdim=True)
     if dist.is_initialized():
-        dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-        dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-        dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+        dist.all_reduce(
+            factor, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
+        )
+        dist.all_reduce(
+            x_sum, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
+        )
+        dist.all_reduce(
+            x_sum_sq,
+            op=dist.ReduceOp.SUM,
+            group=constants.data_parallel_group(),
+        )
     mean = x_sum / factor
     meansq = x_sum_sq / factor
     var = meansq - mean**2
@@ -281,17 +332,25 @@ def get_eos_indices(
     tokenizer: transformers.PreTrainedTokenizerFast,
 ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
     if torch.any(input_ids[:, 0] == tokenizer.eos_token_id):
-        indices = (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
+        indices = (
+            (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
+        )
         bad_input_ids = input_ids[indices]
-        bad_strs = tokenizer.batch_decode(bad_input_ids,
-                                          skip_special_tokens=True,
-                                          clean_up_tokenization_spaces=True)
-        raise RuntimeError(f"Generated sequence terminates unexpectedly early: {bad_strs}")
+        bad_strs = tokenizer.batch_decode(
+            bad_input_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True,
+        )
+        raise RuntimeError(
+            f"Generated sequence terminates unexpectedly early: {bad_strs}"
+        )
     seq_len = input_ids.shape[1]
     eos_mask = (input_ids == tokenizer.eos_token_id).float()
     seq_no_eos_mask = (eos_mask.sum(1) == 0).float()
     eos_indices = eos_mask.argmax(1)
-    eos_indices = (eos_indices * (1 - seq_no_eos_mask) + seq_no_eos_mask * (seq_len - 1)).long()
+    eos_indices = (
+        eos_indices * (1 - seq_no_eos_mask) + seq_no_eos_mask * (seq_len - 1)
+    ).long()
     return eos_indices, seq_no_eos_mask
 
 
@@ -336,13 +395,15 @@ def torch_attn_func(
     v = repeat_kv(v, n_rep)  # (total_seqlen, nq, head_dim)
 
     input_lens_k = cu_seqlens_k[1:] - cu_seqlens_k[:-1]
-    attention_mask_k = torch.arange(max_seqlen_k, dtype=torch.long,
-                                    device="cpu").unsqueeze(0) < input_lens_k.unsqueeze(1)
+    attention_mask_k = torch.arange(
+        max_seqlen_k, dtype=torch.long, device="cpu"
+    ).unsqueeze(0) < input_lens_k.unsqueeze(1)
     _, _pad_indices_k, _, _ = unpad_input(attention_mask_k, attention_mask_k)
 
     input_lens_q = cu_seqlens_q[1:] - cu_seqlens_q[:-1]
-    attention_mask_q = torch.arange(max_seqlen_q, dtype=torch.long,
-                                    device="cpu").unsqueeze(0) < input_lens_q.unsqueeze(1)
+    attention_mask_q = torch.arange(
+        max_seqlen_q, dtype=torch.long, device="cpu"
+    ).unsqueeze(0) < input_lens_q.unsqueeze(1)
     _, _pad_indices_q, _, _ = unpad_input(attention_mask_q, attention_mask_q)
 
     q = pad_input(q, _pad_indices_q, bsz, max_seqlen_q)
@@ -354,12 +415,16 @@ def torch_attn_func(
     v = v.transpose(1, 2)
     scores = torch.matmul(q, k.transpose(2, 3)) * softmax_scale
 
-    mask = (attention_mask_k.unsqueeze(1).unsqueeze(1).repeat(1, nq, max_seqlen_q,
-                                                              1))  # [bs, nq, seqlen, seqlen]
+    mask = (
+        attention_mask_k.unsqueeze(1)
+        .unsqueeze(1)
+        .repeat(1, nq, max_seqlen_q, 1)
+    )  # [bs, nq, seqlen, seqlen]
     if causal:
         _ms = max(max_seqlen_q, max_seqlen_k)
-        causal_mask = torch.tril(torch.ones(_ms, _ms, device=q.device, dtype=torch.bool))[-max_seqlen_q:,
-                                                                                          -max_seqlen_k:]
+        causal_mask = torch.tril(
+            torch.ones(_ms, _ms, device=q.device, dtype=torch.bool)
+        )[-max_seqlen_q:, -max_seqlen_k:]
         mask = mask & causal_mask
 
     # if mask_softmax:
@@ -403,8 +468,12 @@ def compute_varlen_position_indices(
     cu_seqlens: torch.IntTensor,
     seqlen_offsets: Optional[torch.IntTensor] = None,
 ) -> torch.IntTensor:
-    indexing_t = torch.arange(total_seqlen, dtype=torch.long, device=cu_seqlens.device).unsqueeze_(0)
-    indexing_t = (cu_seqlens[:-1].unsqueeze(1) <= indexing_t) & (indexing_t < cu_seqlens[1:].unsqueeze(1))
+    indexing_t = torch.arange(
+        total_seqlen, dtype=torch.long, device=cu_seqlens.device
+    ).unsqueeze_(0)
+    indexing_t = (cu_seqlens[:-1].unsqueeze(1) <= indexing_t) & (
+        indexing_t < cu_seqlens[1:].unsqueeze(1)
+    )
     indices = indexing_t.cumsum(1) - 1
     if seqlen_offsets is not None:
         indices += seqlen_offsets.unsqueeze(1)
@@ -422,7 +491,9 @@ def apply_rotary_varlen(
     rotary_indices: Optional[torch.LongTensor] = None,
 ) -> Tuple[torch.HalfTensor, torch.LongTensor]:
     if rotary_indices is None:
-        rotary_indices = compute_varlen_position_indices(x.shape[0], cu_seqlens, seqlen_offsets)
+        rotary_indices = compute_varlen_position_indices(
+            x.shape[0], cu_seqlens, seqlen_offsets
+        )
 
     ro_dim = cos.shape[-1] * 2
     assert ro_dim <= x.shape[-1]
@@ -439,7 +510,8 @@ def apply_rotary_varlen(
     # sin = repeat(sin, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
     return torch.cat(
         [
-            x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin,
+            x[..., :ro_dim] * cos
+            + rotate_half(x[..., :ro_dim], interleaved) * sin,
             x[..., ro_dim:],
         ],
         dim=-1,
@@ -466,7 +538,8 @@ def apply_rotary(
         sin = sin[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
     return torch.cat(
         [
-            x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin,
+            x[..., :ro_dim] * cos
+            + rotate_half(x[..., :ro_dim], interleaved) * sin,
             x[..., ro_dim:],
         ],
         dim=-1,

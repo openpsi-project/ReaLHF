@@ -6,7 +6,11 @@ from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.device_mesh import AllocationConfig
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
-from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, OptimizerConfig
+from reallm.api.quickstart.model import (
+    get_real_model_config,
+    ModelTrainEvalConfig,
+    OptimizerConfig,
+)
 from reallm.experiments.common.common import CommonExperimentConfig
 
 
@@ -50,13 +54,21 @@ class RWConfig(CommonExperimentConfig):
     eval_freq_epochs: Optional[int] = 1
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
-    model: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
-    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    model: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
+    allocation: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
 
-    dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
+    dataset: PairedComparisonDatasetConfig = dataclasses.field(
+        default_factory=PairedComparisonDatasetConfig
+    )
 
     def __post_init__(self):
-        assert (not self.is_sft_lora and self.sft_lora_path is None), "LoRA is not supported for now."
+        assert (
+            not self.is_sft_lora and self.sft_lora_path is None
+        ), "LoRA is not supported for now."
         self.model.init_critic_from_actor = True
 
     @property
@@ -113,7 +125,9 @@ class RWConfig(CommonExperimentConfig):
 
     @property
     def eval_dataloader(self):
-        return DataLoader("packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs))
+        return DataLoader(
+            "packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs)
+        )
 
     @property
     def tokenizer_name_or_path(self):

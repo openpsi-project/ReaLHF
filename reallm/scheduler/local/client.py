@@ -9,7 +9,13 @@ import time
 import psutil
 
 from reallm.base.constants import LOG_ROOT
-from reallm.scheduler.client import JobException, JobInfo, JobState, SchedulerClient, SchedulerError
+from reallm.scheduler.client import (
+    JobException,
+    JobInfo,
+    JobState,
+    SchedulerClient,
+    SchedulerError,
+)
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Local Scheduler")
@@ -42,7 +48,9 @@ for job_state, process_statuses in JOB_STATE_TO_PROCESS_STATUS.items():
         PROCESS_STATUS_TO_JOB_STATE[process_status] = job_state
 
 
-def terminate_process_and_children(pid: int, signal: Optional[Union[str, int]] = None):
+def terminate_process_and_children(
+    pid: int, signal: Optional[Union[str, int]] = None
+):
     if signal is None:
         signal = signal_module.SIGKILL
     if isinstance(signal, str):
@@ -76,7 +84,9 @@ class LocalSchedulerClient(SchedulerClient):
         self._running_worker_types = []
 
         self._gpu_counter = 0
-        self._cuda_devices: List[str] = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+        self._cuda_devices: List[str] = os.environ.get(
+            "CUDA_VISIBLE_DEVICES", ""
+        ).split(",")
 
         self._job_counter: Dict[str, int] = defaultdict(int)
         self._job_with_gpu: Dict[str, bool] = defaultdict(int)
@@ -87,7 +97,8 @@ class LocalSchedulerClient(SchedulerClient):
         if len(self._cuda_devices) < 1:
             raise RuntimeError(
                 f"Local mode can only run when there is at least one GPU. "
-                f"CUDA_VISIBLE_DEVICES is currently set to {os.environ['CUDA_VISIBLE_DEVICES']}.")
+                f"CUDA_VISIBLE_DEVICES is currently set to {os.environ['CUDA_VISIBLE_DEVICES']}."
+            )
 
     def __del__(self):
         self.wait(commit=False)
@@ -107,18 +118,22 @@ class LocalSchedulerClient(SchedulerClient):
         self._job_counter[worker_type] += count
         if worker_type in self._job_with_gpu:
             assert self._job_with_gpu[worker_type] == (
-                gpu > 0), "All workers of the same type must either use GPU or not use GPU."
+                gpu > 0
+            ), "All workers of the same type must either use GPU or not use GPU."
         else:
             self._job_with_gpu[worker_type] = gpu > 0
 
         if worker_type in self._job_env_vars:
-            assert (self._job_env_vars[worker_type] == env_vars
-                    ), "All workers of the same type must have the same env vars."
+            assert (
+                self._job_env_vars[worker_type] == env_vars
+            ), "All workers of the same type must have the same env vars."
         else:
             self._job_env_vars[worker_type] = env_vars
 
         if worker_type in self._job_cmd:
-            assert (self._job_cmd[worker_type] == cmd), "All workers of the same type must have the same cmd."
+            assert (
+                self._job_cmd[worker_type] == cmd
+            ), "All workers of the same type must have the same cmd."
         else:
             self._job_cmd[worker_type] = cmd
 
@@ -127,10 +142,10 @@ class LocalSchedulerClient(SchedulerClient):
 
     def __commit_all(self):
         for worker_type, count, use_gpu, env_vars in zip(
-                self._job_counter.keys(),
-                self._job_counter.values(),
-                self._job_with_gpu.values(),
-                self._job_env_vars.values(),
+            self._job_counter.keys(),
+            self._job_counter.values(),
+            self._job_with_gpu.values(),
+            self._job_env_vars.values(),
         ):
             os.makedirs(
                 os.path.dirname(self.log_path_of(worker_type)),
@@ -139,11 +154,18 @@ class LocalSchedulerClient(SchedulerClient):
             )
             for i in range(count):
                 if use_gpu:
-                    available_device_id = self._gpu_counter % len(self._cuda_devices)
-                    env_vars["CUDA_VISIBLE_DEVICES"] = str(self._cuda_devices[available_device_id])
+                    available_device_id = self._gpu_counter % len(
+                        self._cuda_devices
+                    )
+                    env_vars["CUDA_VISIBLE_DEVICES"] = str(
+                        self._cuda_devices[available_device_id]
+                    )
                     self._gpu_counter += 1
-                cmd = (" ".join(str(k) + "=" + str(v)
-                                for k, v in env_vars.items()) + " stdbuf -oL " + self._job_cmd[worker_type])
+                cmd = (
+                    " ".join(str(k) + "=" + str(v) for k, v in env_vars.items())
+                    + " stdbuf -oL "
+                    + self._job_cmd[worker_type]
+                )
                 # Run `apps.remote` with a single process.
                 # This simulates a multi-prog slurm job with `count` jobsteps, with each jobstep having a single process.
                 cmd = cmd.format(
@@ -164,8 +186,10 @@ class LocalSchedulerClient(SchedulerClient):
         assert any(k.startswith(worker_type) for k in self._jobs)
         keys = [k for k, p in self._jobs.items() if k.startswith(worker_type)]
         procs = [p for k, p in self._jobs.items() if k.startswith(worker_type)]
-        logger.info(f"Stopping local process with signal {signal if signal else 'SIGKILL'}, "
-                    f"pid: {[p.pid for p in procs]}")
+        logger.info(
+            f"Stopping local process with signal {signal if signal else 'SIGKILL'}, "
+            f"pid: {[p.pid for p in procs]}"
+        )
         for p in procs:
             terminate_process_and_children(p.pid, signal=signal)
         for p in procs:
@@ -182,7 +206,9 @@ class LocalSchedulerClient(SchedulerClient):
 
     def find(self, job_name):
         if job_name in self._jobs:
-            return JobInfo(name=job_name, state=JobState.RUNNING, host="localhost")
+            return JobInfo(
+                name=job_name, state=JobState.RUNNING, host="localhost"
+            )
         else:
             return JobInfo(name=job_name, state=JobState.NOT_FOUND)
 
@@ -194,16 +220,16 @@ class LocalSchedulerClient(SchedulerClient):
         return rs
 
     def wait(
-            self,
-            timeout=None,
-            check_status: Tuple[JobState, ...] = (
-                JobState.CANCELLED,
-                JobState.FAILED,
-                JobState.NOT_FOUND,
-            ),
-            remove_status: Tuple[JobState, ...] = (JobState.COMPLETED,),
-            update=False,
-            commit=True,
+        self,
+        timeout=None,
+        check_status: Tuple[JobState, ...] = (
+            JobState.CANCELLED,
+            JobState.FAILED,
+            JobState.NOT_FOUND,
+        ),
+        remove_status: Tuple[JobState, ...] = (JobState.COMPLETED,),
+        update=False,
+        commit=True,
     ):
         if commit:
             self.__commit_all()
@@ -222,14 +248,17 @@ class LocalSchedulerClient(SchedulerClient):
                 num_jobs_left = len(left)
                 logger.info(f"Waiting for {num_jobs_left} jobs.")
             if deadline is not None and time.time() > deadline:
-                raise TimeoutError(f"Timeout waiting for {self.run_name}: {', '.join(sorted(left))}")
+                raise TimeoutError(
+                    f"Timeout waiting for {self.run_name}: {', '.join(sorted(left))}"
+                )
             # update job states
             for job_name in list(left):
                 job = self._jobs[job_name]
                 pid = job.pid
                 process = psutil.Process(pid)
-                self._job_states[job_name] = PROCESS_STATUS_TO_JOB_STATE.get(process.status(),
-                                                                             JobState.NOT_FOUND)
+                self._job_states[job_name] = PROCESS_STATUS_TO_JOB_STATE.get(
+                    process.status(), JobState.NOT_FOUND
+                )
 
             for job_name in list(left):
                 state = self._job_states[job_name]

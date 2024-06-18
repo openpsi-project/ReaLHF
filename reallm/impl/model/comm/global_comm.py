@@ -9,7 +9,14 @@ import torch.distributed
 
 from reallm.api.core import system_api
 from reallm.api.core.config import ModelName
-from reallm.base import constants, gpu_utils, name_resolve, names, network, topology
+from reallm.base import (
+    constants,
+    gpu_utils,
+    name_resolve,
+    names,
+    network,
+    topology,
+)
 
 
 @dataclasses.dataclass
@@ -29,12 +36,20 @@ def filter_match_mwids(
 ) -> List[int]:
     if len(conditions) == 0:
         mwids_this_model = [
-            msid2mwid[system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)]
+            msid2mwid[
+                system_api.ModelShardID.from_parallelism_rank(
+                    model_name, topo, j
+                )
+            ]
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
-            msid2mwid[system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)]
+            msid2mwid[
+                system_api.ModelShardID.from_parallelism_rank(
+                    model_name, topo, j
+                )
+            ]
             for j in topo.filter_match(**conditions)
         ]
     mwids_this_model = sorted(mwids_this_model)
@@ -43,13 +58,15 @@ def filter_match_mwids(
 
 
 def setup_global_comm(
-        expr_name: str,
-        trial_name: str,
-        worker_index: int,
-        model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
-        msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
-        world_size: Optional[int] = None,  # for testing only
-        global_rank: Optional[int] = None,  # for testing only
+    expr_name: str,
+    trial_name: str,
+    worker_index: int,
+    model_topos: Optional[
+        Dict[str, topology.PipeModelDataParallelTopology]
+    ] = None,
+    msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
+    world_size: Optional[int] = None,  # for testing only
+    global_rank: Optional[int] = None,  # for testing only
 ) -> NCCLProcessGroupInfo:
     assert (world_size is None) == (global_rank is None)
     if world_size is None:
@@ -58,9 +75,18 @@ def setup_global_comm(
                 map(
                     int,
                     name_resolve.get_subtree(
-                        names.trainer_ddp_peer(expr_name, trial_name, gpu_utils.GLOBAL_PROCESS_GROUP_NAME)),
-                )))
-        assert len(peers) == len(set(peers)), f"Duplicated trainer worker index. {peers}"
+                        names.trainer_ddp_peer(
+                            expr_name,
+                            trial_name,
+                            gpu_utils.GLOBAL_PROCESS_GROUP_NAME,
+                        )
+                    ),
+                )
+            )
+        )
+        assert len(peers) == len(
+            set(peers)
+        ), f"Duplicated trainer worker index. {peers}"
         world_size = len(peers)
         global_rank = peers.index(worker_index)
 
@@ -68,15 +94,26 @@ def setup_global_comm(
     if model_topos is not None:
         assert msid2mwid is not None
         for model_name, topo in model_topos.items():
-            mw_ranks[model_name] = filter_match_mwids(model_name, topo, msid2mwid)
+            mw_ranks[model_name] = filter_match_mwids(
+                model_name, topo, msid2mwid
+            )
 
-    if ("GPU_DEVICES_ISOLATED" not in os.environ and "RAY" not in os.environ["REAL_MODE"]):
-        raise RuntimeError("GPU devices not isolated in slurm or local mode. This should not happen.")
+    if (
+        "GPU_DEVICES_ISOLATED" not in os.environ
+        and "RAY" not in os.environ["REAL_MODE"]
+    ):
+        raise RuntimeError(
+            "GPU devices not isolated in slurm or local mode. This should not happen."
+        )
 
-    assert len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1, os.environ["CUDA_VISIBLE_DEVICES"]
+    assert len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1, os.environ[
+        "CUDA_VISIBLE_DEVICES"
+    ]
     local_gpu_id = int(os.environ["CUDA_VISIBLE_DEVICES"])
 
-    ddp_master_name = names.trainer_ddp_master(expr_name, trial_name, gpu_utils.GLOBAL_PROCESS_GROUP_NAME)
+    ddp_master_name = names.trainer_ddp_master(
+        expr_name, trial_name, gpu_utils.GLOBAL_PROCESS_GROUP_NAME
+    )
 
     if worker_index == 0:
         host_ip = socket.gethostbyname(socket.gethostname())
@@ -88,7 +125,8 @@ def setup_global_comm(
             ddp_init_address = name_resolve.wait(ddp_master_name, timeout=300)
         except TimeoutError:
             raise TimeoutError(
-                f"global_rank={global_rank} worker_index={worker_index} wait for ddp_init_method timeout.")
+                f"global_rank={global_rank} worker_index={worker_index} wait for ddp_init_method timeout."
+            )
 
     torch_dist_kwargs = dict(
         world_size=world_size,
@@ -96,16 +134,24 @@ def setup_global_comm(
         init_method=ddp_init_address,
         backend="nccl",
     )
-    torch.cuda.set_device(0)  # initialize CUDA here with only a single visible device
+    torch.cuda.set_device(
+        0
+    )  # initialize CUDA here with only a single visible device
     # This environment variable is used by DeepSpeed.
     os.environ["LOCAL_RANK"] = "0"
 
-    torch.distributed.init_process_group(**torch_dist_kwargs, group_name=gpu_utils.GLOBAL_PROCESS_GROUP_NAME)
+    torch.distributed.init_process_group(
+        **torch_dist_kwargs, group_name=gpu_utils.GLOBAL_PROCESS_GROUP_NAME
+    )
 
     model_groups = {}
     for model_name, ranks in mw_ranks.items():
-        model_groups[model_name] = topology.new_or_get_group(ranks, backend="nccl")
-        constants.set_parallelism_group(model_name, model_groups[model_name], ranks)
+        model_groups[model_name] = topology.new_or_get_group(
+            ranks, backend="nccl"
+        )
+        constants.set_parallelism_group(
+            model_name, model_groups[model_name], ranks
+        )
 
     self_group = None
     for i in range(world_size):

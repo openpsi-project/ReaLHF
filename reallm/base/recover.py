@@ -48,5 +48,7 @@ def load_recover_info() -> Optional[RecoverInfo]:
         with open(RECOVER_INFO_PATH, "rb") as f:
             return pickle.load(f)
     except FileNotFoundError:
-        raise FileNotFoundError(f"Resume info not found at {RECOVER_INFO_PATH}. "
-                                f"This should not be a resumed experiment!")
+        raise FileNotFoundError(
+            f"Resume info not found at {RECOVER_INFO_PATH}. "
+            f"This should not be a resumed experiment!"
+        )

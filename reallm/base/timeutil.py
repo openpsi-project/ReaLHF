@@ -5,14 +5,15 @@ import math
 import threading
 import time
 
-
 INFINITE_DURATION = 60 * 60 * 24 * 365 * 1000
 
 
 class FrequencyControl:
     """An utility to control the execution of code with a time or/and step frequency."""
 
-    def __init__(self, frequency_seconds=None, frequency_steps=None, initial_value=False):
+    def __init__(
+        self, frequency_seconds=None, frequency_steps=None, initial_value=False
+    ):
         """Initialization method of FrequencyControl.
         Args:
             frequency_seconds: Minimal interval between two trigger.
@@ -73,9 +74,15 @@ class FrequencyControl:
             self.__interval_steps = self.__steps - self.__last_steps
             if self.frequency_steps is None and self.frequency_seconds is None:
                 return False
-            if (self.frequency_seconds is not None and self.__interval_seconds < self.frequency_seconds):
+            if (
+                self.frequency_seconds is not None
+                and self.__interval_seconds < self.frequency_seconds
+            ):
                 return False
-            if (self.frequency_steps is not None and self.__interval_steps < self.frequency_steps):
+            if (
+                self.frequency_steps is not None
+                and self.__interval_steps < self.frequency_steps
+            ):
                 return False
             self.__last_time = now
             self.__last_steps = self.__steps
@@ -106,8 +113,6 @@ class EpochStepTimeFreqCtl:
         return x or y or z
 
 
-
-
 @dataclasses.dataclass
 class Scheduler(ABC):
     init_value: float
@@ -121,7 +126,8 @@ class Scheduler(ABC):
         """Get the scheduled value at the current `step`."""
         if step < 0 or step > self.total_iters:
             raise ValueError(
-                f"Scheduler step should be in the interval [0, {self.total_iters}]. Input {step}.")
+                f"Scheduler step should be in the interval [0, {self.total_iters}]. Input {step}."
+            )
         return self._get(step)
 
     def _get(self, step):
@@ -144,7 +150,9 @@ class LinearScheduler(Scheduler):
     end_value: float
 
     def _get(self, step: int) -> float:
-        return (self.end_value - self.init_value) / self.total_iters * step + self.init_value
+        return (
+            self.end_value - self.init_value
+        ) / self.total_iters * step + self.init_value
 
 
 @dataclasses.dataclass
@@ -166,7 +174,10 @@ class CosineDecayScheduler(Scheduler):
 
     def _get(self, step: int) -> float:
         delta = self.init_value - self.end_value
-        return (delta * 0.5 * (1 + math.cos(math.pi / self.total_iters * step)) + self.end_value)
+        return (
+            delta * 0.5 * (1 + math.cos(math.pi / self.total_iters * step))
+            + self.end_value
+        )
 
 
 @dataclasses.dataclass
@@ -188,12 +199,20 @@ class ChainedScheduler:
     def __post_init__(self):
         for i in range(len(self.schedulers) - 1):
             # Float point err 1e-8.
-            if (abs(self.schedulers[i + 1].get(0) - self.schedulers[i].final_value) > 1e-8):
-                raise ValueError(f"Values should be consecutive between "
-                                 f"the {i}-th ({type(self.schedulers[i])}) and "
-                                 f"the {i+1}-th {type(self.schedulers[i+1])} schedulers! "
-                                 f"End value is {self.schedulers[i].final_value} and the "
-                                 f"next init value is {self.schedulers[i + 1].get(0)}.")
+            if (
+                abs(
+                    self.schedulers[i + 1].get(0)
+                    - self.schedulers[i].final_value
+                )
+                > 1e-8
+            ):
+                raise ValueError(
+                    f"Values should be consecutive between "
+                    f"the {i}-th ({type(self.schedulers[i])}) and "
+                    f"the {i+1}-th {type(self.schedulers[i+1])} schedulers! "
+                    f"End value is {self.schedulers[i].final_value} and the "
+                    f"next init value is {self.schedulers[i + 1].get(0)}."
+                )
 
     def get(self, step: int) -> float:
         for s in self.schedulers:

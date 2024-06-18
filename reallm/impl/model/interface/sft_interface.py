@@ -9,7 +9,10 @@ import tqdm
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_generate import GenerationConfig
-from reallm.impl.model.utils.functional import build_shift_one_indices, gather_packed_shifted_log_probs
+from reallm.impl.model.utils.functional import (
+    build_shift_one_indices,
+    gather_packed_shifted_log_probs,
+)
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
 
@@ -23,33 +26,49 @@ def compute_packed_sft_loss(
 ) -> torch.Tensor:
     # **kwargs is used to ensure the correctness of invoking this function
     shift_one_indices = build_shift_one_indices(logits, cu_seqlens)
-    logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
+    logprobs = gather_packed_shifted_log_probs(
+        logits, cu_seqlens, packed_input_ids
+    ).float()
     prompt_mask = prompt_mask[shift_one_indices]
     logprobs = torch.where(prompt_mask, 0, logprobs)
 
     loss_sum = -logprobs.sum()
 
     with torch.no_grad():
-        seqlogp = torch.zeros(cu_seqlens.shape[0] - 1, device=logits.device, dtype=torch.float64)
+        seqlogp = torch.zeros(
+            cu_seqlens.shape[0] - 1, device=logits.device, dtype=torch.float64
+        )
         for i in range(cu_seqlens.shape[0] - 1):
-            m = prompt_mask[cu_seqlens[i] - i:cu_seqlens[i + 1] - i - 1]
-            logp = logprobs[cu_seqlens[i] - i:cu_seqlens[i + 1] - i - 1]
+            m = prompt_mask[cu_seqlens[i] - i : cu_seqlens[i + 1] - i - 1]
+            logp = logprobs[cu_seqlens[i] - i : cu_seqlens[i + 1] - i - 1]
             assert cu_seqlens[i + 1] - i - 1 <= logprobs.shape[0], (
                 cu_seqlens,
                 logprobs.shape,
             )
-            seqlogp[i] = torch.where(m, 0.0, logp).sum() / (m.numel() - m.count_nonzero())
+            seqlogp[i] = torch.where(m, 0.0, logp).sum() / (
+                m.numel() - m.count_nonzero()
+            )
 
     logging_ppl = (-seqlogp).exp().sum()
     token_denorm = prompt_mask.numel() - prompt_mask.count_nonzero()
-    seq_denorm = torch.tensor([cu_seqlens.shape[0] - 1], dtype=torch.float32, device=logits.device)
+    seq_denorm = torch.tensor(
+        [cu_seqlens.shape[0] - 1], dtype=torch.float32, device=logits.device
+    )
 
     # Logging loss and perplexity.
     logging_loss = loss_sum.detach().clone()
     logging_token_denorm = token_denorm.detach().clone().float()
-    dist.all_reduce(logging_ppl, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(logging_loss, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
-    dist.all_reduce(seq_denorm, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    dist.all_reduce(
+        logging_ppl, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
+    )
+    dist.all_reduce(
+        logging_loss,
+        op=dist.ReduceOp.SUM,
+        group=constants.data_parallel_group(),
+    )
+    dist.all_reduce(
+        seq_denorm, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
+    )
     dist.all_reduce(
         logging_token_denorm,
         op=dist.ReduceOp.SUM,
@@ -69,8 +88,12 @@ class SFTInterface(model_api.ModelInterface):
 
     def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data["packed_input_ids"]  # shape [tot_seqlen]
-        prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
+        packed_input_ids: torch.Tensor = data[
+            "packed_input_ids"
+        ]  # shape [tot_seqlen]
+        prompt_mask: torch.BoolTensor = data[
+            "prompt_mask"
+        ]  # shape [tot_seqlen]
         module: deepspeed.DeepSpeedEngine = model.module
 
         module.train()
@@ -78,14 +101,18 @@ class SFTInterface(model_api.ModelInterface):
         seqlens_cpu = data.metadata["seqlens"]
         max_seqlen = max(seqlens_cpu)
         cu_seqlens = torch.nn.functional.pad(
-            torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0),
+            torch.tensor(
+                seqlens_cpu, dtype=torch.int32, device=model.device
+            ).cumsum(0),
             (1, 0),
         )
 
         loss_fn_kwargs = dict(
             prompt_mask=prompt_mask,
-            input_lens=cu_seqlens[1:] -
-            cu_seqlens[:-1],  # this is used to partition other loss_fn_kwargs into microbatches
+            input_lens=cu_seqlens[1:]
+            - cu_seqlens[
+                :-1
+            ],  # this is used to partition other loss_fn_kwargs into microbatches
         )
         stat = module.train_batch(
             seqlens_cpu=seqlens_cpu,
@@ -119,7 +146,11 @@ class SFTInterface(model_api.ModelInterface):
         )
 
     @torch.no_grad()
-    def evaluate(self, model_: model_api.Model, eval_dataloader: torch.utils.data.DataLoader) -> Dict:
+    def evaluate(
+        self,
+        model_: model_api.Model,
+        eval_dataloader: torch.utils.data.DataLoader,
+    ) -> Dict:
         device = model_.device
         module = model_.module
 
@@ -130,12 +161,18 @@ class SFTInterface(model_api.ModelInterface):
             seqlens_cpu = data.metadata["seqlens"]
 
             data = recursive_apply(data, lambda x: x.to(device))
-            packed_input_ids: torch.Tensor = data["packed_input_ids"]  # shape [tot_seqlen]
-            prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
+            packed_input_ids: torch.Tensor = data[
+                "packed_input_ids"
+            ]  # shape [tot_seqlen]
+            prompt_mask: torch.BoolTensor = data[
+                "prompt_mask"
+            ]  # shape [tot_seqlen]
 
             max_seqlen = max(seqlens_cpu)
             cu_seqlens = torch.nn.functional.pad(
-                torch.tensor(seqlens_cpu, dtype=torch.int32, device=model_.device).cumsum(0),
+                torch.tensor(
+                    seqlens_cpu, dtype=torch.int32, device=model_.device
+                ).cumsum(0),
                 (1, 0),
             )
 
@@ -191,7 +228,12 @@ class SFTInterface(model_api.ModelInterface):
 
     # for testing only
     @torch.no_grad()
-    def generate(self, model: model_api.Model, data: NamedArray, gconfig: GenerationConfig) -> NamedArray:
+    def generate(
+        self,
+        model: model_api.Model,
+        data: NamedArray,
+        gconfig: GenerationConfig,
+    ) -> NamedArray:
         module = model.module
 
         module.eval()

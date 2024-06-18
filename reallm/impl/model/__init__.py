@@ -8,6 +8,7 @@ from reallm.api.core.model_api import HF_MODEL_FAMILY_REGISTRY
 from reallm.base.importing import import_module
 from reallm.impl.model.conversion.hf_registry import HFModelRegistry
 from reallm.impl.model.nn.real_llm_api import ReaLModel
+
 # Import all HuggingFace model implementations.
 import reallm.api.from_hf
 
@@ -32,9 +33,15 @@ if torch.cuda.is_available():
 _HF_REGISTRIES = {}
 
 
-def _load_from_hf(model: ReaLModel, registry_name, load_dir: str, init_critic_from_actor: bool):
+def _load_from_hf(
+    model: ReaLModel, registry_name, load_dir: str, init_critic_from_actor: bool
+):
     r = _HF_REGISTRIES[registry_name]
-    setattr(model, "save_to_hf", functools.partial(_save_to_hf, model, registry_name))
+    setattr(
+        model,
+        "save_to_hf",
+        functools.partial(_save_to_hf, model, registry_name),
+    )
     return r.load(model, load_dir, init_critic_from_actor)
 
 
@@ -43,7 +50,9 @@ def _save_to_hf(model: ReaLModel, registry_name, tokenizer, save_dir: str):
     r.save(model, tokenizer, save_dir)
 
 
-def _config_from_hf(registry_name, hf_config=None, model_path=None, is_critic=False):
+def _config_from_hf(
+    registry_name, hf_config=None, model_path=None, is_critic=False
+):
     r = _HF_REGISTRIES[registry_name]
     return r.config_from_hf(hf_config, model_path, is_critic)
 

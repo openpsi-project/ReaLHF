@@ -39,18 +39,30 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         self.max_pairs_per_prompt = max_pairs_per_prompt
 
         self.rng = np.random.RandomState(seed=seed)
-        data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
+        data = data_api.load_shuffle_split_dataset(
+            util, dataset_path, dataset_builder
+        )
 
         prompts = [x["prompt"] for x in data]
 
-        pos_answers = [[x["prompt"] + c + tokenizer.eos_token for c in x["pos_answers"]] for x in data]
-        neg_answers = [[x["prompt"] + c + tokenizer.eos_token for c in x["neg_answers"]] for x in data]
+        pos_answers = [
+            [x["prompt"] + c + tokenizer.eos_token for c in x["pos_answers"]]
+            for x in data
+        ]
+        neg_answers = [
+            [x["prompt"] + c + tokenizer.eos_token for c in x["neg_answers"]]
+            for x in data
+        ]
 
         for a, b in zip(pos_answers, neg_answers):
             if len(a) != len(b):
-                raise RuntimeError("pos_answers and neg_answers must be one-to-one pairs.")
+                raise RuntimeError(
+                    "pos_answers and neg_answers must be one-to-one pairs."
+                )
             if len(a) == 0:
-                raise RuntimeError("pos_answers and neg_answers must be non-empty.")
+                raise RuntimeError(
+                    "pos_answers and neg_answers must be non-empty."
+                )
 
         group_sizes = [len(x) for x in pos_answers]
 
@@ -80,14 +92,27 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         neg_answer_tokens = []
         offset = 0
         for g in group_sizes:
-            pos_answer_tokens.append({k: v[offset:offset + g] for k, v in _pos_answer_tokens.items()})
-            neg_answer_tokens.append({k: v[offset:offset + g] for k, v in _neg_answer_tokens.items()})
+            pos_answer_tokens.append(
+                {
+                    k: v[offset : offset + g]
+                    for k, v in _pos_answer_tokens.items()
+                }
+            )
+            neg_answer_tokens.append(
+                {
+                    k: v[offset : offset + g]
+                    for k, v in _neg_answer_tokens.items()
+                }
+            )
             offset += g
 
         self.pos_answer_tokens: List[List[int]] = pos_answer_tokens
         self.neg_answer_tokens: List[List[int]] = neg_answer_tokens
-        assert (len(self.prompt_tokens["input_ids"]) == len(self.pos_answer_tokens) == len(
-            self.neg_answer_tokens))
+        assert (
+            len(self.prompt_tokens["input_ids"])
+            == len(self.pos_answer_tokens)
+            == len(self.neg_answer_tokens)
+        )
 
     def __len__(self):
         return len(self.pos_answer_tokens)
@@ -96,15 +121,23 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         prompt_len = self.prompt_tokens["length"][idx]
         n_pairs_this_prompt = len(self.pos_answer_tokens[idx]["input_ids"])
         group_size = min(self.max_pairs_per_prompt, n_pairs_this_prompt)
-        pair_indices = self.rng.choice(n_pairs_this_prompt, group_size, replace=False)
+        pair_indices = self.rng.choice(
+            n_pairs_this_prompt, group_size, replace=False
+        )
 
         packed_input_ids = []
         for i in pair_indices:
             packed_input_ids += self.pos_answer_tokens[idx]["input_ids"][i]
             packed_input_ids += self.neg_answer_tokens[idx]["input_ids"][i]
 
-        pos_input_lens = [len(self.pos_answer_tokens[idx]["input_ids"][i]) for i in pair_indices]
-        neg_input_lens = [len(self.neg_answer_tokens[idx]["input_ids"][i]) for i in pair_indices]
+        pos_input_lens = [
+            len(self.pos_answer_tokens[idx]["input_ids"][i])
+            for i in pair_indices
+        ]
+        neg_input_lens = [
+            len(self.neg_answer_tokens[idx]["input_ids"][i])
+            for i in pair_indices
+        ]
 
         input_lens = [x + y for x, y in zip(pos_input_lens, neg_input_lens)]
         assert sum(input_lens) == len(packed_input_ids)
@@ -112,10 +145,18 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         x = NamedArray(
             packed_input_ids=torch.tensor(packed_input_ids, dtype=torch.long),
             pos_input_lens=torch.tensor(pos_input_lens, dtype=torch.int32),
-            group_factor=torch.tensor([1 / group_size for _ in range(group_size)], dtype=torch.float32),
-            prompt_lens=torch.tensor([prompt_len for _ in range(group_size)], dtype=torch.int32),
+            group_factor=torch.tensor(
+                [1 / group_size for _ in range(group_size)], dtype=torch.float32
+            ),
+            prompt_lens=torch.tensor(
+                [prompt_len for _ in range(group_size)], dtype=torch.int32
+            ),
         )
-        assert (x["pos_input_lens"].shape == x["group_factor"].shape == x["prompt_lens"].shape)
+        assert (
+            x["pos_input_lens"].shape
+            == x["group_factor"].shape
+            == x["prompt_lens"].shape
+        )
         assert x["pos_input_lens"].shape[0] == len(input_lens)
         x.register_metadata(seqlens=input_lens)
         return x

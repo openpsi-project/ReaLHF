@@ -10,7 +10,9 @@ def random_sample(bs, seq_len, vocab_size):
 
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(
+        input_ids, attention_mask
+    )
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = reallm.base.namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
@@ -44,4 +46,6 @@ def parse_stats_key(key):
 def load_model_config(model_class: str, model_path: str) -> ReaLModelConfig:
     from reallm.impl.model.nn.real_llm_api import ReaLModel
 
-    return getattr(ReaLModel, f"config_from_{model_class}")(model_path=model_path)
+    return getattr(ReaLModel, f"config_from_{model_class}")(
+        model_path=model_path
+    )

@@ -11,9 +11,15 @@ import torch.distributed as dist
 from reallm.api.core import data_api
 from reallm.base.namedarray import from_dict, NamedArray, recursive_apply
 from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output, GenerationConfig
-from reallm.impl.model.utils.functional import (apply_logits_mask, gather_packed_shifted_log_probs,
-                                                masked_normalization)
+from reallm.impl.model.nn.real_llm_generate import (
+    concat_prompt_to_generation_output,
+    GenerationConfig,
+)
+from reallm.impl.model.utils.functional import (
+    apply_logits_mask,
+    gather_packed_shifted_log_probs,
+    masked_normalization,
+)
 from reallm.impl.model.utils.padding import unpad_input
 import reallm.api.core.model_api as model_api
 import reallm.base.constants as constants
@@ -45,7 +51,9 @@ def _ppo_actor_loss_from_model_outputs(
         apply_logits_mask(logits, logits_mask)
 
     n_tokens = ppo_loss_mask.count_nonzero()
-    logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, packed_input_ids).float()
+    logprobs = gather_packed_shifted_log_probs(
+        logits, cu_seqlens, packed_input_ids
+    ).float()
     loss, ppo_stat = ppo_functional.actor_loss_fn(
         logprobs=logprobs,
         old_logprobs=old_logp,
@@ -85,12 +93,16 @@ def _ppo_actor_loss_from_model_outputs(
     _imp = importance_weight / n_tokens
     _kl = approx_kl / n_tokens
     if early_stop_imp_ratio is not None and _imp > early_stop_imp_ratio:
-        logger.warning(f"Current importance ratio {_imp.item():.4f} is larger "
-                       f"than early stop threshold {early_stop_imp_ratio}. Abandon this minibatch.")
+        logger.warning(
+            f"Current importance ratio {_imp.item():.4f} is larger "
+            f"than early stop threshold {early_stop_imp_ratio}. Abandon this minibatch."
+        )
         loss = loss * 0.0
     if early_stop_kl is not None and _kl > early_stop_kl:
-        logger.warning(f"Current approximate KL divergence {_kl.item():.4f} is larger "
-                       f"than early stop threshold {early_stop_kl}. Abort actor update.")
+        logger.warning(
+            f"Current approximate KL divergence {_kl.item():.4f} is larger "
+            f"than early stop threshold {early_stop_kl}. Abort actor update."
+        )
         loss = loss * 0.0
 
     stats = dict(
@@ -130,7 +142,9 @@ class PPOActorInterface(model_api.ModelInterface):
     force_no_logits_mask: bool = False
 
     value_norm: bool = False
-    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_type: str = dataclasses.field(
+        metadata={"choices": ["exp", "ma"]}, default="exp"
+    )
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
 
@@ -139,19 +153,27 @@ class PPOActorInterface(model_api.ModelInterface):
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None
-            self.kl_adapter = ppo_functional.AdaptiveKLController(self.kl_ctl, self.adaptive_kl_target,
-                                                                  self.adaptive_kl_horizon)
+            self.kl_adapter = ppo_functional.AdaptiveKLController(
+                self.kl_ctl, self.adaptive_kl_target, self.adaptive_kl_horizon
+            )
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         if self.value_norm:
-            from reallm.impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+            from reallm.impl.model.modules import (
+                ExponentialRunningMeanStd,
+                MovingAverageRunningMeanStd,
+            )
 
             if self.value_norm_type == "exp":
-                self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
+                self.rms = ExponentialRunningMeanStd(
+                    beta=self.value_norm_beta, epsilon=self.value_norm_eps
+                )
             elif self.value_norm_type == "ma":
                 self.rms = MovingAverageRunningMeanStd()
             else:
-                raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
+                raise ValueError(
+                    f"Unknown value_norm_type {self.value_norm_type}"
+                )
         self.kl_ctl = None
 
     def save(self, model: model_api.Model, save_dir: str):
@@ -173,10 +195,14 @@ class PPOActorInterface(model_api.ModelInterface):
 
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_prompts = data["packed_prompts"]
-        prompt_lengths = torch.tensor(data.metadata["seqlens"],
-                                      dtype=torch.int32,
-                                      device=packed_prompts.device)
-        prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
+        prompt_lengths = torch.tensor(
+            data.metadata["seqlens"],
+            dtype=torch.int32,
+            device=packed_prompts.device,
+        )
+        prompt_cu_seqlens = torch.nn.functional.pad(
+            prompt_lengths.cumsum(0), (1, 0)
+        )
 
         res = module.generate(
             seqlens_cpu=data.metadata["seqlens"],
@@ -192,20 +218,29 @@ class PPOActorInterface(model_api.ModelInterface):
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
-        seq_no_eos_mask = (gen_tokens[:, -1] != eos_token_id).logical_and(gen_tokens[:, -1] != pad_token_id)
+        seq_no_eos_mask = (gen_tokens[:, -1] != eos_token_id).logical_and(
+            gen_tokens[:, -1] != pad_token_id
+        )
         # We also want gen_lengths to include the eos token, where the reward model outputs a score for this sequence.
-        gen_lengths = (gen_tokens != pad_token_id).logical_and(gen_tokens != eos_token_id).sum(dim=-1) + 1
+        gen_lengths = (gen_tokens != pad_token_id).logical_and(
+            gen_tokens != eos_token_id
+        ).sum(dim=-1) + 1
         gen_lengths = gen_lengths.clip(max=gen_tokens.shape[-1])
 
-        (packed_seq, packed_logprobs, packed_logits_mask, seq_lengths,
-         prompt_mask) = (concat_prompt_to_generation_output(
-             packed_prompts=packed_prompts,
-             prompt_lengths=prompt_lengths,
-             gen_tokens=gen_tokens,
-             logprobs=logprobs,
-             logits_mask=logits_mask,
-             gen_lengths=gen_lengths,
-         ))
+        (
+            packed_seq,
+            packed_logprobs,
+            packed_logits_mask,
+            seq_lengths,
+            prompt_mask,
+        ) = concat_prompt_to_generation_output(
+            packed_prompts=packed_prompts,
+            prompt_lengths=prompt_lengths,
+            gen_tokens=gen_tokens,
+            logprobs=logprobs,
+            logits_mask=logits_mask,
+            gen_lengths=gen_lengths,
+        )
 
         cu_seqlens = torch.nn.functional.pad(gen_lengths.cumsum(0), (1, 0))
 
@@ -214,8 +249,12 @@ class PPOActorInterface(model_api.ModelInterface):
             packed_seq=packed_seq,
             cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs,
-            packed_logits_mask=(packed_logits_mask.bool() if not self.force_no_logits_mask
-                                and packed_logits_mask is not None else None),
+            packed_logits_mask=(
+                packed_logits_mask.bool()
+                if not self.force_no_logits_mask
+                and packed_logits_mask is not None
+                else None
+            ),
             prompt_mask=prompt_mask,
         )
         res = from_dict(res)
@@ -242,9 +281,14 @@ class PPOActorInterface(model_api.ModelInterface):
             return None
 
         logits /= GenerationConfig(**self.generation_config).temperature
-        if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
+        if (
+            "packed_logits_mask" in data
+            and data["packed_logits_mask"] is not None
+        ):
             apply_logits_mask(logits, data["packed_logits_mask"])
-        logprobs = gather_packed_shifted_log_probs(logits, cu_seqlens, data["packed_seq"])
+        logprobs = gather_packed_shifted_log_probs(
+            logits, cu_seqlens, data["packed_seq"]
+        )
         res = from_dict(dict(logprobs=logprobs))
         res.register_metadata(seqlens=data.metadata["seqlens"])
         return res
@@ -279,14 +323,17 @@ class PPOActorInterface(model_api.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
         loss_mask = prompt_mask.logical_not()
-        shift_one_indices = torch.cat([
-            torch.arange(
-                cu_seqlens[i] + 1,
-                cu_seqlens[i + 1],
-                dtype=torch.long,
-                device=cu_seqlens.device,
-            ) for i in range(cu_seqlens.shape[0] - 1)
-        ])
+        shift_one_indices = torch.cat(
+            [
+                torch.arange(
+                    cu_seqlens[i] + 1,
+                    cu_seqlens[i + 1],
+                    dtype=torch.long,
+                    device=cu_seqlens.device,
+                )
+                for i in range(cu_seqlens.shape[0] - 1)
+            ]
+        )
         loss_mask = loss_mask[shift_one_indices]
 
         # Apply the mask to log probabilities.
@@ -328,15 +375,24 @@ class PPOActorInterface(model_api.ModelInterface):
                 packed_seq=data_["packed_seq"],
                 cu_seqlens=data_["cu_seqlens"].int(),
                 kl_rewards=kl_rewards,
-                packed_logits_mask=(data_["packed_logits_mask"] if "packed_logits_mask" in data_ else None),
-            ))
+                packed_logits_mask=(
+                    data_["packed_logits_mask"]
+                    if "packed_logits_mask" in data_
+                    else None
+                ),
+            )
+        )
         data_.register_metadata(seqlens=batch_seqlens)
-        datas = data_api.split_sequences(data_,
-                                         self.n_minibatches,
-                                         min_size=constants.pipe_parallel_world_size() * 2)
+        datas = data_api.split_sequences(
+            data_,
+            self.n_minibatches,
+            min_size=constants.pipe_parallel_world_size() * 2,
+        )
 
         ### Logging code starts. ###
-        _n_seqs = torch.tensor([reward_score.shape[0]], dtype=torch.float32, device=model.device)
+        _n_seqs = torch.tensor(
+            [reward_score.shape[0]], dtype=torch.float32, device=model.device
+        )
         _n_tokens = loss_mask.count_nonzero()
         task_reward = reward_score.sum()
         _advantages = advantages.sum()
@@ -367,9 +423,13 @@ class PPOActorInterface(model_api.ModelInterface):
                 dtype=torch.long,
                 device=model.device,
             )
-            dist.all_reduce(n_masked_vocabs, group=constants.data_parallel_group())
+            dist.all_reduce(
+                n_masked_vocabs, group=constants.data_parallel_group()
+            )
             dist.all_reduce(total_vocabs, group=constants.data_parallel_group())
-            global_stats["valid_vocab_ratio"] = float((total_vocabs - n_masked_vocabs) / total_vocabs)
+            global_stats["valid_vocab_ratio"] = float(
+                (total_vocabs - n_masked_vocabs) / total_vocabs
+            )
         ### Logging code ends. ###
 
         # NOTE: We cannot randomly shuffle data here because
@@ -379,8 +439,12 @@ class PPOActorInterface(model_api.ModelInterface):
         for data in datas:
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-            logits_mask = (data["packed_logits_mask"] if "packed_logits_mask" in data else None)
-            seqlens = batch_seqlens[offset:offset + input_lens.shape[0]]
+            logits_mask = (
+                data["packed_logits_mask"]
+                if "packed_logits_mask" in data
+                else None
+            )
+            seqlens = batch_seqlens[offset : offset + input_lens.shape[0]]
             offset += input_lens.shape[0]
             loss_fn_kwargs = dict(
                 input_lens=input_lens,  # used for partition
@@ -414,8 +478,12 @@ class PPOActorInterface(model_api.ModelInterface):
             train_stats = dict(
                 ppo_approx_kl=float(train_stats["ppo_approx_kl"] / _n_tokens),
                 actor_loss=float(train_stats["actor_loss"] / _n_tokens),
-                actor_clip_ratio=float(train_stats["actor_clip_ratio"] / _n_tokens),
-                importance_weight=float(train_stats["importance_weight"] / _n_tokens),
+                actor_clip_ratio=float(
+                    train_stats["actor_clip_ratio"] / _n_tokens
+                ),
+                importance_weight=float(
+                    train_stats["importance_weight"] / _n_tokens
+                ),
             )
             train_stats = dict(**train_stats, **global_stats)
 
@@ -435,14 +503,17 @@ def _ppo_critic_loss_from_model_outputs(
     rms=None,
     **kwargs,
 ) -> Tuple[torch.FloatTensor, Dict]:
-    leave_one_indices = torch.cat([
-        torch.arange(
-            cu_seqlens[i],
-            cu_seqlens[i + 1] - 1,
-            dtype=torch.long,
-            device=cu_seqlens.device,
-        ) for i in range(cu_seqlens.shape[0] - 1)
-    ])
+    leave_one_indices = torch.cat(
+        [
+            torch.arange(
+                cu_seqlens[i],
+                cu_seqlens[i + 1] - 1,
+                dtype=torch.long,
+                device=cu_seqlens.device,
+            )
+            for i in range(cu_seqlens.shape[0] - 1)
+        ]
+    )
     new_values = new_values[leave_one_indices].squeeze(-1).float()
     values = values[leave_one_indices].squeeze(-1).float()
 
@@ -464,7 +535,12 @@ def _ppo_critic_loss_from_model_outputs(
     mean_ref_kl = (kl_rewards.detach().float() * ppo_loss_mask).sum()
     logging_loss = loss.detach().float() * n_tokens
     clip_ratio = loss_stat["clip_ratio"].float() * n_tokens
-    denormalized_values = (torch.where(ppo_loss_mask, denormalized_values, 0.0).sum().detach().float())
+    denormalized_values = (
+        torch.where(ppo_loss_mask, denormalized_values, 0.0)
+        .sum()
+        .detach()
+        .float()
+    )
     dist.all_reduce(n_tokens, group=constants.data_parallel_group())
     dist.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
     dist.all_reduce(logging_loss, group=constants.data_parallel_group())
@@ -495,7 +571,9 @@ class PPOCriticInterface(model_api.ModelInterface):
     adaptive_kl_target: Optional[float] = 6
     adaptive_kl_horizon: Optional[float] = 10000
     value_norm: bool = False
-    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_type: str = dataclasses.field(
+        metadata={"choices": ["exp", "ma"]}, default="exp"
+    )
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
 
@@ -504,19 +582,27 @@ class PPOCriticInterface(model_api.ModelInterface):
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None
-            self.kl_adapter = ppo_functional.AdaptiveKLController(self.kl_ctl, self.adaptive_kl_target,
-                                                                  self.adaptive_kl_horizon)
+            self.kl_adapter = ppo_functional.AdaptiveKLController(
+                self.kl_ctl, self.adaptive_kl_target, self.adaptive_kl_horizon
+            )
         else:
             self.kl_adapter = ppo_functional.FixedKLController(self.kl_ctl)
         if self.value_norm:
-            from reallm.impl.model.modules import ExponentialRunningMeanStd, MovingAverageRunningMeanStd
+            from reallm.impl.model.modules import (
+                ExponentialRunningMeanStd,
+                MovingAverageRunningMeanStd,
+            )
 
             if self.value_norm_type == "exp":
-                self.rms = ExponentialRunningMeanStd(beta=self.value_norm_beta, epsilon=self.value_norm_eps)
+                self.rms = ExponentialRunningMeanStd(
+                    beta=self.value_norm_beta, epsilon=self.value_norm_eps
+                )
             elif self.value_norm_type == "ma":
                 self.rms = MovingAverageRunningMeanStd()
             else:
-                raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
+                raise ValueError(
+                    f"Unknown value_norm_type {self.value_norm_type}"
+                )
         self.kl_ctl = None
 
     def save(self, model: model_api.Model, save_dir: str):
@@ -583,14 +669,17 @@ class PPOCriticInterface(model_api.ModelInterface):
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
         loss_mask = prompt_mask.logical_not()
-        shift_one_indices = torch.cat([
-            torch.arange(
-                cu_seqlens[i] + 1,
-                cu_seqlens[i + 1],
-                dtype=torch.long,
-                device=cu_seqlens.device,
-            ) for i in range(cu_seqlens.shape[0] - 1)
-        ])
+        shift_one_indices = torch.cat(
+            [
+                torch.arange(
+                    cu_seqlens[i] + 1,
+                    cu_seqlens[i + 1],
+                    dtype=torch.long,
+                    device=cu_seqlens.device,
+                )
+                for i in range(cu_seqlens.shape[0] - 1)
+            ]
+        )
         loss_mask = loss_mask[shift_one_indices]
 
         # Apply the mask to log probabilities.
@@ -633,7 +722,8 @@ class PPOCriticInterface(model_api.ModelInterface):
                 kl_rewards=kl_rewards,
                 packed_seq=data_["packed_seq"],
                 cu_seqlens=data_["cu_seqlens"],
-            ))
+            )
+        )
         data_.register_metadata(seqlens=batch_seqlens)
         datas = data_api.split_sequences(
             data_,
@@ -653,7 +743,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         offset = 0
         for data in datas:
             input_lens = data["cu_seqlens"][1:] - data["cu_seqlens"][:-1]
-            seqlens_cpu = batch_seqlens[offset:offset + input_lens.shape[0]]
+            seqlens_cpu = batch_seqlens[offset : offset + input_lens.shape[0]]
             offset += input_lens.shape[0]
 
             loss_kwargs = dict(
@@ -686,8 +776,12 @@ class PPOCriticInterface(model_api.ModelInterface):
         if train_stats:
             train_stats = dict(
                 value_loss=float(train_stats["value_loss"] / n_tokens),
-                value_clip_ratio=float(train_stats["value_clip_ratio"] / n_tokens),
-                denormalized_values=float(train_stats["denormalized_values"] / n_tokens),
+                value_clip_ratio=float(
+                    train_stats["value_clip_ratio"] / n_tokens
+                ),
+                denormalized_values=float(
+                    train_stats["denormalized_values"] / n_tokens
+                ),
                 returns=global_stats["returns"] / int(n_tokens),
                 n_tokens=int(n_tokens),
             )

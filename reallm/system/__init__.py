@@ -28,7 +28,9 @@ def worker_type_to_class_name(worker_type: str):
     return "".join([w.capitalize() for w in worker_type.split("_")])
 
 
-def run_worker(worker_type, experiment_name, trial_name, worker_name, worker_server_type):
+def run_worker(
+    worker_type, experiment_name, trial_name, worker_name, worker_server_type
+):
     """Run one worker
     Args:
         worker_type: string, one of the worker types listed above,
@@ -38,7 +40,9 @@ def run_worker(worker_type, experiment_name, trial_name, worker_name, worker_ser
         worker_server_type: string, either 'zmq' or 'ray'.
     """
     worker_class = load_worker(worker_type)
-    make_server_fn = getattr(importlib.import_module("reallm.system.worker_control"), "make_server")
+    make_server_fn = getattr(
+        importlib.import_module("reallm.system.worker_control"), "make_server"
+    )
     server = make_server_fn(
         type_=worker_server_type,
         experiment_name=experiment_name,
@@ -58,11 +62,17 @@ def make_controller(type_, experiment_name, trial_name):
     module = importlib.import_module("reallm.system.controller")
     if type_ == "zmq":
         control_module = importlib.import_module("reallm.system.worker_control")
-        panel = getattr(control_module, "make_control")("zmq", experiment_name, trial_name)
+        panel = getattr(control_module, "make_control")(
+            "zmq", experiment_name, trial_name
+        )
         return getattr(module, "Controller")(experiment_name, trial_name, panel)
     elif type_ == "ray":
-        return getattr(module, "RayController")(experiment_name, trial_name, local_mode=False)
+        return getattr(module, "RayController")(
+            experiment_name, trial_name, local_mode=False
+        )
     elif type_ == "local_ray":
-        return getattr(module, "RayController")(experiment_name, trial_name, local_mode=True)
+        return getattr(module, "RayController")(
+            experiment_name, trial_name, local_mode=True
+        )
     else:
         raise NotImplementedError(f"Unknown controller type {type_}.")

@@ -1,4 +1,13 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 import collections
 import dataclasses
 import enum
@@ -57,9 +66,13 @@ class ModelRPC:
     max_n_seqs: int
 
     input_data: List[str] = dataclasses.field(default_factory=lambda: [])
-    input_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
+    input_key_remap: Dict[str, str] = dataclasses.field(
+        default_factory=lambda: {}
+    )
     output_data: List[str] = dataclasses.field(default_factory=lambda: [])
-    output_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
+    output_key_remap: Dict[str, str] = dataclasses.field(
+        default_factory=lambda: {}
+    )
     log_return_value: bool = False
 
     min_n_seqs_per_dp: int = 1
@@ -77,13 +90,21 @@ class ModelRPC:
     parents: List[str] = dataclasses.field(default_factory=lambda: [])
     children: List[str] = dataclasses.field(default_factory=lambda: [])
 
-    parent_rpcs: List["ModelRPC"] = dataclasses.field(default_factory=lambda: [])
-    children_rpcs: List["ModelRPC"] = dataclasses.field(default_factory=lambda: [])
+    parent_rpcs: List["ModelRPC"] = dataclasses.field(
+        default_factory=lambda: []
+    )
+    children_rpcs: List["ModelRPC"] = dataclasses.field(
+        default_factory=lambda: []
+    )
 
     # data key -> model name
-    data_producers: Dict[str, ModelName] = dataclasses.field(default_factory=lambda: {})
+    data_producers: Dict[str, ModelName] = dataclasses.field(
+        default_factory=lambda: {}
+    )
     # data key -> rpc names
-    data2required_rpc_names: Dict[str, List[str]] = dataclasses.field(default_factory=lambda: {})
+    data2required_rpc_names: Dict[str, List[str]] = dataclasses.field(
+        default_factory=lambda: {}
+    )
 
     def __post_init__(self):
         if isinstance(self.model_name, str):
@@ -95,10 +116,12 @@ class ModelRPC:
             raise RuntimeError(
                 "The maximum batch size of the source node in the dataflow graph is too large. "
                 f"The maximum number of sequences is {self.max_n_seqs} > budget {int(1e4)}. "
-                "Please set a smaller value.")
+                "Please set a smaller value."
+            )
         if "@" in self.model_name.role or "@" in self.interface_type.value:
             raise ValueError(
-                f"Invalid model name or interface type: {self.model_name}, {self.interface_type}.")
+                f"Invalid model name or interface type: {self.model_name}, {self.interface_type}."
+            )
 
     def __repr__(self):
         return f"ModelRPC({self.model_name}, {self.interface_type})"
@@ -121,10 +144,13 @@ class ModelRPC:
         def _has_children_of_model_name(rpc: "ModelRPC", model_name: ModelName):
             if rpc.is_dst:
                 return False
-            return any([
-                r.model_name.role == model_name.role or _has_children_of_model_name(r, model_name)
-                for r in rpc.children_rpcs
-            ])
+            return any(
+                [
+                    r.model_name.role == model_name.role
+                    or _has_children_of_model_name(r, model_name)
+                    for r in rpc.children_rpcs
+                ]
+            )
 
         return not _has_children_of_model_name(self, self.model_name)
 
@@ -149,7 +175,9 @@ class ModelRPC:
         return namedarray.from_dict(res_data)
 
 
-def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[ModelRPC], List[List[Tuple[str]]]]:
+def build_graph(
+    rpcs: List[ModelRPC], verbose: bool = False
+) -> Tuple[List[ModelRPC], List[List[Tuple[str]]]]:
     # Resolve dependencies between model interfaces.
     children: List[List[str]] = [[] for _ in rpcs]
     parents: List[List[str]] = [[] for _ in rpcs]
@@ -163,7 +191,10 @@ def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[Model
         required_data_entries[i] = (*required_data_entries[i], *rpc.input_data)
         generated_data_entries[i] = (
             *generated_data_entries[i],
-            *[k if k not in rpc.output_key_remap else rpc.output_key_remap[k] for k in rpc.output_data],
+            *[
+                k if k not in rpc.output_key_remap else rpc.output_key_remap[k]
+                for k in rpc.output_data
+            ],
         )
     data_producers = {}
     for rpc, gd in zip(rpcs, generated_data_entries):
@@ -189,19 +220,31 @@ def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[Model
                     edges[i][j] = (*edges[i][j], k)
                     if verbose:
                         logger.info(
-                            f"Dependency added: {rpc.name} <- {parent_rpc.name} because of data entry `{k}`.")
+                            f"Dependency added: {rpc.name}"
+                            f" <- {parent_rpc.name} "
+                            f"because of data entry `{k}`."
+                        )
     if verbose:
         for i, rpc in enumerate(rpcs):
             logger.info(
-                f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }.")
-    for rpc, p, c, pr, cr in zip(rpcs, parents, children, parent_rpcs, children_rpcs):
+                f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }."
+            )
+    for rpc, p, c, pr, cr in zip(
+        rpcs, parents, children, parent_rpcs, children_rpcs
+    ):
         rpc.parents = p
         rpc.children = c
         rpc.parent_rpcs = pr
         rpc.children_rpcs = cr
 
     for rpc in rpcs:
-        rpc.max_min_flow_seqs = max([r.min_n_seqs for r in rpcs if r.model_name.role == rpc.model_name.role])
+        rpc.max_min_flow_seqs = max(
+            [
+                r.min_n_seqs
+                for r in rpcs
+                if r.model_name.role == rpc.model_name.role
+            ]
+        )
         rpc.data_producers = data_producers
         rpc.data2required_rpc_names = data2required_rpc_names
 
@@ -210,7 +253,9 @@ def build_graph(rpcs: List[ModelRPC], verbose: bool = False) -> Tuple[List[Model
         for h in itertools.chain(rpc.pre_hooks, rpc.post_hooks):
             assert isinstance(h, RPCHook), type(h)
             if isinstance(h, SyncParamHook):
-                assert any(h.target == r.model_name for r in rpcs) or (h.source == r.model_name for r in rpcs)
+                assert any(h.target == r.model_name for r in rpcs) or (
+                    h.source == r.model_name for r in rpcs
+                )
         for h in rpc.pre_hooks:
             if isinstance(h, OffloadHook):
                 raise ValueError("Offload can only be post hooks!")

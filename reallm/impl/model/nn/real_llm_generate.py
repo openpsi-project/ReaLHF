@@ -12,6 +12,7 @@ import torch.utils.checkpoint
 import transformers
 
 from reallm.api.core import model_api
+
 # import reallm.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
 from reallm.base import constants, logging
 from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
@@ -42,7 +43,9 @@ def genstep(
     unfinished_sequences: torch.Tensor,
     generated_idx: Union[torch.IntTensor, int],
     gconfig: GenerationConfig,
-) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], bool, torch.Tensor]:
+) -> Tuple[
+    torch.Tensor, torch.Tensor, Optional[torch.Tensor], bool, torch.Tensor
+]:
     """Advance generation by one step given logits.
 
     Args:
@@ -65,21 +68,30 @@ def genstep(
                 Shape [bs].
     """
     if constants.model_parallel_world_size() > 1:
-        from reallm.impl.model.parallelism.model_parallel.mappings import \
-            gather_from_tensor_model_parallel_region
+        from reallm.impl.model.parallelism.model_parallel.mappings import (
+            gather_from_tensor_model_parallel_region,
+        )
 
-        next_token_logits = gather_from_tensor_model_parallel_region(next_token_logits)
+        next_token_logits = gather_from_tensor_model_parallel_region(
+            next_token_logits
+        )
 
     unfinished_sequences = unfinished_sequences.bool()
     next_token_logits = next_token_logits.float()
     if isinstance(generated_idx, int):
         if generated_idx < gconfig.min_new_tokens:
-            next_token_logits = mask_eos_token(next_token_logits, eos_token_id=tokenizer.eos_token_id)
+            next_token_logits = mask_eos_token(
+                next_token_logits, eos_token_id=tokenizer.eos_token_id
+            )
     else:
         assert isinstance(generated_idx, torch.Tensor)
         if (generated_idx < gconfig.min_new_tokens).any():
-            _batch_indices = (generated_idx < gconfig.min_new_tokens).unsqueeze(1)
-            _vocab_indices = _batch_indices.new_zeros((1, next_token_logits.shape[1]))
+            _batch_indices = (generated_idx < gconfig.min_new_tokens).unsqueeze(
+                1
+            )
+            _vocab_indices = _batch_indices.new_zeros(
+                (1, next_token_logits.shape[1])
+            )
             if tokenizer.eos_token_id is not None:
                 _vocab_indices[:, tokenizer.eos_token_id] = 1
             next_token_logits.masked_fill_(
@@ -119,17 +131,25 @@ def genstep(
 
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:
-            raise ValueError("If `eos_token_id` is defined, make sure that `pad_token_id` is defined.")
-        next_tokens.masked_fill_(unfinished_sequences.logical_not(), tokenizer.pad_token_id)
+            raise ValueError(
+                "If `eos_token_id` is defined, make sure that `pad_token_id` is defined."
+            )
+        next_tokens.masked_fill_(
+            unfinished_sequences.logical_not(), tokenizer.pad_token_id
+        )
         # next_tokens = next_tokens * unfinished_sequences + tokenizer.pad_token_id * (1 - unfinished_sequences)
     # unfinished_sequences = next_tokens.ne(tokenizer.eos_token_id).long() * unfinished_sequences
     unfinished_sequences.logical_and_(next_tokens.ne(tokenizer.eos_token_id))
 
     # terminate check
     if isinstance(generated_idx, int):
-        terminate = (generated_idx >= gconfig.max_new_tokens - 1) or (unfinished_sequences.max() == 0)
+        terminate = (generated_idx >= gconfig.max_new_tokens - 1) or (
+            unfinished_sequences.max() == 0
+        )
     else:
-        unfinished_sequences.logical_and_(generated_idx < gconfig.max_new_tokens - 1)
+        unfinished_sequences.logical_and_(
+            generated_idx < gconfig.max_new_tokens - 1
+        )
         terminate = unfinished_sequences.max() == 0
 
     logits_mask = next_token_logits == torch.finfo(next_token_logits.dtype).min
@@ -225,7 +245,11 @@ def init_kv_cache(
     assert len(layer_indices) == len(ys), (len(ys), layer_indices)
     bs = input_lens.shape[0]
     for y, layer_idx in zip(ys, layer_indices):
-        assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
+        assert (
+            y.k_cache is not None
+            and y.v_cache is not None
+            and y.cache_seqlens is not None
+        )
         kvcache_seqlen = max(
             constants.max_prompt_len() + gconfig.max_new_tokens,
             module.config.hidden_dim // module.config.head_dim + 10,
@@ -240,8 +264,12 @@ def init_kv_cache(
             dtype=y.v_cache.dtype,
             device=y.v_cache.device,
         )
-        indices = (torch.arange(kvcache_seqlen, device=module.device, dtype=torch.long)[None, :]
-                   < input_lens[:, None])
+        indices = (
+            torch.arange(
+                kvcache_seqlen, device=module.device, dtype=torch.long
+            )[None, :]
+            < input_lens[:, None]
+        )
         k_cache[indices] = y.k_cache
         v_cache[indices] = y.v_cache
         y.k_cache = k_cache
@@ -256,13 +284,15 @@ def generate(
     packed_input_ids: Optional[torch.LongTensor] = None,
     cu_seqlens: Optional[torch.LongTensor] = None,
     max_seqlen: Optional[int] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationConfig = dataclasses.field(
+        default_factory=GenerationConfig
+    ),
 ) -> Tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        List[PipeCacheData],
-        Optional[torch.Tensor],
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    List[PipeCacheData],
+    Optional[torch.Tensor],
 ]:
     """Generete a sequence with a ReaLModel."""
     bs = cu_seqlens.shape[0] - 1
@@ -284,19 +314,28 @@ def generate(
     # to use varlen flash attention, then record kv caches for the following inferences.
     max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
     if constants.max_prompt_len() < max_seqlen:
-        raise RuntimeError(f"Input sequence length {max_seqlen} is larger than the maximum sequence length "
-                           f"supported by the model {constants.max_prompt_len()}.")
+        raise RuntimeError(
+            f"Input sequence length {max_seqlen} is larger than the maximum sequence length "
+            f"supported by the model {constants.max_prompt_len()}."
+        )
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True)
+    x = PipeTransferData(
+        cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True
+    )
     # one embedding layer, n_layers transformer block, one output layer
-    ys = [PipeCacheData(packed_input_ids=packed_input_ids)
-          ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+    ys = [PipeCacheData(packed_input_ids=packed_input_ids)] + [
+        PipeCacheData() for _ in range(mconfig.n_layers + 1)
+    ]
     # Model forward will set k/v cache in PipeCacheData.
     prompt_logits = model(x, ys)[0].pp_output
     logits = prompt_logits[cu_seqlens[1:] - 1]
     cache_seqlens = input_lens.clone().to(dtype=torch.int32)
     for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
-        assert (y.k_cache is not None and y.v_cache is not None and y.cache_seqlens is not None)
+        assert (
+            y.k_cache is not None
+            and y.v_cache is not None
+            and y.cache_seqlens is not None
+        )
         # fix of a flash attention bug
         kvcache_seqlen = max(
             constants.max_prompt_len() + gconfig.max_new_tokens,
@@ -328,8 +367,12 @@ def generate(
             dtype=y.v_cache.dtype,
             device=y.v_cache.device,
         )
-        indices = (torch.arange(kvcache_seqlen, device=device, dtype=torch.long)[None, :] < input_lens[:,
-                                                                                                       None])
+        indices = (
+            torch.arange(kvcache_seqlen, device=device, dtype=torch.long)[
+                None, :
+            ]
+            < input_lens[:, None]
+        )
         k_cache[indices] = y.k_cache
         v_cache[indices] = y.v_cache
         y.k_cache = k_cache
@@ -341,8 +384,9 @@ def generate(
     # Next, we will generate the next token after prompts.
     # cache_seqlens is exactly the lengths of prompts.
     # We perform a genstep outside the loop due to a historical reason.
-    next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-        logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+    next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (
+        genstep(logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+    )
     gen_token_ph.append(next_tokens)
     gen_logprob_ph.append(logprob)
     gen_logits_mask_ph.append(logits_mask)
@@ -379,15 +423,19 @@ def generate(
             1  # The global handle. This will increase all handles in ys by 1.
         )
 
-        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (
+            genstep(
+                logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+            )
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
         generated_idx += 1
 
-    gen_tokens, log_probs, logits_mask = _gather_gen_output_from_list(gen_token_ph, gen_logprob_ph,
-                                                                      gen_logits_mask_ph)
+    gen_tokens, log_probs, logits_mask = _gather_gen_output_from_list(
+        gen_token_ph, gen_logprob_ph, gen_logits_mask_ph
+    )
 
     return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
 
@@ -404,8 +452,12 @@ def _gather_gen_output_from_list(
         logits_mask = None
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
-        gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
-        logits_mask = torch.stack(gen_logits_mask_ph, 1)  # [bs, seqlen, vocab_size]
+        gen_logits_mask_ph = [
+            torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph
+        ]
+        logits_mask = torch.stack(
+            gen_logits_mask_ph, 1
+        )  # [bs, seqlen, vocab_size]
     return gen_tokens, log_probs, logits_mask
 
 
@@ -457,8 +509,12 @@ def _gather_minibatch_gen_outputs(
         logits_mask = None
     else:
         mm = next(m for m in padded_logits_mask if m is not None)
-        padded_logits_mask = [torch.ones_like(mm) if m is None else m for m in padded_logits_mask]
-        logits_mask = torch.cat(padded_logits_mask, 0)  # [bs, seqlen, vocab_size]
+        padded_logits_mask = [
+            torch.ones_like(mm) if m is None else m for m in padded_logits_mask
+        ]
+        logits_mask = torch.cat(
+            padded_logits_mask, 0
+        )  # [bs, seqlen, vocab_size]
 
     return (gen_tokens, log_probs, logits_mask)
 
@@ -471,11 +527,11 @@ def concat_prompt_to_generation_output(
     logits_mask: torch.BoolTensor,
     gen_lengths: torch.IntTensor,
 ) -> Tuple[
-        torch.LongTensor,
-        torch.FloatTensor,
-        torch.BoolTensor,
-        torch.IntTensor,
-        torch.BoolTensor,
+    torch.LongTensor,
+    torch.FloatTensor,
+    torch.BoolTensor,
+    torch.IntTensor,
+    torch.BoolTensor,
 ]:
     device = packed_prompts.device
 
@@ -483,30 +539,46 @@ def concat_prompt_to_generation_output(
     gen_tokens_list, gen_log_probs_list, gen_logits_mask_list = [], [], []
 
     bs = prompt_lengths.shape[0]
-    prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
+    prompt_cu_seqlens = torch.nn.functional.pad(
+        prompt_lengths.cumsum(0), (1, 0)
+    )
     for i in range(bs):
         prompt_len, gen_len = prompt_lengths[i].item(), gen_lengths[i].item()
 
         # log_probs is one-step shorter than token sequences.
-        prompts_list.append(packed_prompts[prompt_cu_seqlens[i]:prompt_cu_seqlens[i + 1]])
+        prompts_list.append(
+            packed_prompts[prompt_cu_seqlens[i] : prompt_cu_seqlens[i + 1]]
+        )
         prompt_log_probs_list.append(logprobs.new_zeros(prompt_len - 1))
         if logits_mask is not None:
-            prompt_logits_mask_list.append(logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1])))
+            prompt_logits_mask_list.append(
+                logits_mask.new_ones((prompt_len - 1, logits_mask.shape[-1]))
+            )
 
         # Generated tokens are right-padded.
         gen_tokens_list.append(gen_tokens[i, :gen_len])
         gen_log_probs_list.append(logprobs[i, :gen_len])
         if logits_mask is not None:
             gen_logits_mask_list.append(
-                torch.cat([
-                    logits_mask[i, :gen_len],
-                    logits_mask.new_ones(1, logits_mask.shape[-1]),
-                ]))
+                torch.cat(
+                    [
+                        logits_mask[i, :gen_len],
+                        logits_mask.new_ones(1, logits_mask.shape[-1]),
+                    ]
+                )
+            )
 
-    seq = torch.cat(list(itertools.chain.from_iterable(zip(prompts_list, gen_tokens_list))))
+    seq = torch.cat(
+        list(itertools.chain.from_iterable(zip(prompts_list, gen_tokens_list)))
+    )
     seq_lengths = prompt_lengths + gen_lengths
     packed_logprobs = torch.cat(
-        list(itertools.chain.from_iterable(zip(prompt_log_probs_list, gen_log_probs_list))))
+        list(
+            itertools.chain.from_iterable(
+                zip(prompt_log_probs_list, gen_log_probs_list)
+            )
+        )
+    )
     assert seq.shape[0] == packed_logprobs.shape[0] + bs, (
         seq.shape,
         packed_logprobs.shape,
@@ -515,11 +587,22 @@ def concat_prompt_to_generation_output(
     packed_logits_mask = None
     if gen_logits_mask_list:
         packed_logits_mask = torch.cat(
-            list(itertools.chain.from_iterable(zip(prompt_logits_mask_list, gen_logits_mask_list))))
+            list(
+                itertools.chain.from_iterable(
+                    zip(prompt_logits_mask_list, gen_logits_mask_list)
+                )
+            )
+        )
 
     prompt_mask = zip(
-        [torch.ones(plen, dtype=torch.bool, device=device) for plen in prompt_lengths],
-        [torch.zeros(glen, dtype=torch.bool, device=device) for glen in gen_lengths],
+        [
+            torch.ones(plen, dtype=torch.bool, device=device)
+            for plen in prompt_lengths
+        ],
+        [
+            torch.zeros(glen, dtype=torch.bool, device=device)
+            for glen in gen_lengths
+        ],
     )
     prompt_mask = torch.cat(list(itertools.chain.from_iterable(prompt_mask)))
 
@@ -532,14 +615,18 @@ def vanilla_packed_generate(
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationConfig = dataclasses.field(
+        default_factory=GenerationConfig
+    ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
     mconfig: model_api.ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
-    unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
+    unfinished_sequences = torch.ones(
+        input_ids.shape[0], dtype=torch.long, device=input_ids.device
+    )
 
     gen_token_ph = []
     gen_logprob_ph = []
@@ -547,18 +634,24 @@ def vanilla_packed_generate(
 
     # The main loop.
     while not terminate:
-        packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+        packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(
+            input_ids, attention_mask
+        )
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(packed_input_ids=packed_input_ids)
-              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+        ys = [PipeCacheData(packed_input_ids=packed_input_ids)] + [
+            PipeCacheData() for _ in range(mconfig.n_layers + 1)
+        ]
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output
         logits = logits[cu_seqlens[1:] - 1]
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
-        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (
+            genstep(
+                logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+            )
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -577,7 +670,9 @@ def vanilla_packed_generate(
         logits_mask = None
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
-        gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
+        gen_logits_mask_ph = [
+            torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph
+        ]
         logits_mask = torch.stack(gen_logits_mask_ph, -2)
 
     return gen_tokens, log_probs, logits_mask
@@ -589,7 +684,9 @@ def vanilla_cpu_generate(
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationConfig = dataclasses.field(
+        default_factory=GenerationConfig
+    ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
     mconfig: model_api.ReaLModelConfig = model.config
@@ -597,7 +694,9 @@ def vanilla_cpu_generate(
 
     terminate = False
     generated_idx = 0
-    unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
+    unfinished_sequences = torch.ones(
+        input_ids.shape[0], dtype=torch.long, device=input_ids.device
+    )
 
     gen_token_ph = []
     gen_logprob_ph = []
@@ -607,14 +706,18 @@ def vanilla_cpu_generate(
     while not terminate:
         x = PipeTransferData(attention_mask=attention_mask)
         # one embedding layer, n_layers transformer block, one output layer
-        ys = [PipeCacheData(packed_input_ids=input_ids)
-              ] + [PipeCacheData() for _ in range(mconfig.n_layers + 1)]
+        ys = [PipeCacheData(packed_input_ids=input_ids)] + [
+            PipeCacheData() for _ in range(mconfig.n_layers + 1)
+        ]
         # Model forward will set k/v cache in PipeCacheData.
         logits = model(x, ys).pp_output[:, -1, :]
         # Next, we will generate the next token after prompts.
         # cache_seqlens is exactly the lengths of prompts.
-        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig)
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (
+            genstep(
+                logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+            )
+        )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
         gen_logits_mask_ph.append(logits_mask)
@@ -633,7 +736,9 @@ def vanilla_cpu_generate(
         logits_mask = None
     else:
         mm = next(m for m in gen_logits_mask_ph if m is not None)
-        gen_logits_mask_ph = [torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph]
+        gen_logits_mask_ph = [
+            torch.ones_like(mm) if m is None else m for m in gen_logits_mask_ph
+        ]
         logits_mask = torch.stack(gen_logits_mask_ph, -2)
 
     return gen_tokens, log_probs, logits_mask
@@ -680,7 +785,8 @@ class InflightBatchingGenerator:
                 ),
                 dtype=dtype,
                 device=device,
-            ) for _ in range(self.mconfig.n_layers)
+            )
+            for _ in range(self.mconfig.n_layers)
         ]
         self.v_caches = [
             torch.zeros(
@@ -692,25 +798,46 @@ class InflightBatchingGenerator:
                 ),
                 dtype=dtype,
                 device=device,
-            ) for _ in range(self.mconfig.n_layers)
+            )
+            for _ in range(self.mconfig.n_layers)
         ]
-        self.cache_seqlens = torch.zeros((batch_size,), dtype=torch.int32, device=device)
+        self.cache_seqlens = torch.zeros(
+            (batch_size,), dtype=torch.int32, device=device
+        )
 
         # Input buffers
-        self.input_buf = torch.zeros((batch_size, max_prompt_len), dtype=torch.long, device=device)
-        self.input_buf_lens = torch.zeros((batch_size,), dtype=torch.int32, device=device)
+        self.input_buf = torch.zeros(
+            (batch_size, max_prompt_len), dtype=torch.long, device=device
+        )
+        self.input_buf_lens = torch.zeros(
+            (batch_size,), dtype=torch.int32, device=device
+        )
 
         # Save prompts for output
         self.prompt_tokens = [None for _ in range(batch_size)]
 
         # Generation state
-        self.generate_idx = torch.zeros((batch_size,), dtype=torch.int32, device=device)
-        self.unfinished_sequences = torch.zeros((batch_size,), dtype=torch.float32, device=device)
+        self.generate_idx = torch.zeros(
+            (batch_size,), dtype=torch.int32, device=device
+        )
+        self.unfinished_sequences = torch.zeros(
+            (batch_size,), dtype=torch.float32, device=device
+        )
 
-        self.ys = ([PipeCacheData(cache_seqlens=self.cache_seqlens,)] + [
-            PipeCacheData(k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens)
-            for k, v in zip(self.k_caches, self.v_caches)
-        ] + [PipeCacheData()])
+        self.ys = (
+            [
+                PipeCacheData(
+                    cache_seqlens=self.cache_seqlens,
+                )
+            ]
+            + [
+                PipeCacheData(
+                    k_cache=k, v_cache=v, cache_seqlens=self.cache_seqlens
+                )
+                for k, v in zip(self.k_caches, self.v_caches)
+            ]
+            + [PipeCacheData()]
+        )
 
         # output buffers
         self.output_tokens_buf = [[] for _ in range(batch_size)]
@@ -720,7 +847,9 @@ class InflightBatchingGenerator:
     def _get_non_eos_logits(self) -> torch.FloatTensor:
         self.ys[0].packed_position_ids = None
         self.ys[0].packed_input_ids = self.input_buf[:, :1]
-        logits = self.model(PipeTransferData(), self.ys).pp_output.squeeze(dim=1)
+        logits = self.model(PipeTransferData(), self.ys).pp_output.squeeze(
+            dim=1
+        )
 
         self.cache_seqlens += 1
         return logits.float()
@@ -742,9 +871,12 @@ class InflightBatchingGenerator:
                 if all([m is None for m in self.output_logits_mask[i]]):
                     gen_logits_mask = None
                 else:
-                    mm = next(m for m in self.output_logits_mask[i] if m is not None)
+                    mm = next(
+                        m for m in self.output_logits_mask[i] if m is not None
+                    )
                     gen_logits_mask = [
-                        torch.ones_like(mm) if m is None else m for m in self.output_logits_mask[i]
+                        torch.ones_like(mm) if m is None else m
+                        for m in self.output_logits_mask[i]
                     ]
                     gen_logits_mask = torch.stack(gen_logits_mask, -2)
 
@@ -757,7 +889,9 @@ class InflightBatchingGenerator:
                 try:
                     self.outqueue.put_nowait(res)
                 except queue.Full as e:
-                    raise RuntimeError("Output queue is full. Please set a larger queue size.") from e
+                    raise RuntimeError(
+                        "Output queue is full. Please set a larger queue size."
+                    ) from e
 
             # clear cache
             self.cache_seqlens[i] = 0
@@ -781,18 +915,25 @@ class InflightBatchingGenerator:
                 try:
                     prompt = self.inqueue.get_nowait()
                     self.prompt_tokens[i] = prompt
-                    self.input_buf[i, :prompt.shape[0]] = prompt
+                    self.input_buf[i, : prompt.shape[0]] = prompt
                     self.input_buf_lens[i] = prompt.shape[0]
                 except queue.Empty as e:
-                    raise RuntimeError("Input queue is empty. This should not happen.") from e
+                    raise RuntimeError(
+                        "Input queue is empty. This should not happen."
+                    ) from e
 
         input_lens = self.input_buf_lens
-        valid_input_mask = torch.arange(self.max_prompt_len, device=self.input_buf.device,
-                                        dtype=torch.int32).unsqueeze(0) < input_lens.unsqueeze(-1)
-        indices = torch.nonzero(valid_input_mask.flatten(), as_tuple=False).flatten()
+        valid_input_mask = torch.arange(
+            self.max_prompt_len, device=self.input_buf.device, dtype=torch.int32
+        ).unsqueeze(0) < input_lens.unsqueeze(-1)
+        indices = torch.nonzero(
+            valid_input_mask.flatten(), as_tuple=False
+        ).flatten()
         packed_input_ids = self.input_buf.flatten()[indices]
         max_seqlen = int(max(input_lens))
-        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0), value=0).int()
+        cu_seqlens = torch.nn.functional.pad(
+            input_lens.cumsum(0), (1, 0), value=0
+        ).int()
 
         x = PipeTransferData(cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
         self.ys[0].packed_position_ids = None
@@ -810,12 +951,14 @@ class InflightBatchingGenerator:
         else:
             logits = self._get_non_eos_logits()
 
-        next_tokens, logprob, logits_mask, _, self.unfinished_sequences = genstep(
-            logits,
-            self.tokenizer,
-            self.unfinished_sequences,
-            self.generate_idx,
-            self.gconfig,
+        next_tokens, logprob, logits_mask, _, self.unfinished_sequences = (
+            genstep(
+                logits,
+                self.tokenizer,
+                self.unfinished_sequences,
+                self.generate_idx,
+                self.gconfig,
+            )
         )
 
         for i in range(self.batch_size):

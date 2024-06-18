@@ -20,12 +20,18 @@ import torch.distributed
 from reallm.api.core.config import ModelName
 from reallm.api.core.model_api import ReaLModelConfig
 from reallm.base import datapack, logging, namedarray, timeutil, topology
-from reallm.base.asyncio_utils import (raise_asyncio_exception, setup_run_until_complete,
-                                       teardown_run_util_complete)
+from reallm.base.asyncio_utils import (
+    raise_asyncio_exception,
+    setup_run_until_complete,
+    teardown_run_util_complete,
+)
 from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import MODEL_SAVE_ROOT
-from reallm.base.monitor import (caculuate_llama_forward_flops, calculate_llama_gen_flops,
-                                 calculate_llama_train_flops)
+from reallm.base.monitor import (
+    caculuate_llama_forward_flops,
+    calculate_llama_gen_flops,
+    calculate_llama_train_flops,
+)
 from reallm.system.buffer import AsyncIOSequenceBuffer
 import reallm.api.core.config as config_api
 import reallm.api.core.data_api as data_api
@@ -43,10 +49,20 @@ blogger = logging.getLogger("benchmark")
 class ExperimentComplete(Exception):
 
     def __init__(self, message):
-        disclaimer = (colorama.Fore.GREEN + "\033[1m" +
-                      "<This is not an error. It is just a way to stop the experiment.> ")
-        super().__init__(disclaimer + colorama.Style.RESET_ALL + colorama.Fore.YELLOW +
-                         colorama.Style.BRIGHT + "\033[1m" + message + colorama.Style.RESET_ALL)
+        disclaimer = (
+            colorama.Fore.GREEN
+            + "\033[1m"
+            + "<This is not an error. It is just a way to stop the experiment.> "
+        )
+        super().__init__(
+            disclaimer
+            + colorama.Style.RESET_ALL
+            + colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + message
+            + colorama.Style.RESET_ALL
+        )
 
 
 def request_all(
@@ -61,29 +77,44 @@ def request_all(
             handler=handler,
             handle_name=handle_type,
             data=data,
-        ) for handler, data in zip(handlers, datas)
+        )
+        for handler, data in zip(handlers, datas)
     ]
     if verbose:
-        blogger.debug(f"master worker #request_all# *end* time ${time.time_ns()}$")
+        blogger.debug(
+            f"master worker #request_all# *end* time ${time.time_ns()}$"
+        )
     tik = time.perf_counter()
 
     # A protocol to ensure that any model worker execute jobs in the same order.
     [stream.post(r) for r in requests]
-    [stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id])) for p in requests]
+    [
+        stream.poll(
+            block=True, pattern=create_exact_match_pattern([p.syn_reply_id])
+        )
+        for p in requests
+    ]
     [
         stream.post(
-            request_reply_stream.Payload(handler=r.handler, handle_name="ack", request_id=r.ack_reply_id))
+            request_reply_stream.Payload(
+                handler=r.handler, handle_name="ack", request_id=r.ack_reply_id
+            )
+        )
         for r in requests
     ]
     t = time.perf_counter() - tik
 
     if verbose:
-        blogger.debug(f'Request "{handle_type}" time in total: '
-                      f"{t:.4f}s, {t / len(requests):.4f}s per request")
+        blogger.debug(
+            f'Request "{handle_type}" time in total: '
+            f"{t:.4f}s, {t / len(requests):.4f}s per request"
+        )
     return [r.request_id for r in requests]
 
 
-def create_exact_match_pattern(string_list: List[Union[uuid.UUID, str]]) -> re.Pattern:
+def create_exact_match_pattern(
+    string_list: List[Union[uuid.UUID, str]]
+) -> re.Pattern:
     escaped_strings = [re.escape(str(s)) for s in string_list]
     pattern = f"({'|'.join(escaped_strings)})$"
     return re.compile(pattern)
@@ -108,10 +139,17 @@ async def gather_all_replies(
 ) -> List:
     """Collect responses from multiple streams. Blocking method."""
     responses = await asyncio.gather(
-        *
-        [_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in request_ids])
+        *[
+            _awaitable_response(
+                stream, pattern=create_exact_match_pattern([req_id])
+            )
+            for req_id in request_ids
+        ]
+    )
     if verbose:
-        blogger.debug(f"master worker #gather_all_replies# *end* time ${time.time_ns()}$")
+        blogger.debug(
+            f"master worker #gather_all_replies# *end* time ${time.time_ns()}$"
+        )
     return responses
 
 
@@ -122,8 +160,10 @@ async def group_rpc_blocked(
     datas: List[namedarray.NamedArray],
     verbose: bool = True,
 ) -> List[namedarray.NamedArray]:
-    payloads = await gather_all_replies(stream,
-                                        request_all(stream, handlers, handle_type, datas, verbose=verbose))
+    payloads = await gather_all_replies(
+        stream,
+        request_all(stream, handlers, handle_type, datas, verbose=verbose),
+    )
     return [p.data for p in payloads]
 
 
@@ -149,7 +189,8 @@ def _request_parameter_sync(
     ]
     all_handler_mwids = set([msid2mwid[h] for h in handlers])
     dst_handlers = [
-        config_pkg.ModelShardID.from_parallelism_rank(target, to_topo, j) for j in range(to_topo.world_size())
+        config_pkg.ModelShardID.from_parallelism_rank(target, to_topo, j)
+        for j in range(to_topo.world_size())
     ]
     for h in dst_handlers:
         if msid2mwid[h] not in all_handler_mwids:
@@ -169,21 +210,35 @@ def _request_parameter_sync(
             handle_name="empty",
             pre_hooks=["param_realloc"],
             pre_hook_data=[ps_data],
-        ) for h in handlers
+        )
+        for h in handlers
     ]
     request_ids = [stream.post(p) for p in payloads]
-    [stream.poll(pattern=create_exact_match_pattern([p.syn_reply_id]), block=True) for p in payloads]
     [
-        stream.post(
-            request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id))
+        stream.poll(
+            pattern=create_exact_match_pattern([p.syn_reply_id]), block=True
+        )
         for p in payloads
     ]
-    [stream.poll(pattern=create_exact_match_pattern([req_id]), block=True) for req_id in request_ids]
+    [
+        stream.post(
+            request_reply_stream.Payload(
+                handler=p.handler, handle_name="ack", request_id=p.ack_reply_id
+            )
+        )
+        for p in payloads
+    ]
+    [
+        stream.poll(pattern=create_exact_match_pattern([req_id]), block=True)
+        for req_id in request_ids
+    ]
 
 
 @dataclasses.dataclass
 class InterfaceDataAmount:
-    train_configs: List[ReaLModelConfig] = dataclasses.field(default_factory=list)
+    train_configs: List[ReaLModelConfig] = dataclasses.field(
+        default_factory=list
+    )
     train_bs: List[int] = dataclasses.field(default_factory=list)
     train_seqlens: List[List[int]] = dataclasses.field(default_factory=list)
 
@@ -233,12 +288,16 @@ class RPCCorountineControl:
     request_queues: Dict[str, List[asyncio.Queue]]
 
     training_buffer_indices: Set[int] = dataclasses.field(default_factory=set)
-    data_amount: InterfaceDataAmount = dataclasses.field(default_factory=InterfaceDataAmount)
+    data_amount: InterfaceDataAmount = dataclasses.field(
+        default_factory=InterfaceDataAmount
+    )
 
     # recover information
     used_hash_vals_this_epoch: Set[int] = dataclasses.field(default_factory=set)
     is_recover_epoch: bool = False
-    hash_vals_to_ignore_in_recover: Set[int] = dataclasses.field(default_factory=set)
+    hash_vals_to_ignore_in_recover: Set[int] = dataclasses.field(
+        default_factory=set
+    )
 
 
 def _attach_payloads_with_hooks(
@@ -250,7 +309,9 @@ def _attach_payloads_with_hooks(
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
     main_handlers: List[config_pkg.ModelShardID],
     hook_type: str,
-) -> Tuple[Dict[config_api.ModelShardID, request_reply_stream.Payload], List[int]]:
+) -> Tuple[
+    Dict[config_api.ModelShardID, request_reply_stream.Payload], List[int]
+]:
     assert hook_type in ["pre", "post"], hook_type
 
     main_mwids = set([msid2mwid[h] for h in main_handlers])
@@ -280,10 +341,14 @@ def _attach_payloads_with_hooks(
                 "to_model_config": dst_config,
             }
             for h in main_handlers:
-                getattr(payloads[h], f"{hook_type}_hooks").append("param_realloc")
+                getattr(payloads[h], f"{hook_type}_hooks").append(
+                    "param_realloc"
+                )
                 getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
             other_handlers = [
-                config_api.ModelShardID.from_parallelism_rank(other_model_name, other_topo, j)
+                config_api.ModelShardID.from_parallelism_rank(
+                    other_model_name, other_topo, j
+                )
                 for j in range(other_topo.world_size())
             ]
             for h in other_handlers:
@@ -292,18 +357,28 @@ def _attach_payloads_with_hooks(
                         handler=h,
                         handle_name="empty",
                     )
-                    setattr(payloads[h], f"{hook_type}_hooks", ["param_realloc"])
+                    setattr(
+                        payloads[h], f"{hook_type}_hooks", ["param_realloc"]
+                    )
                     setattr(payloads[h], f"{hook_type}_hook_data", [ps_data])
                     mwids.append(msid2mwid[h])
                 elif msid2mwid[h] not in main_mwids:
-                    hh = next(hh for hh in payloads if msid2mwid[hh] == msid2mwid[h])
-                    getattr(payloads[hh], f"{hook_type}_hooks").append("param_realloc")
-                    getattr(payloads[hh], f"{hook_type}_hook_data").append(ps_data)
+                    hh = next(
+                        hh for hh in payloads if msid2mwid[hh] == msid2mwid[h]
+                    )
+                    getattr(payloads[hh], f"{hook_type}_hooks").append(
+                        "param_realloc"
+                    )
+                    getattr(payloads[hh], f"{hook_type}_hook_data").append(
+                        ps_data
+                    )
 
         elif isinstance(hook, dfg.OffloadHook):
             for h in main_handlers:
                 getattr(payloads[h], f"{hook_type}_hooks").append("offload")
-                getattr(payloads[h], f"{hook_type}_hook_data").append(dict(model_name=h.model_name))
+                getattr(payloads[h], f"{hook_type}_hook_data").append(
+                    dict(model_name=h.model_name)
+                )
         else:
             raise NotImplementedError(f"Unknown hook type: {hook}")
     return payloads, mwids
@@ -382,14 +457,23 @@ async def scatter_tensor_to_mws(
         hook_type="post",
     )
     req_ids = [stream.post(p) for h, p in payloads.items() if h in handlers]
-    other_req_ids = [stream.post(p) for h, p in payloads.items() if h not in handlers]
-    await asyncio.gather(*[
-        _awaitable_response(stream, pattern=create_exact_match_pattern([p.syn_reply_id]))
-        for p in payloads.values()
-    ])
+    other_req_ids = [
+        stream.post(p) for h, p in payloads.items() if h not in handlers
+    ]
+    await asyncio.gather(
+        *[
+            _awaitable_response(
+                stream, pattern=create_exact_match_pattern([p.syn_reply_id])
+            )
+            for p in payloads.values()
+        ]
+    )
     [
         stream.post(
-            request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id))
+            request_reply_stream.Payload(
+                handler=p.handler, handle_name="ack", request_id=p.ack_reply_id
+            )
+        )
         for p in payloads.values()
     ]
     return req_ids, other_req_ids
@@ -426,7 +510,9 @@ async def model_rpc_request_func(
     producer_name2producer_handlers = {}
     for producer_name in keys_to_send:
         producer_name2producer_handlers[producer_name] = [
-            config_pkg.ModelShardID.from_parallelism_rank(producer_name, model_topos[producer_name], j)
+            config_pkg.ModelShardID.from_parallelism_rank(
+                producer_name, model_topos[producer_name], j
+            )
             for j in range(model_topos[producer_name].world_size())
         ]
 
@@ -440,20 +526,29 @@ async def model_rpc_request_func(
         await can_do_rpc.acquire()
 
         # Ensure that parent RPCs will not be over-consumed.
-        while any(this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.max_n_seqs
-                  for c in rpc.children_rpcs):
+        while any(
+            this_rpc_consumed_seqs
+            >= (ctrl.rpc_traversal[c.name] + 1) * c.max_n_seqs
+            for c in rpc.children_rpcs
+        ):
             await asyncio.sleep(0.1)
 
         sample = await buffer.get_batch_for_rpc(rpc)
 
         if rpc.is_src:
-            ctrl.training_buffer_indices = ctrl.training_buffer_indices.union(sample.indices)
-            ctrl.used_hash_vals_this_epoch = ctrl.used_hash_vals_this_epoch.union(sample.hash_vals)
+            ctrl.training_buffer_indices = ctrl.training_buffer_indices.union(
+                sample.indices
+            )
+            ctrl.used_hash_vals_this_epoch = (
+                ctrl.used_hash_vals_this_epoch.union(sample.hash_vals)
+            )
 
         if rpc.interface_type == dfg.ModelInterfaceType.GENERATE:
             ctrl.data_amount.gen_configs.append(model_configs[rpc.model_name])
             ctrl.data_amount.gen_bs.append(len(sample.seqlens))
-            ctrl.data_amount.gen_len.append(rpc.interface_impl.args["generation_config"]["min_new_tokens"])
+            ctrl.data_amount.gen_len.append(
+                rpc.interface_impl.args["generation_config"]["min_new_tokens"]
+            )
             ctrl.data_amount.prompt_lens.append(sample.seqlens)
         elif rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP:
             ctrl.data_amount.train_configs.append(model_configs[rpc.model_name])
@@ -478,7 +573,9 @@ async def model_rpc_request_func(
             dp_size,
             min_size=min_n_seqs_per_dp,
         )
-        target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
+        target_mapping = {
+            i: list(range(v[0], v[1])) for i, v in enumerate(partitions)
+        }
 
         # Set data owner of produced data by this RPC, such that downstream RPCs can know
         # whether to fetch these data.
@@ -501,7 +598,9 @@ async def model_rpc_request_func(
             producer_mapping = defaultdict(list)
             for i, dp_idx in enumerate(dp_indices):
                 producer_mapping[dp_idx].append(i)
-            producer_mapping = {k: sorted(v) for k, v in producer_mapping.items()}
+            producer_mapping = {
+                k: sorted(v) for k, v in producer_mapping.items()
+            }
             producer_mappings[names[0], k] = producer_mapping
 
         # send partitioned data to model workers
@@ -519,8 +618,12 @@ async def model_rpc_request_func(
             seqlens=sample.seqlens,
             handlers=handlers,
         )
-        await request_queues[response_coroutine_idx].put((req_ids, other_req_ids, time.perf_counter()))
-        response_coroutine_idx = (response_coroutine_idx + 1) % len(request_queues)
+        await request_queues[response_coroutine_idx].put(
+            (req_ids, other_req_ids, time.perf_counter())
+        )
+        response_coroutine_idx = (response_coroutine_idx + 1) % len(
+            request_queues
+        )
         logger.info(f"Model rpc {rpc.name} requested.")
 
 
@@ -534,9 +637,13 @@ async def model_rpc_reply_func(
 ):
     topo = model_topos[rpc.model_name]
     dp_size = topo.get_dim("data")
-    dp_head_indices = [topo.get_rank(data=i, pipe=topo.get_dim("pipe") - 1, model=0) for i in range(dp_size)]
+    dp_head_indices = [
+        topo.get_rank(data=i, pipe=topo.get_dim("pipe") - 1, model=0)
+        for i in range(dp_size)
+    ]
     dp_head_handlers = [
-        config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, i) for i in dp_head_indices
+        config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, i)
+        for i in dp_head_indices
     ]
 
     request_queue = ctrl.request_queues[rpc.name][corountine_idx]
@@ -546,20 +653,34 @@ async def model_rpc_reply_func(
         req_ids, other_req_ids, tik = await request_queue.get()
 
         # empty requests with parameter synchronization hooks may be issued
-        await asyncio.gather(*[
-            _awaitable_response(stream, pattern=create_exact_match_pattern([req_id]))
-            for req_id in other_req_ids
-        ])
+        await asyncio.gather(
+            *[
+                _awaitable_response(
+                    stream, pattern=create_exact_match_pattern([req_id])
+                )
+                for req_id in other_req_ids
+            ]
+        )
 
         responses = await asyncio.gather(
-            *
-            [_awaitable_response(stream, pattern=create_exact_match_pattern([req_id])) for req_id in req_ids])
+            *[
+                _awaitable_response(
+                    stream, pattern=create_exact_match_pattern([req_id])
+                )
+                for req_id in req_ids
+            ]
+        )
         # logger.info(f"rpc {rpc.name} received responses {req_ids}")
 
-        responses: List[request_reply_stream.Payload] = [responses[i] for i in dp_head_indices]
+        responses: List[request_reply_stream.Payload] = [
+            responses[i] for i in dp_head_indices
+        ]
         recv_tik = time.perf_counter()
 
-        if (isinstance(responses[-1].data, dict) and responses[-1].data.get("seqlens") is not None):
+        if (
+            isinstance(responses[-1].data, dict)
+            and responses[-1].data.get("seqlens") is not None
+        ):
             res = []
             for k in responses[0].data["keys"]:
                 if k in rpc.output_key_remap:
@@ -579,12 +700,20 @@ async def model_rpc_reply_func(
         if rpc.is_dst:
             await ctrl.train_count.put(1)
         else:
-            buffer_indices = sum([response.data["buffer_indices"] for response in responses], [])
+            buffer_indices = sum(
+                [response.data["buffer_indices"] for response in responses], []
+            )
             keys = res
-            seqlens = sum([response.data["seqlens"] for response in responses], [])
-            await buffer.amend_batch(buffer_indices, [(keys, seqlen) for seqlen in seqlens])
+            seqlens = sum(
+                [response.data["seqlens"] for response in responses], []
+            )
+            await buffer.amend_batch(
+                buffer_indices, [(keys, seqlen) for seqlen in seqlens]
+            )
 
-        logger.info(f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s.")
+        logger.info(
+            f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s."
+        )
 
 
 async def load_data_func(
@@ -606,12 +735,14 @@ async def load_data_func(
 
         is_final_batch = False
         while not is_final_batch:
-            data_batches: List[data_api.DataBatchMeta] = await group_rpc_blocked(
-                stream,
-                handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
-                handle_type="fetch",
-                datas=[None for _ in range(src_rpc_dp_size)],
-                verbose=False,
+            data_batches: List[data_api.DataBatchMeta] = (
+                await group_rpc_blocked(
+                    stream,
+                    handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
+                    handle_type="fetch",
+                    datas=[None for _ in range(src_rpc_dp_size)],
+                    verbose=False,
+                )
             )
             cur_epoch = data_batches[0].epoch
 
@@ -626,9 +757,13 @@ async def load_data_func(
             all_data += data_api.unpack_data_batch(x)
 
         steps_per_epoch = len(all_data) // src_rpc.max_n_seqs
-        avg_tokens_per_batch = sum(x.seqlens[0] for x in all_data) / steps_per_epoch
-        logger.info(f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
-                    f"Each batch has {avg_tokens_per_batch:.2f} tokens in average.")
+        avg_tokens_per_batch = (
+            sum(x.seqlens[0] for x in all_data) / steps_per_epoch
+        )
+        logger.info(
+            f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
+            f"Each batch has {avg_tokens_per_batch:.2f} tokens in average."
+        )
         await ctrl.data_spec_queue.put((steps_per_epoch, avg_tokens_per_batch))
 
         dp_data_batches = [0 for _ in range(src_rpc_dp_size)]
@@ -639,14 +774,23 @@ async def load_data_func(
         seqlens = np.array([x.seqlens[0] for x in all_data], dtype=np.int32)
 
         # NOTE: The reordered indices prioritize longer sequences for detecting OOM errors early.
-        reorder_indices, _ = datapack.reorder_to_balanced_batches(seqlens, src_rpc.max_n_seqs)
+        reorder_indices, _ = datapack.reorder_to_balanced_batches(
+            seqlens, src_rpc.max_n_seqs
+        )
         recover_indices = np.argsort(reorder_indices)
-        all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
+        all_data: List[data_api.DataBatchMeta] = [
+            all_data[i] for i in reorder_indices
+        ]
 
         keys = all_data[0].keys
         batch = [(keys, x.seqlens[0], x.hash_vals[0]) for x in all_data]
         if ctrl.is_recover_epoch:
-            batch = list(filter(lambda x: x[2] not in ctrl.hash_vals_to_ignore_in_recover, batch))
+            batch = list(
+                filter(
+                    lambda x: x[2] not in ctrl.hash_vals_to_ignore_in_recover,
+                    batch,
+                )
+            )
         buffer_indices = await buffer.put_batch(batch)
 
         all_data = [all_data[i] for i in recover_indices]
@@ -676,7 +820,8 @@ async def load_data_func(
             buffer.lock.notify(buffer.n_rpcs)
 
         blogger.info(
-            f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s.")
+            f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s."
+        )
 
 
 def _gather_stat(src: List[Dict]) -> Dict:
@@ -685,10 +830,15 @@ def _gather_stat(src: List[Dict]) -> Dict:
         for k, v in reply.items():
             cnt[k] = cnt.get(k, 0) + 1
             stats[k] = stats.get(k, 0) + v
-    res = {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
+    res = {
+        k: v / cnt
+        for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())
+    }
     for k, c in cnt.items():
         if c != len(src):
-            logger.warning(f"Gathered `{k}` is not present in every returned stats.")
+            logger.warning(
+                f"Gathered `{k}` is not present in every returned stats."
+            )
     for k, v in res.items():
         if any(abs(v - x.get(k, None)) > 1e-4 for x in src):
             logger.warning(
@@ -705,9 +855,13 @@ async def model_eval_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
-        eval_stats = await group_rpc_blocked(stream, handlers, "evaluate", [None for _ in handlers])
+        eval_stats = await group_rpc_blocked(
+            stream, handlers, "evaluate", [None for _ in handlers]
+        )
         eval_stats = _gather_stat(list(filter(lambda x: bool(x), eval_stats)))
-        logger.info(f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}")
+        logger.info(
+            f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}"
+        )
 
 
 async def model_save_thread_func(
@@ -724,7 +878,8 @@ async def model_save_thread_func(
                 model_save_root,
                 s.model_name.role,
                 f"epoch{epoch}epochstep{epoch_step}globalstep{global_step}",
-            ) for s in handlers
+            )
+            for s in handlers
         ]
         await group_rpc_blocked(stream, handlers, "save", model_save_dirs)
         logger.info(f"Save models at epoch {epoch} step {epoch_step}.")
@@ -736,7 +891,9 @@ class MasterWorker(worker_base.Worker):
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
 
-        self.__model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = (config.model_topos)
+        self.__model_topos: Dict[
+            ModelName, topology.PipeModelDataParallelTopology
+        ] = config.model_topos
 
         # Build execution graph and initialize concurrency utilities.
         self.__model_rpcs, _ = dfg.build_graph(config.model_rpcs)
@@ -744,9 +901,11 @@ class MasterWorker(worker_base.Worker):
             _dp_size = self.__model_topos[rpc.model_name].get_dim("data")
             _pp_size = self.__model_topos[rpc.model_name].get_dim("pipe")
             if rpc.min_n_seqs < _dp_size * _pp_size:
-                logger.warning(f"The batch size of RPC `{rpc.name}` in terms of #seqs is smaller than "
-                               f"dp_size * pp_size ({_dp_size}*{_pp_size}). Forcely enlarge the batch size "
-                               f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.min_n_seqs})")
+                logger.warning(
+                    f"The batch size of RPC `{rpc.name}` in terms of #seqs is smaller than "
+                    f"dp_size * pp_size ({_dp_size}*{_pp_size}). Forcely enlarge the batch size "
+                    f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.min_n_seqs})"
+                )
                 rpc.min_n_seqs_per_dp = 1
                 rpc.min_n_seqs = _dp_size * _pp_size
 
@@ -754,8 +913,12 @@ class MasterWorker(worker_base.Worker):
         for msid, mwid in self.config.msid2mwid.items():
             self.__mwid2msids[mwid].append(msid)
 
-        self.__rpc_srcs = list(filter(lambda rpc: rpc.is_src, self.__model_rpcs))
-        self.__rpc_dsts = list(filter(lambda rpc: rpc.is_dst, self.__model_rpcs))
+        self.__rpc_srcs = list(
+            filter(lambda rpc: rpc.is_src, self.__model_rpcs)
+        )
+        self.__rpc_dsts = list(
+            filter(lambda rpc: rpc.is_dst, self.__model_rpcs)
+        )
         self.__n_rpc_srcs = len(self.__rpc_srcs)
         self.__n_rpc_dsts = len(self.__rpc_dsts)
 
@@ -781,7 +944,9 @@ class MasterWorker(worker_base.Worker):
 
         self.__initialized = False
         self.__recover_run = os.environ.get("RECOVER_RUN", "0") == "1"
-        self.__recover_info = (recover.load_recover_info() if self.__recover_run else None)
+        self.__recover_info = (
+            recover.load_recover_info() if self.__recover_run else None
+        )
         self.__recover_first_epoch_done = False
 
         self._epoch = 0
@@ -789,9 +954,13 @@ class MasterWorker(worker_base.Worker):
         if self.__recover_run:
             self._epoch = self.__recover_info.recover_start.epoch
             self._epoch_step = self.__recover_info.recover_start.epoch_step
-            self._start_global_step = self._global_step = (self.__recover_info.recover_start.global_step)
-            logger.info(f"Recovering from previous run: "
-                        f"{(self._epoch, self._epoch_step, self._global_step)}")
+            self._start_global_step = self._global_step = (
+                self.__recover_info.recover_start.global_step
+            )
+            logger.info(
+                f"Recovering from previous run: "
+                f"{(self._epoch, self._epoch_step, self._global_step)}"
+            )
 
         self.__this_step_info = recover.StepInfo(
             epoch=0,
@@ -815,13 +984,16 @@ class MasterWorker(worker_base.Worker):
         src_rpc_dp_size = src_rpc_topo.get_dim("data")
         src_rpc_pp_size = src_rpc_topo.get_dim("pipe")
         for i in range(src_rpc_dp_size):
-            rank = src_rpc_topo.get_rank(data=i, pipe=src_rpc_pp_size - 1, model=0)
+            rank = src_rpc_topo.get_rank(
+                data=i, pipe=src_rpc_pp_size - 1, model=0
+            )
             handler_routing[f"__data{i}__"] = self.config.msid2mwid[
                 config_pkg.ModelShardID.from_parallelism_rank(
                     model_name=src_rpc.model_name,
                     topo=src_rpc_topo,
                     parallelism_rank=rank,
-                )]
+                )
+            ]
         self.__stream = request_reply_stream.make_master_stream(
             self.config.worker_info,
             n_subscribers=self.config.n_model_workers,
@@ -831,7 +1003,9 @@ class MasterWorker(worker_base.Worker):
 
         src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
         src_rpc_model_name = src_rpc.model_name
-        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
+        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim(
+            "data"
+        )
 
         # Request training specification from data workers.
         total_n_seqs = 0
@@ -841,14 +1015,19 @@ class MasterWorker(worker_base.Worker):
                 handle_name="spec",
             )
             self.__stream.post(p)
-            self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
+            self.__stream.poll(
+                block=True, pattern=create_exact_match_pattern([p.syn_reply_id])
+            )
             self.__stream.post(
-                request_reply_stream.Payload(handler=f"__data{i}__",
-                                             handle_name="ack",
-                                             request_id=p.ack_reply_id))
-            n_seqs_per_dataset_shard: int = self.__stream.poll(block=True,
-                                                               pattern=create_exact_match_pattern(
-                                                                   [p.request_id])).data
+                request_reply_stream.Payload(
+                    handler=f"__data{i}__",
+                    handle_name="ack",
+                    request_id=p.ack_reply_id,
+                )
+            )
+            n_seqs_per_dataset_shard: int = self.__stream.poll(
+                block=True, pattern=create_exact_match_pattern([p.request_id])
+            ).data
             total_n_seqs += n_seqs_per_dataset_shard
 
         event_loop = asyncio.new_event_loop()
@@ -860,11 +1039,15 @@ class MasterWorker(worker_base.Worker):
         for model_name, topo in self.config.model_topos.items():
             num_dp = topo.get_dim("data")
             self.__all_model_handlers += [
-                config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
+                config_pkg.ModelShardID.from_parallelism_rank(
+                    model_name, topo, j
+                )
                 for j in range(topo.world_size())
             ]
             self.__dp0_model_handlers += [
-                config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
+                config_pkg.ModelShardID.from_parallelism_rank(
+                    model_name, topo, j
+                )
                 for j in topo.filter_match(data=0)
             ]
 
@@ -873,16 +1056,25 @@ class MasterWorker(worker_base.Worker):
         self.__model_configs: Dict[ModelName, None | ReaLModelConfig] = {}
         for model_name in self.config.model_topos:
             p = request_reply_stream.Payload(
-                handler=config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, 0),
+                handler=config_pkg.ModelShardID.from_parallelism_rank(
+                    model_name, topo, 0
+                ),
                 handle_name="model_config",
             )
             self.__stream.post(p)
-            self.__stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
+            self.__stream.poll(
+                block=True, pattern=create_exact_match_pattern([p.syn_reply_id])
+            )
             self.__stream.post(
-                request_reply_stream.Payload(handler=p.handler, handle_name="ack", request_id=p.ack_reply_id))
-            self.__model_configs[model_name] = self.__stream.poll(pattern=create_exact_match_pattern(
-                [p.request_id]),
-                                                                  block=True).data
+                request_reply_stream.Payload(
+                    handler=p.handler,
+                    handle_name="ack",
+                    request_id=p.ack_reply_id,
+                )
+            )
+            self.__model_configs[model_name] = self.__stream.poll(
+                pattern=create_exact_match_pattern([p.request_id]), block=True
+            ).data
 
         # Initialize model backends.
         # For models with the same role, they share the same model parameters.
@@ -895,7 +1087,9 @@ class MasterWorker(worker_base.Worker):
         # If all replicas are not trainable, the parameters are held in replica 0.
         _model_is_trainable = collections.defaultdict(list)
         for rpc in self.__model_rpcs:
-            _model_is_trainable[rpc.model_name].append(rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP)
+            _model_is_trainable[rpc.model_name].append(
+                rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
+            )
 
         _model_is_trainable = {
             model_name: any(values)
@@ -903,15 +1097,28 @@ class MasterWorker(worker_base.Worker):
         }
 
         _roles = set([rpc.model_name.role for rpc in self.__model_rpcs])
-        _role_cnt = {role: len(set([rpc.model_name for rpc in self.__model_rpcs 
-                                    if rpc.model_name.role == role])) for role in _roles}
+        _role_cnt = {
+            role: len(
+                set(
+                    [
+                        rpc.model_name
+                        for rpc in self.__model_rpcs
+                        if rpc.model_name.role == role
+                    ]
+                )
+            )
+            for role in _roles
+        }
         _reordered_model_names = []
         for role in _roles:
             if _role_cnt[role] == 1:
                 _reordered_model_names.append(ModelName(role, 0))
                 continue
             _indices = list(range(_role_cnt[role]))
-            _trainable_this_role = [_model_is_trainable[ModelName(role, i)] for i in range(_role_cnt[role])]
+            _trainable_this_role = [
+                _model_is_trainable[ModelName(role, i)]
+                for i in range(_role_cnt[role])
+            ]
             if any(_trainable_this_role):
                 assert sum(_trainable_this_role) == 1
                 _trainable_idx = _trainable_this_role.index(True)
@@ -921,28 +1128,37 @@ class MasterWorker(worker_base.Worker):
                 _reordered_model_names.append(ModelName(role, i))
 
         # Send initialization requests.
-        self.logger.info(f"Initialize model backends with order: {_reordered_model_names}.")
+        self.logger.info(
+            f"Initialize model backends with order: {_reordered_model_names}."
+        )
         _initialized_roles = []
         for model_name in _reordered_model_names:
             topo = self.config.model_topos[model_name]
             # Build FinetuneSpec, which is required to initialize backends.
             _handlers = [
-                config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
+                config_pkg.ModelShardID.from_parallelism_rank(
+                    model_name, topo, j
+                )
                 for j in range(topo.world_size())
             ]
             train_rpcs = list(
                 filter(
-                    lambda rpc: rpc.model_name == model_name and rpc.interface_type == dfg.ModelInterfaceType.
-                    TRAIN_STEP,
+                    lambda rpc: rpc.model_name == model_name
+                    and rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP,
                     self.__model_rpcs,
-                ))
+                )
+            )
             if len(train_rpcs) > 0:
                 assert len(train_rpcs) == 1
-                steps_per_epoch = (total_n_seqs * self.config.exp_ctrl.total_train_epochs +
-                                   train_rpcs[0].max_n_seqs - 1) // train_rpcs[0].max_n_seqs
+                steps_per_epoch = (
+                    total_n_seqs * self.config.exp_ctrl.total_train_epochs
+                    + train_rpcs[0].max_n_seqs
+                    - 1
+                ) // train_rpcs[0].max_n_seqs
                 ft_spec = model_api.FinetuneSpec(
                     total_train_epochs=self.config.exp_ctrl.total_train_epochs,
-                    total_train_steps=steps_per_epoch * self.config.exp_ctrl.total_train_epochs,
+                    total_train_steps=steps_per_epoch
+                    * self.config.exp_ctrl.total_train_epochs,
                     steps_per_epoch=steps_per_epoch,
                 )
             else:
@@ -956,7 +1172,9 @@ class MasterWorker(worker_base.Worker):
             # Reallocate parameters if necessary.
             if model_name.role in _initialized_roles:
                 assert model_name in _param_recevers
-                _param_realloc_src = _param_senders[_param_recevers.index(model_name)]
+                _param_realloc_src = _param_senders[
+                    _param_recevers.index(model_name)
+                ]
                 _request_parameter_sync(
                     stream=self.__stream,
                     msid2mwid=self.config.msid2mwid,
@@ -973,7 +1191,8 @@ class MasterWorker(worker_base.Worker):
                     handlers=_handlers,
                     handle_type="initialize",
                     datas=model_ft_specs,
-                ))
+                )
+            )
             event_loop.run_until_complete(asyncio.gather(_task))[0]
 
             # Reallocate parameters back.
@@ -1001,19 +1220,28 @@ class MasterWorker(worker_base.Worker):
             data_spec_queue=asyncio.Queue(1),
             eval_queue=asyncio.Queue(1),
             save_queue=asyncio.Queue(1),
-            rpc_traversal={rpc.name: 0
-                           for rpc in self.__model_rpcs},
-            can_do_rpc={rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls)
-                        for rpc in self.__model_rpcs},
+            rpc_traversal={rpc.name: 0 for rpc in self.__model_rpcs},
+            can_do_rpc={
+                rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls)
+                for rpc in self.__model_rpcs
+            },
             request_queues={
-                rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
+                rpc.name: [
+                    asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)
+                ]
                 for rpc in self.__model_rpcs
             },
             is_recover_epoch=self.__recover_run,
-            used_hash_vals_this_epoch=(self.__recover_info.hash_vals_to_ignore
-                                       if self.__recover_run else set()),
-            hash_vals_to_ignore_in_recover=(self.__recover_info.hash_vals_to_ignore
-                                            if self.__recover_run else set()),
+            used_hash_vals_this_epoch=(
+                self.__recover_info.hash_vals_to_ignore
+                if self.__recover_run
+                else set()
+            ),
+            hash_vals_to_ignore_in_recover=(
+                self.__recover_info.hash_vals_to_ignore
+                if self.__recover_run
+                else set()
+            ),
         )
 
         self.__fetch_master_ctl = asyncio.Queue(1)
@@ -1045,7 +1273,8 @@ class MasterWorker(worker_base.Worker):
                     model_topos=self.__model_topos,
                     model_configs=self.__model_configs,
                     ctrl=self.__rpc_ctrl,
-                ))
+                )
+            )
             reply_tasks = []
             for j in range(rpc.max_concurrent_calls):
                 _reply_task = event_loop.create_task(
@@ -1056,7 +1285,8 @@ class MasterWorker(worker_base.Worker):
                         buffer=self.__seqbuffer,
                         model_topos=self.__model_topos,
                         ctrl=self.__rpc_ctrl,
-                    ))
+                    )
+                )
                 reply_tasks.append(_reply_task)
             coroutine_tasks += [request_task] + reply_tasks
 
@@ -1070,14 +1300,16 @@ class MasterWorker(worker_base.Worker):
                 buffer=self.__seqbuffer,
                 stream=self.__stream,
                 ctrl=self.__rpc_ctrl,
-            ))
+            )
+        )
         eval_task = event_loop.create_task(
             model_eval_thread_func(
                 stream=self.__stream,
                 handlers=self.__all_model_handlers,
                 eval_queue=self.__rpc_ctrl.eval_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
-            ))
+            )
+        )
         save_task = event_loop.create_task(
             model_save_thread_func(
                 stream=self.__stream,
@@ -1085,12 +1317,15 @@ class MasterWorker(worker_base.Worker):
                 model_save_root=self.MODEL_SAVE_ROOT,
                 save_queue=self.__rpc_ctrl.save_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
-            ))
+            )
+        )
         coroutine_tasks += [load_data_task, eval_task, save_task]
 
         # Set up a run context of EventLoop.run_util_complete, baiscally copy-paste from cpython.
         # With this context, we can call the non-block EventLoop._run_once (similar to worker._poll).
-        self.__asyncio_ctx = setup_run_until_complete(event_loop, asyncio.gather(*coroutine_tasks))
+        self.__asyncio_ctx = setup_run_until_complete(
+            event_loop, asyncio.gather(*coroutine_tasks)
+        )
 
         logger.info(f"Coroutines created. The master worker is ready to run.")
 
@@ -1109,7 +1344,9 @@ class MasterWorker(worker_base.Worker):
         # Main execution steps. The graph runs under-the-hood in RPC & stream threads.
         # Wait for the finish of the traversal of the execution graph.
         execution_start = time.perf_counter()
-        logger.info("Master worker is waiting for the finish of the execution graph.")
+        logger.info(
+            "Master worker is waiting for the finish of the execution graph."
+        )
         _rpc_dst_cnt = 0
         while _rpc_dst_cnt < self.__n_rpc_dsts:
             try:
@@ -1143,8 +1380,9 @@ class MasterWorker(worker_base.Worker):
             is_new_epoch = False
 
         try:
-            (self.__cur_steps_per_epoch,
-             self.__cur_avg_tokens_per_batch) = (self.__rpc_ctrl.data_spec_queue.get_nowait())
+            (self.__cur_steps_per_epoch, self.__cur_avg_tokens_per_batch) = (
+                self.__rpc_ctrl.data_spec_queue.get_nowait()
+            )
         except asyncio.QueueEmpty:
             pass
 
@@ -1164,9 +1402,13 @@ class MasterWorker(worker_base.Worker):
         self._global_step += 1
 
         if should_eval:
-            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
+            self.__rpc_ctrl.eval_queue.put_nowait(
+                (self._epoch, self._epoch_step)
+            )
         if should_save:
-            self.__rpc_ctrl.save_queue.put_nowait((self._epoch, self._epoch_step, self._global_step))
+            self.__rpc_ctrl.save_queue.put_nowait(
+                (self._epoch, self._epoch_step, self._global_step)
+            )
 
         # update step info
         self.__last_step_info = self.__this_step_info
@@ -1187,15 +1429,20 @@ class MasterWorker(worker_base.Worker):
 
         # calculate flops
         #########################################
-        if not all(isinstance(v, ReaLModelConfig) for v in self.__model_configs.values()):
-            logger.warning(f"Not all models are ReaLModels. Unable to calculate FLOP/s.")
+        if not all(
+            isinstance(v, ReaLModelConfig)
+            for v in self.__model_configs.values()
+        ):
+            logger.warning(
+                f"Not all models are ReaLModels. Unable to calculate FLOP/s."
+            )
             flops = None
         else:
             flops = 0
             for train_bs, train_seqlens, real_config in zip(
-                    self.__rpc_ctrl.data_amount.train_bs,
-                    self.__rpc_ctrl.data_amount.train_seqlens,
-                    self.__rpc_ctrl.data_amount.train_configs,
+                self.__rpc_ctrl.data_amount.train_bs,
+                self.__rpc_ctrl.data_amount.train_seqlens,
+                self.__rpc_ctrl.data_amount.train_configs,
             ):
                 flops += calculate_llama_train_flops(
                     checkpoint_activations_factor=4,
@@ -1207,9 +1454,9 @@ class MasterWorker(worker_base.Worker):
                     vocab_size=real_config.vocab_size,
                 )
             for inf_bs, inf_seqlens, real_config in zip(
-                    self.__rpc_ctrl.data_amount.inf_bs,
-                    self.__rpc_ctrl.data_amount.inf_seqlens,
-                    self.__rpc_ctrl.data_amount.inf_configs,
+                self.__rpc_ctrl.data_amount.inf_bs,
+                self.__rpc_ctrl.data_amount.inf_seqlens,
+                self.__rpc_ctrl.data_amount.inf_configs,
             ):
                 flops += caculuate_llama_forward_flops(
                     batch_size=inf_bs,
@@ -1220,10 +1467,10 @@ class MasterWorker(worker_base.Worker):
                     vocab_size=real_config.vocab_size,
                 )
             for gen_bs, prompt_lens, gen_len, real_config in zip(
-                    self.__rpc_ctrl.data_amount.gen_bs,
-                    self.__rpc_ctrl.data_amount.prompt_lens,
-                    self.__rpc_ctrl.data_amount.gen_len,
-                    self.__rpc_ctrl.data_amount.gen_configs,
+                self.__rpc_ctrl.data_amount.gen_bs,
+                self.__rpc_ctrl.data_amount.prompt_lens,
+                self.__rpc_ctrl.data_amount.gen_len,
+                self.__rpc_ctrl.data_amount.gen_configs,
             ):
                 flops += calculate_llama_gen_flops(
                     batch_size=gen_bs,
@@ -1235,7 +1482,9 @@ class MasterWorker(worker_base.Worker):
                     vocab_size=real_config.vocab_size,
                 )
             tflops = flops / (e2e_time * (10**12))
-            tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
+            tflops_per_gpu = flops / (
+                e2e_time * self.config.n_model_workers * (10**12)
+            )
         self.__rpc_ctrl.data_amount.clear()
         #########################################
 
@@ -1250,7 +1499,10 @@ class MasterWorker(worker_base.Worker):
             s += f"Average #tokens per batch is {self.__cur_avg_tokens_per_batch:.0f}. "
         s += f"#End to end# execution time: *{e2e_time:.3f}*s. "
         s += f"Total time consumption: {total_time_consumption:.3f}s. "
-        if self.__cur_steps_per_epoch is not None and len(self.e2e_time_history) > 2:
+        if (
+            self.__cur_steps_per_epoch is not None
+            and len(self.e2e_time_history) > 2
+        ):
             remaining_steps = self.__cur_steps_per_epoch - self._epoch_step
             remaining_epochs = self.__total_train_epochs - self._epoch
             avg_t = np.mean(self.e2e_time_history[2:])
@@ -1261,25 +1513,37 @@ class MasterWorker(worker_base.Worker):
             s += f"TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
         logger.info(s)
 
-        if (self.__benchmark_steps is not None and self._global_step >= self.__benchmark_steps):
+        if (
+            self.__benchmark_steps is not None
+            and self._global_step >= self.__benchmark_steps
+        ):
             logger.info(
                 f"Finished benchmark {self.__benchmark_steps}. Total time consumption {total_time_consumption:.3f}"
             )
-            logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
+            logger.info(
+                f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*"
+            )
             for i, level_time_history in self.level_time_history.items():
-                logger.info(f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*")
+                logger.info(
+                    f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*"
+                )
             self.experiment_complete_exit(f"Benchmark completes! Yeah!!!")
 
         if self.__clear_data_cache_reqids is not None:
             [
-                self.__stream.poll(block=True, pattern=create_exact_match_pattern([reqid]))
+                self.__stream.poll(
+                    block=True, pattern=create_exact_match_pattern([reqid])
+                )
                 for reqid in self.__clear_data_cache_reqids
             ]
         self.__clear_data_cache_reqids = request_all(
             self.__stream,
             [vs[0] for vs in self.__mwid2msids.values()],
             "clear_data_cache",
-            [self.__rpc_ctrl.training_buffer_indices for _ in self.__all_model_handlers],
+            [
+                self.__rpc_ctrl.training_buffer_indices
+                for _ in self.__all_model_handlers
+            ],
         )
         self.__rpc_ctrl.training_buffer_indices.clear()
 
@@ -1291,8 +1555,14 @@ class MasterWorker(worker_base.Worker):
         try:
             teardown_run_util_complete(self.__asyncio_ctx)
         except RuntimeError as e:
-            logger.info(colorama.Style.RESET_ALL + colorama.Fore.YELLOW + colorama.Style.BRIGHT + "\033[1m" +
-                        msg + colorama.Style.RESET_ALL)
+            logger.info(
+                colorama.Style.RESET_ALL
+                + colorama.Fore.YELLOW
+                + colorama.Style.BRIGHT
+                + "\033[1m"
+                + msg
+                + colorama.Style.RESET_ALL
+            )
             self.exit()
             # raise ExperimentComplete(msg) from e
 
@@ -1321,7 +1591,9 @@ class MasterWorker(worker_base.Worker):
                 sleep_time = 600
                 current_sleep_time = 0
                 while current_sleep_time < sleep_time:
-                    logger.info(f"ERROR exit, waited {current_sleep_time} s for interruption ...")
+                    logger.info(
+                        f"ERROR exit, waited {current_sleep_time} s for interruption ..."
+                    )
                     time.sleep(10)
                     current_sleep_time += 10
             except KeyboardInterrupt:

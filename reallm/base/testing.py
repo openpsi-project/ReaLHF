@@ -14,7 +14,14 @@ import torch.distributed as dist
 
 from reallm.api.core import config
 from reallm.api.core.config import ModelFamily
-from reallm.base import constants, gpu_utils, name_resolve, namedarray, names, topology
+from reallm.base import (
+    constants,
+    gpu_utils,
+    name_resolve,
+    namedarray,
+    names,
+    topology,
+)
 from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
 # mp.set_start_method("spawn", force=True)  # Otherwise a CUDA reinitialization error will be thrown
@@ -22,6 +29,7 @@ from reallm.base.topology import ParallelGrid, PipeModelDataParallelTopology
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
 _DEFAULT_TRIAL_NAME = "test"
+
 
 class StandaloneTestingProcess(mp.Process):
     """Aims for defining this class:
@@ -48,8 +56,12 @@ class StandaloneTestingProcess(mp.Process):
         self.err_queue = err_queue
         self.barrier = barrier
 
-        self.expr_name = expr_name if expr_name is not None else _DEFAULT_EXPR_NAME
-        self.trial_name = trial_name if trial_name is not None else _DEFAULT_TRIAL_NAME
+        self.expr_name = (
+            expr_name if expr_name is not None else _DEFAULT_EXPR_NAME
+        )
+        self.trial_name = (
+            trial_name if trial_name is not None else _DEFAULT_TRIAL_NAME
+        )
 
         self.func = func
         self.args = args
@@ -71,7 +83,9 @@ class StandaloneTestingProcess(mp.Process):
         self.barrier.wait()
 
         # init process group
-        gpu_utils.reveal_ddp_identity(self.expr_name, self.trial_name, self.rank)
+        gpu_utils.reveal_ddp_identity(
+            self.expr_name, self.trial_name, self.rank
+        )
         self.barrier.wait()
         from reallm.impl.model.comm.global_comm import setup_global_comm
 
@@ -125,7 +139,9 @@ def init_global_constants(
         wg_ranks = [constants.to_global_pg_rank(i) for i in range(ws)]
         wg = topology.new_or_get_group(ranks=wg_ranks)
 
-        constants.set_parallelism_group(model_name=model_name, pgroup=wg, ranks=wg_ranks)
+        constants.set_parallelism_group(
+            model_name=model_name, pgroup=wg, ranks=wg_ranks
+        )
         grid = ParallelGrid(process_group=wg, topology=topo)
         constants.set_grid(model_name=model_name, grid=grid)
 
@@ -158,7 +174,8 @@ class LocalMultiProcessTest:
                 expr_name=expr_name,
                 trial_name=trial_name,
                 **kwargs,
-            ) for rank in range(world_size)
+            )
+            for rank in range(world_size)
         ]
 
     def launch(self):
@@ -178,7 +195,9 @@ class LocalMultiProcessTest:
 def clear_name_resolve(expr_name=None, trial_name=None):
     expr_name = expr_name if expr_name is not None else _DEFAULT_EXPR_NAME
     trial_name = trial_name if trial_name is not None else _DEFAULT_TRIAL_NAME
-    name_resolve.clear_subtree(names.trial_root(experiment_name=expr_name, trial_name=trial_name))
+    name_resolve.clear_subtree(
+        names.trial_root(experiment_name=expr_name, trial_name=trial_name)
+    )
 
 
 def make_finetune_spec(
@@ -199,7 +218,17 @@ def make_finetune_spec(
 
 
 def random_sentence(min_len=100, max_len=128):
-    words = ["the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog"]
+    words = [
+        "the",
+        "quick",
+        "brown",
+        "fox",
+        "jumped",
+        "over",
+        "the",
+        "lazy",
+        "dog",
+    ]
     sentence_length = random.randint(min_len, max_len)
     return " ".join(random.choices(words, k=sentence_length))
     # return "Output less than 50 words:"
@@ -221,7 +250,13 @@ def make_input(tokenizer, device, s):
 def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
     random.seed(seed)
     whole_batch = [random_sentence() for _ in range(batch_size)]
-    dp_batch = whole_batch[batch_size // dp_worldsize * dp_rank:batch_size // dp_worldsize * (dp_rank + 1)]
+    dp_batch = whole_batch[
+        batch_size
+        // dp_worldsize
+        * dp_rank : batch_size
+        // dp_worldsize
+        * (dp_rank + 1)
+    ]
     return make_input(tokenizer, device, dp_batch)
 
 
@@ -232,8 +267,12 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
         assert num_dp == None
         dp_rank = constants.data_parallel_rank()
         num_dp = constants.data_parallel_world_size()
-    input_ids, attention_mask = make_batch(tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    input_ids, attention_mask = make_batch(
+        tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed
+    )
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(
+        input_ids, attention_mask
+    )
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
@@ -252,7 +291,9 @@ def random_sample(bs, seq_len, vocab_size):
 
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(
+        input_ids, attention_mask
+    )
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = namedarray.NamedArray(
         packed_input_ids=packed_input_ids,

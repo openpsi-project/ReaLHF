@@ -1,11 +1,24 @@
 import torch
 
-from reallm.api.core.dfg import ModelFamily, ModelInterface, ModelInterfaceType, ModelRPC
+from reallm.api.core.dfg import (
+    ModelFamily,
+    ModelInterface,
+    ModelInterfaceType,
+    ModelRPC,
+)
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PromptOnlyDatasetConfig
-from reallm.api.quickstart.device_mesh import AllocationConfig, DeviceMesh, RPCAllocation
+from reallm.api.quickstart.device_mesh import (
+    AllocationConfig,
+    DeviceMesh,
+    RPCAllocation,
+)
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
-from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig, ParallelismConfig
+from reallm.api.quickstart.model import (
+    get_real_model_config,
+    ModelTrainEvalConfig,
+    ParallelismConfig,
+)
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.experiments.common.common import CommonExperimentConfig
 from reallm.experiments.common.utils import *
@@ -118,7 +131,9 @@ class PPOHyperparameters:
     use_adaptive_kl_ctl: bool = False
     adv_norm: bool = True
     value_norm: bool = True
-    value_norm_type: str = dataclasses.field(metadata={"choices": ["exp", "ma"]}, default="exp")
+    value_norm_type: str = dataclasses.field(
+        metadata={"choices": ["exp", "ma"]}, default="exp"
+    )
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
 
@@ -223,22 +238,46 @@ class PPOConfig(CommonExperimentConfig):
     rew_lora_path: Optional[str] = None
     rew_head_path: Optional[str] = None
 
-    actor: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
-    critic: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
-    ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
-    rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    actor: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
+    critic: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
+    ref: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
+    rew: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
 
     # for manual allocation only
-    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    critic_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    actor_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    critic_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_train: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
+    critic_train: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
+    actor_gen: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
+    critic_inf: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
+    rew_inf: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
+    ref_inf: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
 
-    dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
+    dataset: PromptOnlyDatasetConfig = dataclasses.field(
+        default_factory=PromptOnlyDatasetConfig
+    )
 
-    ppo: PPOHyperparameters = dataclasses.field(default_factory=PPOHyperparameters)
+    ppo: PPOHyperparameters = dataclasses.field(
+        default_factory=PPOHyperparameters
+    )
 
     def __post_init__(self):
         if self.is_sft_lora or self.sft_lora_path is not None:
@@ -344,7 +383,9 @@ class PPOConfig(CommonExperimentConfig):
 
         inf_ref_inputs = ["packed_seq", "cu_seqlens"]
         if not self.ppo.force_no_logits_mask:
-            inf_ref_inputs.append("packed_logits_mask",)
+            inf_ref_inputs.append(
+                "packed_logits_mask",
+            )
         inf_ref_logits = ModelRPC(
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
@@ -514,7 +555,9 @@ class PPOConfig(CommonExperimentConfig):
                 device_mesh=DeviceMesh(
                     n_nodes=1,
                     n_gpus_per_node=8,
-                    mapping=np.array([[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32),
+                    mapping=np.array(
+                        [[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32
+                    ),
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(
@@ -529,7 +572,9 @@ class PPOConfig(CommonExperimentConfig):
                 device_mesh=DeviceMesh(
                     n_nodes=1,
                     n_gpus_per_node=8,
-                    mapping=np.array([[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32),
+                    mapping=np.array(
+                        [[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32
+                    ),
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(
@@ -541,7 +586,9 @@ class PPOConfig(CommonExperimentConfig):
             )
         else:
             actor_train_n_nodes = min(
-                math.ceil(self.n_nodes * actor_size / (actor_size + critic_size)),
+                math.ceil(
+                    self.n_nodes * actor_size / (actor_size + critic_size)
+                ),
                 self.n_nodes - 1,
             )
             critic_train_n_nodes = self.n_nodes - actor_train_n_nodes
@@ -603,7 +650,9 @@ class PPOConfig(CommonExperimentConfig):
                 device_mesh=DeviceMesh(
                     n_nodes=1,
                     n_gpus_per_node=8,
-                    mapping=np.array([[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32),
+                    mapping=np.array(
+                        [[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32
+                    ),
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(
@@ -617,7 +666,9 @@ class PPOConfig(CommonExperimentConfig):
                 device_mesh=DeviceMesh(
                     n_nodes=1,
                     n_gpus_per_node=8,
-                    mapping=np.array([[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32),
+                    mapping=np.array(
+                        [[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32
+                    ),
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(
@@ -662,7 +713,14 @@ class PPOConfig(CommonExperimentConfig):
                     model_parallel_size=4,
                 ),
             )
-        return [actor_gen, actor_train, ref_inf, rew_inf, critic_inf, critic_train]
+        return [
+            actor_gen,
+            actor_train,
+            ref_inf,
+            rew_inf,
+            critic_inf,
+            critic_train,
+        ]
 
 
 register_quickstart_exp("ppo", PPOConfig)

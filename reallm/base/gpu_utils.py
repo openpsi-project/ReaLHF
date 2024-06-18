@@ -49,13 +49,23 @@ def set_cuda_device(device):
 
 
 def reveal_ddp_identity(expr_name, trial_name, worker_index):
-    master_group_name = names.trainer_ddp_peer(expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME)
-    name_resolve.add_subentry(master_group_name, str(worker_index), keepalive_ttl=30)
+    master_group_name = names.trainer_ddp_peer(
+        expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME
+    )
+    name_resolve.add_subentry(
+        master_group_name, str(worker_index), keepalive_ttl=30
+    )
     # local_peer_name = names.trainer_ddp_local_peer(expr_name, trial_name, socket.gethostname(), peer_name)
     # name_resolve.add_subentry(local_peer_name, peer_index, keepalive_ttl=30)
 
 
-def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment_name: str, trial_name: str):
+def isolate_cuda_device(
+    worker_type: str,
+    rank: int,
+    world_size: int,
+    experiment_name: str,
+    trial_name: str,
+):
     """Isolate CUDA_VISIBLE_DEVICES for each Slurm jobstep.
 
     To distinguish the concept of job/jobstep/worker/task, check scheduler/slurm/utils.py.
@@ -79,20 +89,35 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
 
     name_resolve_identifier = f"__type_{worker_type}"
     name_resolve.add_subentry(
-        names.trainer_ddp_local_peer(experiment_name, trial_name, socket.gethostname(),
-                                     name_resolve_identifier),
+        names.trainer_ddp_local_peer(
+            experiment_name,
+            trial_name,
+            socket.gethostname(),
+            name_resolve_identifier,
+        ),
         rank,
         keepalive_ttl=60,
     )
     name_resolve.add_subentry(
-        names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier),
+        names.trainer_ddp_peer(
+            experiment_name, trial_name, name_resolve_identifier
+        ),
         rank,
         keepalive_ttl=30,
     )
-    logger.debug(f"Worker type {worker_type} rank {rank} waiting for peers, world size {world_size}...")
-    while (len(
+    logger.debug(
+        f"Worker type {worker_type} rank {rank} waiting for peers, world size {world_size}..."
+    )
+    while (
+        len(
             name_resolve.get_subtree(
-                names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier))) < world_size):
+                names.trainer_ddp_peer(
+                    experiment_name, trial_name, name_resolve_identifier
+                )
+            )
+        )
+        < world_size
+    ):
         time.sleep(0.1)
     # logger.info(f"Rank {rank} discovers all peers, resolving local rank...")
     local_peer_name = names.trainer_ddp_local_peer(
@@ -101,19 +126,29 @@ def isolate_cuda_device(worker_type: str, rank: int, world_size: int, experiment
         socket.gethostname(),
         name_resolve_identifier,
     )
-    local_peers = list([str(x) for x in sorted([int(x) for x in name_resolve.get_subtree(local_peer_name)])])
+    local_peers = list(
+        [
+            str(x)
+            for x in sorted(
+                [int(x) for x in name_resolve.get_subtree(local_peer_name)]
+            )
+        ]
+    )
     # logger.info(f"Rank {rank} discovers local peers with global ranks {local_peers}")
 
     local_peer_index = local_peers.index(str(rank))
     if len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == len(local_peers):
-        local_gpu_id = list(map(int, os.environ["CUDA_VISIBLE_DEVICES"].split(",")))[local_peer_index]
+        local_gpu_id = list(
+            map(int, os.environ["CUDA_VISIBLE_DEVICES"].split(","))
+        )[local_peer_index]
     elif len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1:
         local_gpu_id = int(os.environ["CUDA_VISIBLE_DEVICES"])
     else:
         if not os.environ.get("REAL_MODE") == "LOCAL":
             raise RuntimeError(
                 f"Unresolvable CUDA_VISIBLE_DEVICES {os.environ['CUDA_VISIBLE_DEVICES']} on host {network.gethostname()}, "
-                f"local peers (global ranks) {local_peers}, local peer index {local_peer_index}.")
+                f"local peers (global ranks) {local_peers}, local peer index {local_peer_index}."
+            )
         devices = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
         local_gpu_id = int(devices[local_peer_index % len(devices)])
 

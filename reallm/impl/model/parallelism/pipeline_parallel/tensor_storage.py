@@ -16,12 +16,16 @@ def get_shape(tensor):
 def print_data_shapes(name, rank, mbid, x, ys):
     if rank == 0:
         logger.debug(f"{name}: rank {rank} mbid {mbid}")
-        logger.debug(f"shapes: x.pp_input {get_shape(x.pp_input)}, x.pp_output {get_shape(x.pp_output)},"
-                     f" x.cu_seqlens {get_shape(x.cu_seqlens)}")
+        logger.debug(
+            f"shapes: x.pp_input {get_shape(x.pp_input)}, x.pp_output {get_shape(x.pp_output)},"
+            f" x.cu_seqlens {get_shape(x.cu_seqlens)}"
+        )
         for i, y in enumerate(ys):
-            logger.debug(f"shapes: ys[{i}].input_ids {get_shape(y.packed_input_ids)}, "
-                         f"ys[{i}].k_cache {get_shape(y.k_cache)}, ys[{i}].v_cache {get_shape(y.v_cache)}, "
-                         f"ys[{i}].cache_seqlens {get_shape(y.cache_seqlens)}")
+            logger.debug(
+                f"shapes: ys[{i}].input_ids {get_shape(y.packed_input_ids)}, "
+                f"ys[{i}].k_cache {get_shape(y.k_cache)}, ys[{i}].v_cache {get_shape(y.v_cache)}, "
+                f"ys[{i}].cache_seqlens {get_shape(y.cache_seqlens)}"
+            )
 
 
 class TensorBuffer:
@@ -42,10 +46,18 @@ class TensorBuffer:
         device: torch.device,
         require_grads: bool = False,
     ):
-        self.tensors[name][mbid] = torch.zeros(shape, dtype=dtype, device=device, requires_grad=require_grads)
+        self.tensors[name][mbid] = torch.zeros(
+            shape, dtype=dtype, device=device, requires_grad=require_grads
+        )
         return self.tensors[name][mbid]
 
-    def get(self, name: str, mbid: int, remove: bool = False, raise_error: bool = True):
+    def get(
+        self,
+        name: str,
+        mbid: int,
+        remove: bool = False,
+        raise_error: bool = True,
+    ):
         try:
             if remove:
                 return self.tensors[name].pop(mbid)
@@ -57,7 +69,9 @@ class TensorBuffer:
             else:
                 return None
 
-    def remove(self, name: str, mbid: Optional[int] = None, check_exists: bool = False):
+    def remove(
+        self, name: str, mbid: Optional[int] = None, check_exists: bool = False
+    ):
         try:
             if mbid is None:
                 del self.tensors[name]
@@ -66,7 +80,9 @@ class TensorBuffer:
         except KeyError:
             if not check_exists:
                 return
-            raise KeyError(f"TensorBuffer.remove: key {name} mbid {mbid} not found")
+            raise KeyError(
+                f"TensorBuffer.remove: key {name} mbid {mbid} not found"
+            )
 
     def check_name(self, name: str):
         return name in self.tensors

@@ -103,8 +103,13 @@ def ffd_with_result_unsorted(a: np.ndarray, c: int) -> List[List[int]]:
 
 
 @numba.njit
-def allocate(lengths: np.ndarray, lengths_cumsum: np.ndarray, c: int, rank: int,
-             world_size: int) -> List[List[int]]:
+def allocate(
+    lengths: np.ndarray,
+    lengths_cumsum: np.ndarray,
+    c: int,
+    rank: int,
+    world_size: int,
+) -> List[List[int]]:
     """Dynamic batch allocator, similar to Multifit, https://en.wikipedia.org/wiki/Multifit_algorithm.
 
     Adopted from https://github.com/imoneoi/openchat/blob/cd99f6366d243daf1a906b24f9475a811a90aaff/ochat/training_deepspeed/multipack_dataloader.py
@@ -127,17 +132,19 @@ def allocate(lengths: np.ndarray, lengths_cumsum: np.ndarray, c: int, rank: int,
     while True:
         # binary search [l, r)
         l = 1
-        r = 1 + np.searchsorted(lengths_cumsum[start_index:], s + c * world_size, "right")
+        r = 1 + np.searchsorted(
+            lengths_cumsum[start_index:], s + c * world_size, "right"
+        )
 
         while r - l > 1:
             m = (l + r) // 2
-            if ffd_check(lengths[start_index:start_index + m], c, world_size):
+            if ffd_check(lengths[start_index : start_index + m], c, world_size):
                 l = m
             else:
                 r = m
 
         # use length l
-        batch = ffd_with_result(lengths[start_index:start_index + l], c)
+        batch = ffd_with_result(lengths[start_index : start_index + l], c)
         for i in range(len(batch)):
             batch[i] = [start_index + x for x in batch[i]]
 
@@ -173,7 +180,9 @@ def partition_balanced(nums: np.ndarray, k: int, min_size: int = 1):
     dp = np.full((n + 1, k + 1), dtype=np.int64, fill_value=int(1e10))
     maxval = np.full((n + 1, k + 1), dtype=np.int64, fill_value=-int(1e10))
     minval = np.full((n + 1, k + 1), dtype=np.int64, fill_value=int(1e10))
-    prefix_sums = np.concatenate((np.zeros(1, dtype=np.int64), np.cumsum(nums)), axis=0)
+    prefix_sums = np.concatenate(
+        (np.zeros(1, dtype=np.int64), np.cumsum(nums)), axis=0
+    )
     split = np.zeros((n + 1, k + 1), dtype=np.int64)
 
     for i in range(n + 1):
@@ -185,7 +194,9 @@ def partition_balanced(nums: np.ndarray, k: int, min_size: int = 1):
         for i in range(j * min_size, n + 1):
             for x in range(min_size, i - min_size + 1):
                 xx = prefix_sums[i] - prefix_sums[x]
-                min_diff = max(dp[x, j - 1], maxval[x, j - 1] - xx, xx - minval[x, j - 1])
+                min_diff = max(
+                    dp[x, j - 1], maxval[x, j - 1] - xx, xx - minval[x, j - 1]
+                )
                 dp[i, j] = min(dp[i, j], min_diff)
 
                 if dp[i, j] == min_diff:
@@ -207,22 +218,32 @@ def partition_balanced(nums: np.ndarray, k: int, min_size: int = 1):
     return res[::-1]
 
 
-def partition_balanced_tuples(nums: np.ndarray, k: int, min_size: int = 1) -> List[Tuple[int, int]]:
+def partition_balanced_tuples(
+    nums: np.ndarray, k: int, min_size: int = 1
+) -> List[Tuple[int, int]]:
     lst = partition_balanced(nums, k, min_size)
     return [(lst[i], lst[i + 1]) for i in range(k)]
 
 
-def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int, min_size: int = 1) -> List[Tuple[int]]:
-    err_hint = (" Errors should not be reported in this function. It is probably a bug in the dataset code"
-                " or too small batch size in pipeline parallel reallm.experiments.")
+def min_abs_diff_partition(
+    arr: Union[np.ndarray, List], k: int, min_size: int = 1
+) -> List[Tuple[int]]:
+    err_hint = (
+        " Errors should not be reported in this function. It is probably a bug in the dataset code"
+        " or too small batch size in pipeline parallel reallm.experiments."
+    )
 
     if isinstance(arr, list):
         arr = np.array(arr)
     if len(arr.shape) > 1:
-        raise ValueError(f"The array to be partitioned must be 1D. ({arr})" + err_hint)
+        raise ValueError(
+            f"The array to be partitioned must be 1D. ({arr})" + err_hint
+        )
     if len(arr) < k:
-        raise ValueError(f"The array to be partitioned must have length >= k. (array {arr}, k={k})" +
-                         err_hint)
+        raise ValueError(
+            f"The array to be partitioned must have length >= k. (array {arr}, k={k})"
+            + err_hint
+        )
     if len(arr) < k * min_size:
         raise ValueError(
             f"Length of the array to be partitioned must be at least k * min_size ({k} * {min_size}), current length {len(arr)}."
@@ -238,7 +259,9 @@ def min_abs_diff_partition(arr: Union[np.ndarray, List], k: int, min_size: int =
         if end <= start:
             err_type = "empty"
         if err_type:
-            raise ValueError(f"Partition {start}-{end} is {err_type}. " + err_msg + err_hint)
+            raise ValueError(
+                f"Partition {start}-{end} is {err_type}. " + err_msg + err_hint
+            )
         last_end = end
     return partitions
 
@@ -254,7 +277,11 @@ def reorder_to_balanced_batches(
     bin_sizes = np.zeros(max_bins, dtype=np.int32)
     bin_seqlens = np.zeros(max_bins, dtype=np.int32)
     for i in seqlens.argsort()[::-1]:
-        idx = np.where(bin_sizes + 1 <= n_seqs_per_batch, bin_seqlens, np.iinfo(np.int32).max).argmin()
+        idx = np.where(
+            bin_sizes + 1 <= n_seqs_per_batch,
+            bin_seqlens,
+            np.iinfo(np.int32).max,
+        ).argmin()
         bins[idx].append(i)
         bin_sizes[idx] += 1
         bin_seqlens[idx] += seqlens[i]

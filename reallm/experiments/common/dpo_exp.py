@@ -1,11 +1,19 @@
 import dataclasses
 
-from reallm.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC, OffloadHook
+from reallm.api.core.dfg import (
+    ModelInterface,
+    ModelInterfaceType,
+    ModelRPC,
+    OffloadHook,
+)
 from reallm.api.core.system_api import *
 from reallm.api.quickstart.dataset import PairedComparisonDatasetConfig
 from reallm.api.quickstart.device_mesh import AllocationConfig
 from reallm.api.quickstart.entrypoint import register_quickstart_exp
-from reallm.api.quickstart.model import get_real_model_config, ModelTrainEvalConfig
+from reallm.api.quickstart.model import (
+    get_real_model_config,
+    ModelTrainEvalConfig,
+)
 from reallm.base.topology import PipeModelDataParallelTopology
 from reallm.experiments.common.common import CommonExperimentConfig
 import reallm.base.logging as logging
@@ -66,17 +74,29 @@ class DPOConfig(CommonExperimentConfig):
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
 
-    actor: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
-    ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    actor: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
+    ref: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
 
-    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_train: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
+    ref_inf: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
 
-    dataset: PairedComparisonDatasetConfig = dataclasses.field(default_factory=PairedComparisonDatasetConfig)
+    dataset: PairedComparisonDatasetConfig = dataclasses.field(
+        default_factory=PairedComparisonDatasetConfig
+    )
     beta: float = 0.1
 
     def __post_init__(self):
-        assert (not self.is_sft_lora and self.sft_lora_path is None), "LoRA is not supported for now."
+        assert (
+            not self.is_sft_lora and self.sft_lora_path is None
+        ), "LoRA is not supported for now."
 
     @property
     def models(self):
@@ -87,8 +107,12 @@ class DPOConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterface("dpo", args=dict(beta=self.beta, enable_save=True))
-        ref_interface = ModelInterface("dpo", args=dict(beta=self.beta, enable_save=False))
+        interface = ModelInterface(
+            "dpo", args=dict(beta=self.beta, enable_save=True)
+        )
+        ref_interface = ModelInterface(
+            "dpo", args=dict(beta=self.beta, enable_save=False)
+        )
         ref_inf = ModelRPC(
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,

@@ -50,7 +50,9 @@ def _submit_workers(
                 worker_type=worker_type,
             )
         else:
-            cmd = sched_client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
+            cmd = sched_client.remote_worker_cmd(
+                expr_name, trial_name, debug, worker_type
+            )
 
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
@@ -80,7 +82,8 @@ def _submit_workers(
                 begin=sch_cfg.scheduling.begin,
                 deadline=sch_cfg.scheduling.deadline,
                 time_limit=sch_cfg.scheduling.time_limit,
-            ),)
+            ),
+        )
     return scheduled_jobs
 
 
@@ -93,32 +96,45 @@ def get_repo_path():
 
 def main_start(args, recover_count: int = 0):
     if args.mode == "ray" and args.image_name is None:
-        raise ValueError("--image_name must be specified when using ray cluster. "
-                         "This is becuase ray cluster requires all workers to have "
-                         "the same version of Python and ray.")
+        raise ValueError(
+            "--image_name must be specified when using ray cluster. "
+            "This is becuase ray cluster requires all workers to have "
+            "the same version of Python and ray."
+        )
     if args.mode == "local":
-        assert (args.recover_mode == "disabled"), "Recover mode is not supported for local runs!"
+        assert (
+            args.recover_mode == "disabled"
+        ), "Recover mode is not supported for local runs!"
     # Use search cache for recover runs
-    force_allocation_use_cache = (recover_count > 1
-                                  or args.recover_mode == "resume") and args.allocation_mode == "search"
+    force_allocation_use_cache = (
+        recover_count > 1 or args.recover_mode == "resume"
+    ) and args.allocation_mode == "search"
     # handle args
-    args.ignore_worker_error = (args.ignore_worker_error and args.recover_mode == "disabled")
+    args.ignore_worker_error = (
+        args.ignore_worker_error and args.recover_mode == "disabled"
+    )
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
     repo_path = get_repo_path()
-    is_recover_run = (args.recover_mode == "auto" and recover_count > 0) or args.recover_mode == "resume"
+    is_recover_run = (
+        args.recover_mode == "auto" and recover_count > 0
+    ) or args.recover_mode == "resume"
     save_recover_states = args.recover_mode != "disabled"
 
     # set env vars
     cluster_spec_path = os.environ.get("CLUSTER_SPEC_PATH", None)
-    if not cluster_spec_path: 
+    if not cluster_spec_path:
         if args.mode == "slurm":
-            raise ValueError("Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
-                            "See example/cluster_config.json for a template.")
-        logger.warning("Environment variable CLUSTER_SPEC_PATH is not set. "
-                        "Files of the experiment (logs, checkpoints, cache ...) "
-                        "will be saved to temporary directory of the system. "
-                        "To change the fileroot, set the fileroot option of your choice in your CLUSTER_SPEC_PATH.")
+            raise ValueError(
+                "Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
+                "See example/cluster_config.json for a template."
+            )
+        logger.warning(
+            "Environment variable CLUSTER_SPEC_PATH is not set. "
+            "Files of the experiment (logs, checkpoints, cache ...) "
+            "will be saved to temporary directory of the system. "
+            "To change the fileroot, set the fileroot option of your choice in your CLUSTER_SPEC_PATH."
+        )
 
     BASE_ENVIRONS = {
         "PYTHONPATH": "/reallm",
@@ -135,16 +151,22 @@ def main_start(args, recover_count: int = 0):
 
     os.environ["IS_REMOTE"] = "0" if not force_allocation_use_cache else "1"
     os.environ["REAL_PACKAGE_PATH"] = repo_path
-    
+
     # setup experiments
     if recover_count == 0:
-        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+        constants.set_experiment_trial_names(
+            args.experiment_name, args.trial_name
+        )
 
     experiment = config_package.make_experiment(args.experiment_name)
     if args.allocation_mode == "search":
         experiment._search()
 
-    sched = sched_client.make(mode=scheduler_mode(args.mode), expr_name=expr_name, trial_name=trial_name)
+    sched = sched_client.make(
+        mode=scheduler_mode(args.mode),
+        expr_name=expr_name,
+        trial_name=trial_name,
+    )
 
     setup = experiment.scheduling_setup()
 
@@ -152,7 +174,10 @@ def main_start(args, recover_count: int = 0):
 
     try:
         name_resolve.clear_subtree(
-            names.trial_root(experiment_name=args.experiment_name, trial_name=args.trial_name))
+            names.trial_root(
+                experiment_name=args.experiment_name, trial_name=args.trial_name
+            )
+        )
     except Exception as e:
         logger.warning(f"Resetting name resolving repo failed.")
         raise e
@@ -206,7 +231,9 @@ def main_start(args, recover_count: int = 0):
                 use_ray_cluster=(args.mode == "ray"),
             )
 
-    timeout = (None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT)  # run 5 mins to collect trace
+    timeout = (
+        None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT
+    )  # run 5 mins to collect trace
     try:
         sched.wait(
             check_status=(
@@ -220,20 +247,37 @@ def main_start(args, recover_count: int = 0):
         )
     except (KeyboardInterrupt, JobException, TimeoutError) as e:
         if os.getenv("REAL_TRACE", "0") != "0" and isinstance(e, TimeoutError):
-            s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
+            s = (
+                "#" * 30
+                + "  Trace complete. Killing all processes...  "
+                + "#" * 30
+            )
             logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
 
-        recover_states = [JobState.CANCELLED, JobState.FAILED, JobState.NOT_FOUND]
+        recover_states = [
+            JobState.CANCELLED,
+            JobState.FAILED,
+            JobState.NOT_FOUND,
+        ]
         reason = e.reason if isinstance(e, JobException) else None
-        recover_this = (args.recover_mode == "auto" and recover_count < args.recover_retries)
+        recover_this = (
+            args.recover_mode == "auto" and recover_count < args.recover_retries
+        )
         recover_this = recover_this and reason in recover_states
 
-        kill_signal = ("SIGKILL" if args.mode == "slurm" else "SIGTERM"
-                       )  # use sigkill to terminate slurm jobs
-        sched.stop_all("SIGINT" if (recover_this or args.recover_mode == "save") else kill_signal)
+        kill_signal = (
+            "SIGKILL" if args.mode == "slurm" else "SIGTERM"
+        )  # use sigkill to terminate slurm jobs
+        sched.stop_all(
+            "SIGINT"
+            if (recover_this or args.recover_mode == "save")
+            else kill_signal
+        )
         if recover_this:
-            logger.warning(f"Recovering from error {e}. Recover count: {recover_count+1}, "
-                           f"total recover count {args.recover_retries}")
+            logger.warning(
+                f"Recovering from error {e}. Recover count: {recover_count+1}, "
+                f"total recover count {args.recover_retries}"
+            )
             main_start(args, recover_count=recover_count + 1)
         else:
             raise e
@@ -250,7 +294,11 @@ def main_stop(args):
 
 
 def main_find_config(args):
-    exp_names = [x for x in config_package.ALL_EXPERIMENT_CLASSES if re.match(args.regex, x)]
+    exp_names = [
+        x
+        for x in config_package.ALL_EXPERIMENT_CLASSES
+        if re.match(args.regex, x)
+    ]
     if len(exp_names) == 0:
         print("No matched experiment names.")
     if len(exp_names) > 20:
@@ -264,7 +312,10 @@ def main_find_config(args):
 def main_profile_layers(args):
     from reallm.api.core.model_api import ModelFamily
 
-    _main_profile_layers(ModelFamily(args.model_class, args.model_size, args.is_critic), args.model_path)
+    _main_profile_layers(
+        ModelFamily(args.model_class, args.model_size, args.is_critic),
+        args.model_path,
+    )
 
 
 def _main_profile_layers(model_family, model_path):
@@ -273,8 +324,10 @@ def _main_profile_layers(model_family, model_path):
     from reallm.base.testing import clear_name_resolve
 
     expr_name = trial_name = "profile"
-    cmd = (f"python3 -m reallm.apps.profile_layers --expr_name {expr_name} --trial_name {trial_name} "
-           f"--model_path {model_path} --model_name {model_family} ")
+    cmd = (
+        f"python3 -m reallm.apps.profile_layers --expr_name {expr_name} --trial_name {trial_name} "
+        f"--model_path {model_path} --model_name {model_family} "
+    )
 
     if check_slurm_availability():
         repo_path = get_repo_path()
@@ -290,9 +343,13 @@ def _main_profile_layers(model_family, model_path):
             **_LLM_ENVVARS,
         }
         clear_name_resolve(expr_name, trial_name)
-        sched = sched_client.make(mode="slurm", expr_name=expr_name, trial_name=trial_name)
-        print(f"Profiling {model_family} layers, model path {model_path}, "
-              f"cmd {cmd}")
+        sched = sched_client.make(
+            mode="slurm", expr_name=expr_name, trial_name=trial_name
+        )
+        print(
+            f"Profiling {model_family} layers, model path {model_path}, "
+            f"cmd {cmd}"
+        )
         sched.submit_array(
             worker_type="profile_layer",
             cmd=cmd,
@@ -307,16 +364,26 @@ def _main_profile_layers(model_family, model_path):
 
         try:
             sched.wait(timeout=None)
-        except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
+        except (
+            KeyboardInterrupt,
+            sched_client.JobException,
+            TimeoutError,
+        ) as e:
             sched.stop_all()
             raise e
     else:
         try:
-            print(f"Profiling {model_family} layers, model path {model_path}, "
-                  f"cmd {cmd}")
+            print(
+                f"Profiling {model_family} layers, model path {model_path}, "
+                f"cmd {cmd}"
+            )
             clear_name_resolve(expr_name, trial_name)
             os.system(cmd)
-        except (KeyboardInterrupt, sched_client.JobException, TimeoutError) as e:
+        except (
+            KeyboardInterrupt,
+            sched_client.JobException,
+            TimeoutError,
+        ) as e:
             raise e
 
 
@@ -340,8 +407,16 @@ def main():
         default=None,
         help="trial name; by default uses '<USER>-test'",
     )
-    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
-    subparser.add_argument("--partition", default="dev", help="slurm partition to schedule the trial")
+    subparser.add_argument(
+        "--mode",
+        default="slurm",
+        choices=["local", "slurm", "ray", "local_ray"],
+    )
+    subparser.add_argument(
+        "--partition",
+        default="dev",
+        help="slurm partition to schedule the trial",
+    )
     subparser.add_argument(
         "--wandb_mode",
         type=str,
@@ -385,12 +460,14 @@ def main():
         required=False,
         default="pipe_model",
         choices=["manual", "search", "heuristic", "pipe_model", "pipe_data"],
-        help="Mode of GPU resource/model parallel strategy allocation."
+        help="Mode of GPU resource/model parallel strategy allocation.",
     )
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 
-    subparser = subparsers.add_parser("stop", help="stops an experiment. only slurm experiment is supported.")
+    subparser = subparsers.add_parser(
+        "stop", help="stops an experiment. only slurm experiment is supported."
+    )
     subparser.add_argument(
         "--experiment_name",
         "-e",
@@ -399,16 +476,25 @@ def main():
         help="name of the experiment",
     )
 
-    subparser.add_argument("--trial_name", "-f", type=str, required=True, help="name of the trial")
-    subparser.add_argument("--mode", default="slurm", choices=["local", "slurm", "ray", "local_ray"])
+    subparser.add_argument(
+        "--trial_name", "-f", type=str, required=True, help="name of the trial"
+    )
+    subparser.add_argument(
+        "--mode",
+        default="slurm",
+        choices=["local", "slurm", "ray", "local_ray"],
+    )
     subparser.set_defaults(func=main_stop)
 
-    subparser = subparsers.add_parser("find_config",
-                                      help="find configuration by matching regular expression.")
+    subparser = subparsers.add_parser(
+        "find_config", help="find configuration by matching regular expression."
+    )
     subparser.add_argument("--regex", "-r", type=str, required=True)
     subparser.set_defaults(func=main_find_config)
 
-    subparser = subparsers.add_parser("profile_layers", help="profile layers of a model.")
+    subparser = subparsers.add_parser(
+        "profile_layers", help="profile layers of a model."
+    )
     subparser.add_argument("--model_class", type=str, required=True)
     subparser.add_argument("--model_size", type=int, required=True)
     subparser.add_argument("--is_critic", action="store_true")

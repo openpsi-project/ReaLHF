@@ -4,16 +4,25 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 
-from reallm.impl.model.parallelism.model_parallel.modules import RowParallelLinear
-from reallm.impl.model.utils.functional import (apply_rotary_varlen, compute_varlen_position_indices,
-                                                torch_attn_func)
+from reallm.impl.model.parallelism.model_parallel.modules import (
+    RowParallelLinear,
+)
+from reallm.impl.model.utils.functional import (
+    apply_rotary_varlen,
+    compute_varlen_position_indices,
+    torch_attn_func,
+)
 import reallm.base.logging as logging
 
 from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
 
 try:
-    from flash_attn import flash_attn_func, flash_attn_varlen_func, flash_attn_with_kvcache
+    from flash_attn import (
+        flash_attn_func,
+        flash_attn_varlen_func,
+        flash_attn_with_kvcache,
+    )
 except ModuleNotFoundError:
     pass
 import reallm.base.logging as logging
@@ -114,7 +123,9 @@ class CausalSelfAttentionLayer(nn.Module):
         self.nq = n_q_heads
         self.nkv = n_kv_heads
         if self.nq % self.nkv != 0:
-            raise ValueError(f"n_kv_heads ({self.nkv}) must divide n_q_heads ({self.nq}).")
+            raise ValueError(
+                f"n_kv_heads ({self.nkv}) must divide n_q_heads ({self.nq})."
+            )
         self.d = head_dim
 
         self.layer_index = layer_index
@@ -143,7 +154,9 @@ class CausalSelfAttentionLayer(nn.Module):
         # NOTE: we must ensure the passed-in argument is an interger
         # if we convert the argument to implicitly when calling rotary embedding or flash-attn,
         # aten::item will be called, which will cause a device-host sync and slow down performance.
-        assert max_seqlen is None or isinstance(max_seqlen, int), type(max_seqlen)
+        assert max_seqlen is None or isinstance(max_seqlen, int), type(
+            max_seqlen
+        )
         assert cu_seqlens is None or cu_seqlens.dtype == torch.int32
 
         # default upcast, scale
@@ -162,8 +175,12 @@ class CausalSelfAttentionLayer(nn.Module):
             rotary_cache_len = max_seqlen
             if k_cache is not None and str(q.device) == "cpu":
                 rotary_cache_len = k_cache.shape[1]
-            self.rotary_emb._update_cos_sin_cache(rotary_cache_len, q.device, q.dtype)
-            rotary_indices = compute_varlen_position_indices(q.shape[0], cu_seqlens)
+            self.rotary_emb._update_cos_sin_cache(
+                rotary_cache_len, q.device, q.dtype
+            )
+            rotary_indices = compute_varlen_position_indices(
+                q.shape[0], cu_seqlens
+            )
             qk = apply_rotary_varlen(
                 torch.cat([q, k], dim=-2),
                 cos=self.rotary_emb._cos_cached,
@@ -182,7 +199,9 @@ class CausalSelfAttentionLayer(nn.Module):
             # )
             q, k = qk.split((q.shape[-2], k.shape[-2]), dim=-2)
         elif self.apply_rotary:
-            self.rotary_emb._update_cos_sin_cache(k_cache.shape[1], device=q.device, dtype=q.dtype)
+            self.rotary_emb._update_cos_sin_cache(
+                k_cache.shape[1], device=q.device, dtype=q.dtype
+            )
             # Rotary cos/sin will be automatically offset by cache_seqlens in flash_attn.
             rotary_cos, rotary_sin = (
                 self.rotary_emb._cos_cached,
@@ -197,13 +216,15 @@ class CausalSelfAttentionLayer(nn.Module):
             if k_cache is not None:
                 new_k, new_v = [], []
                 for i, cache_len in enumerate(cache_seqlens):
-                    k_cache[i, cache_len] = k[cu_seqlens[i]:cu_seqlens[i + 1]]
-                    new_k.append(k_cache[i, :cache_len + 1])
-                    v_cache[i, cache_len] = v[cu_seqlens[i]:cu_seqlens[i + 1]]
-                    new_v.append(v_cache[i, :cache_len + 1])
+                    k_cache[i, cache_len] = k[cu_seqlens[i] : cu_seqlens[i + 1]]
+                    new_k.append(k_cache[i, : cache_len + 1])
+                    v_cache[i, cache_len] = v[cu_seqlens[i] : cu_seqlens[i + 1]]
+                    new_v.append(v_cache[i, : cache_len + 1])
                 k = torch.cat(new_k, dim=0)
                 v = torch.cat(new_v, dim=0)
-                cu_seqlens_k = torch.nn.functional.pad((cache_seqlens + 1).cumsum(0), (1, 0))
+                cu_seqlens_k = torch.nn.functional.pad(
+                    (cache_seqlens + 1).cumsum(0), (1, 0)
+                )
                 max_seqlen_k = max(cache_seqlens) + 1
             # Use vanilla pytorch attention, for debugging.
             hidden_states = torch_attn_func(
@@ -222,7 +243,9 @@ class CausalSelfAttentionLayer(nn.Module):
         elif k_cache is not None:
             # k_cache/v_cache shape: [bs, max_seq, n_kv_heads, head_dim]
             if cache_seqlens is None:
-                raise RuntimeError("cache_seqlens must be provided if kv_cache is not None.")
+                raise RuntimeError(
+                    "cache_seqlens must be provided if kv_cache is not None."
+                )
             q = q.unsqueeze(1)
             k = k.unsqueeze(1)
             v = v.unsqueeze(1)
@@ -257,7 +280,9 @@ class CausalSelfAttentionLayer(nn.Module):
                 causal=True,
             )
         else:
-            raise NotImplementedError("Don't know which attention implementation to use.")
+            raise NotImplementedError(
+                "Don't know which attention implementation to use."
+            )
         hidden_states = self.c_proj(hidden_states.flatten(start_dim=-2))
         hidden_states = self.resid_dropout(hidden_states)
         return hidden_states, k, v

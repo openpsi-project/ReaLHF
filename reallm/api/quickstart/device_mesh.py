@@ -8,7 +8,11 @@ import numpy as np
 from reallm.api.core.dfg import ModelRPC
 from reallm.api.quickstart.model import ParallelismConfig
 from reallm.base.cluster import spec as cluster_spec
-from reallm.base.slurm_utils import are_ones_contiguous, nodelist_from_nodes, parse_nodelist
+from reallm.base.slurm_utils import (
+    are_ones_contiguous,
+    nodelist_from_nodes,
+    parse_nodelist,
+)
 
 
 @dataclasses.dataclass
@@ -45,22 +49,32 @@ class DeviceMesh:
 
     def __post_init__(self):
         if self.global_mesh_name is None:
-            self.global_mesh_name = (f"{cluster_spec.node_name_prefix}[01-{self.n_nodes:02d}]" if self.n_nodes > 1 else f"{cluster_spec.node_name_prefix}01")
+            self.global_mesh_name = (
+                f"{cluster_spec.node_name_prefix}[01-{self.n_nodes:02d}]"
+                if self.n_nodes > 1
+                else f"{cluster_spec.node_name_prefix}01"
+            )
 
         if self.global_mesh_name is not None and self.name is None:
-            self.name = device_mesh_name_from_mapping(self.global_mesh_name, self.mapping)
+            self.name = device_mesh_name_from_mapping(
+                self.global_mesh_name, self.mapping
+            )
 
     def __eq__(self, other: "DeviceMesh"):
-        assert (self.global_mesh_name is None or self.global_mesh_name
-                == other.global_mesh_name), "Only device meshes that on the same cluster mesh is comparable"
+        assert (
+            self.global_mesh_name is None
+            or self.global_mesh_name == other.global_mesh_name
+        ), "Only device meshes that on the same cluster mesh is comparable"
         return np.all(self.mapping == other.mapping)
 
     def __repr__(self):
         return f"DeviceMesh({self.name} in {self.global_mesh_name})"
 
     def __op_assertion(self, other: "DeviceMesh"):
-        assert (self.global_mesh_name is None or self.global_mesh_name
-                == other.global_mesh_name), "operation only support device meshes on the same cluster nodes"
+        assert (
+            self.global_mesh_name is None
+            or self.global_mesh_name == other.global_mesh_name
+        ), "operation only support device meshes on the same cluster nodes"
         assert self.n_nodes == other.n_nodes
         assert self.n_gpus_per_node == other.n_gpus_per_node
 
@@ -93,20 +107,29 @@ class DeviceMesh:
         for row in unique_rows:
             this_cols = cols[rows == row]
             # print(row, this_cols)
-            assert (self.n_gpus_per_node % min_n_gpus == 0 or min_n_gpus % self.n_gpus_per_node == 0)
+            assert (
+                self.n_gpus_per_node % min_n_gpus == 0
+                or min_n_gpus % self.n_gpus_per_node == 0
+            )
             n_gpus = min_n_gpus
             while n_gpus < min(self.n_gpus_per_node, np.sum(self.mapping)):
-                for start in range(np.min(this_cols), self.n_gpus_per_node, n_gpus):
+                for start in range(
+                    np.min(this_cols), self.n_gpus_per_node, n_gpus
+                ):
                     # print(row, start, start+n_gpus)
-                    sub_mapping = np.zeros((self.n_nodes, self.n_gpus_per_node), dtype=np.int32)
-                    sub_mapping[row, start:start + n_gpus] = 1
+                    sub_mapping = np.zeros(
+                        (self.n_nodes, self.n_gpus_per_node), dtype=np.int32
+                    )
+                    sub_mapping[row, start : start + n_gpus] = 1
                     sub_mappings.append(sub_mapping)
                 n_gpus *= 2
 
         for n_rows in range(1, len(unique_rows) + 1):
             for start in range(0, len(unique_rows) - n_rows + 1):
-                sub_mapping = np.zeros((self.n_nodes, self.n_gpus_per_node), dtype=np.int32)
-                sub_mapping[start:start + n_rows, :] = 1
+                sub_mapping = np.zeros(
+                    (self.n_nodes, self.n_gpus_per_node), dtype=np.int32
+                )
+                sub_mapping[start : start + n_rows, :] = 1
                 sub_mappings.append(sub_mapping)
 
         return [
@@ -115,32 +138,44 @@ class DeviceMesh:
                 n_gpus_per_node=self.n_gpus_per_node,
                 mapping=sub_mapping,
                 global_mesh_name=self.global_mesh_name,
-                name=device_mesh_name_from_mapping(self.global_mesh_name, sub_mapping),
-            ) for sub_mapping in sub_mappings
+                name=device_mesh_name_from_mapping(
+                    self.global_mesh_name, sub_mapping
+                ),
+            )
+            for sub_mapping in sub_mappings
         ]
 
     def _is_valid_mapping(self) -> bool:
         if self.mapping.shape != (self.n_nodes, self.n_gpus_per_node):
-            raise RuntimeError(f"Invalid mapping shape {self.mapping.shape} "
-                               f"{self.name}")
+            raise RuntimeError(
+                f"Invalid mapping shape {self.mapping.shape} " f"{self.name}"
+            )
         if not np.all(np.logical_or(self.mapping == 0, self.mapping == 1)):
             raise RuntimeError(f"Invalid mapping value {self.mapping}")
 
         assert math.log(self.n_gpus_per_node, 2).is_integer()
 
-        one_node_valid_gpus = [2**i for i in range(int(math.log(self.n_gpus_per_node, 2)))]
+        one_node_valid_gpus = [
+            2**i for i in range(int(math.log(self.n_gpus_per_node, 2)))
+        ]
         if self.mapping.sum() < self.n_gpus_per_node:
             if not any(self.mapping.sum() == g for g in one_node_valid_gpus):
                 raise RuntimeError(f"Invalid mapping sum {self.mapping}")
         else:
-            if not (self.mapping.sum() % self.n_gpus_per_node == 0 and np.all(
+            if not (
+                self.mapping.sum() % self.n_gpus_per_node == 0
+                and np.all(
                     np.logical_or(
                         self.mapping.sum(1) == self.n_gpus_per_node,
                         self.mapping.sum(1) == 0,
-                    ))):
+                    )
+                )
+            ):
                 raise RuntimeError(f"Invalid mapping sum {self.mapping}")
         if not are_ones_contiguous(self.mapping.flatten()):
-            raise RuntimeError(f"mapping devices are not contiguous {self.mapping}")
+            raise RuntimeError(
+                f"mapping devices are not contiguous {self.mapping}"
+            )
         return True
 
 
@@ -204,7 +239,9 @@ def device_mesh_name_from_mapping(global_mesh_name: str, mapping: np.ndarray):
         return node_name
 
 
-def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ParallelismConfig]:
+def find_parallel_strategies(
+    device_mesh: DeviceMesh,
+) -> List[ParallelismConfig]:
     n_gpus = np.sum(device_mesh.mapping)
     res = []
     for num_mp in [1, 2, 4, 8]:
@@ -214,9 +251,13 @@ def find_parallel_strategies(device_mesh: DeviceMesh) -> List[ParallelismConfig]
             num_pp = 1
             while num_pp <= num_dp_pp:
                 num_dp_mp = n_gpus // num_pp
-                valid = (num_dp_mp in [1, 2, 4, 8] or num_dp_mp % 8 == 0) and num_dp_pp % num_pp == 0
+                valid = (
+                    num_dp_mp in [1, 2, 4, 8] or num_dp_mp % 8 == 0
+                ) and num_dp_pp % num_pp == 0
                 if valid:
-                    res.append(ParallelismConfig(num_pp, num_mp, num_dp_pp // num_pp))
+                    res.append(
+                        ParallelismConfig(num_pp, num_mp, num_dp_pp // num_pp)
+                    )
                 num_pp += 1
     return res
 
@@ -228,11 +269,15 @@ class RPCAllocation:
     parallel: ParallelismConfig
 
     def __post_init__(self):
-        world_size = (self.parallel.model_parallel_size * self.parallel.pipeline_parallel_size *
-                      self.parallel.data_parallel_size)
+        world_size = (
+            self.parallel.model_parallel_size
+            * self.parallel.pipeline_parallel_size
+            * self.parallel.data_parallel_size
+        )
         assert world_size == self.device_mesh.mapping.sum(), (
             "World size of ParallelismConfig does not match number of GPUs in device mesh"
-            f"world_size {world_size} != n GPUs {self.device_mesh.mapping.sum()}")
+            f"world_size {world_size} != n GPUs {self.device_mesh.mapping.sum()}"
+        )
 
     def to_dict(self):
         return dict(
@@ -266,5 +311,7 @@ class AllocationConfig:
     :type device_mesh: str
     """
 
-    parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
+    parallel: ParallelismConfig = dataclasses.field(
+        default_factory=ParallelismConfig
+    )
     device_mesh: Optional[str] = None

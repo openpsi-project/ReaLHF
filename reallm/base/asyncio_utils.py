@@ -33,9 +33,14 @@ def setup_run_until_complete(
 
     loop._old_agen_hooks = sys.get_asyncgen_hooks()
     loop._thread_id = threading.get_ident()
-    sys.set_asyncgen_hooks(firstiter=loop._asyncgen_firstiter_hook, finalizer=loop._asyncgen_finalizer_hook)
+    sys.set_asyncgen_hooks(
+        firstiter=loop._asyncgen_firstiter_hook,
+        finalizer=loop._asyncgen_finalizer_hook,
+    )
     asyncio.events._set_running_loop(loop)
-    return AsyncRunUntilCompleteContext(loop=loop, future=future, new_task=new_task)
+    return AsyncRunUntilCompleteContext(
+        loop=loop, future=future, new_task=new_task
+    )
 
 
 def teardown_run_util_complete(ctx: AsyncRunUntilCompleteContext):
@@ -54,7 +59,9 @@ def teardown_run_util_complete(ctx: AsyncRunUntilCompleteContext):
         raise RuntimeError("Event loop stopped before Future completed.")
 
 
-def raise_asyncio_exception(ctx: AsyncRunUntilCompleteContext, raise_error: bool = True):
+def raise_asyncio_exception(
+    ctx: AsyncRunUntilCompleteContext, raise_error: bool = True
+):
     if ctx.new_task and ctx.future.done() and not ctx.future.cancelled():
         # The coroutine raised a BaseException. Consume the exception
         # to not log a warning, the caller doesn't have access to the

@@ -50,13 +50,14 @@ def _split_along_first_dim(input_):
 
     # Split along first dimension.
     dim_size = input_.size()[0]
-    assert (dim_size %
-            world_size == 0), "First dimension of the tensor should be divisible by tensor parallel size"
+    assert (
+        dim_size % world_size == 0
+    ), "First dimension of the tensor should be divisible by tensor parallel size"
     local_dim_size = dim_size // world_size
     rank = constants.model_parallel_rank()
     dim_offset = rank * local_dim_size
 
-    output = input_[dim_offset:dim_offset + local_dim_size].contiguous()
+    output = input_[dim_offset : dim_offset + local_dim_size].contiguous()
 
     return output
 
@@ -75,7 +76,9 @@ def _gather_along_last_dim(input_):
 
     tensor_list = [torch.empty_like(input_) for _ in range(world_size)]
     tensor_list[rank] = input_
-    torch.distributed.all_gather(tensor_list, input_, group=constants.model_parallel_group())
+    torch.distributed.all_gather(
+        tensor_list, input_, group=constants.model_parallel_group()
+    )
 
     # Note: torch.cat already creates a contiguous tensor.
     output = torch.cat(tensor_list, dim=last_dim).contiguous()
@@ -94,8 +97,12 @@ def _gather_along_first_dim(input_):
     dim_size = list(input_.size())
     dim_size[0] = dim_size[0] * world_size
 
-    output = torch.empty(dim_size, dtype=input_.dtype, device=torch.cuda.current_device())
-    torch.distributed._all_gather_base(output, input_.contiguous(), group=constants.model_parallel_group())
+    output = torch.empty(
+        dim_size, dtype=input_.dtype, device=torch.cuda.current_device()
+    )
+    torch.distributed._all_gather_base(
+        output, input_.contiguous(), group=constants.model_parallel_group()
+    )
 
     return output
 
@@ -108,15 +115,18 @@ def _reduce_scatter_along_first_dim(input_):
         return input_
 
     dim_size = list(input_.size())
-    assert (dim_size[0] %
-            world_size == 0), "First dimension of the tensor should be divisible by tensor parallel size"
+    assert (
+        dim_size[0] % world_size == 0
+    ), "First dimension of the tensor should be divisible by tensor parallel size"
 
     dim_size[0] = dim_size[0] // world_size
 
-    output = torch.empty(dim_size, dtype=input_.dtype, device=torch.cuda.current_device())
-    torch.distributed._reduce_scatter_base(output,
-                                           input_.contiguous(),
-                                           group=constants.model_parallel_group())
+    output = torch.empty(
+        dim_size, dtype=input_.dtype, device=torch.cuda.current_device()
+    )
+    torch.distributed._reduce_scatter_base(
+        output, input_.contiguous(), group=constants.model_parallel_group()
+    )
     return output
 
 
@@ -267,8 +277,12 @@ def scatter_to_sequence_parallel_region(input_):
     return _ScatterToSequenceParallelRegion.apply(input_)
 
 
-def gather_from_sequence_parallel_region(input_, model_parallel_output_grad=True):
-    return _GatherFromSequenceParallelRegion.apply(input_, model_parallel_output_grad)
+def gather_from_sequence_parallel_region(
+    input_, model_parallel_output_grad=True
+):
+    return _GatherFromSequenceParallelRegion.apply(
+        input_, model_parallel_output_grad
+    )
 
 
 def reduce_scatter_to_sequence_parallel_region(input_):

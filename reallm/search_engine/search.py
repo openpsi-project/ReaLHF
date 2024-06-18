@@ -70,8 +70,12 @@ def search_rpc_allocations(
     n_nodes = device_mesh.n_nodes
     table = {}
     for rpc in rpcs:
-        print(f"Getting param realloc stats for {rpc.model_type} at {rpc.model_path}")
-        t = get_param_realloc_stats(rpc.model_type, rpc.model_path, n_nodes, True)
+        print(
+            f"Getting param realloc stats for {rpc.model_type} at {rpc.model_path}"
+        )
+        t = get_param_realloc_stats(
+            rpc.model_type, rpc.model_path, n_nodes, True
+        )
         table.update(t)
 
     rpc_exe_list = make_rpc_exe_list(
@@ -124,8 +128,10 @@ def search_rpc_allocations(
             pipeline_parallel_size=alloc_info["num_pp"],
             data_parallel_size=alloc_info["num_dp"],
             model_parallel_size=alloc_info["num_mp"],
-            use_sequence_parallel=(alloc_info["num_mp"] > 1
-                                   and rpc.interface_type == ModelInterfaceType.TRAIN_STEP),
+            use_sequence_parallel=(
+                alloc_info["num_mp"] > 1
+                and rpc.interface_type == ModelInterfaceType.TRAIN_STEP
+            ),
         )
         sub_device_mesh = DeviceMesh(
             n_nodes=device_mesh.n_nodes,
@@ -143,7 +149,9 @@ def search_rpc_allocations(
 
     if not from_file:
         with open(dump_dir, "w") as f:
-            json.dump([rpc_alloc.to_dict() for rpc_alloc in rpc_allocs], f, indent=4)
+            json.dump(
+                [rpc_alloc.to_dict() for rpc_alloc in rpc_allocs], f, indent=4
+            )
         with open(log_dir, "w") as f:
             import pprint
 
@@ -185,11 +193,13 @@ def make_rpc_exe_list(
                 feasible.sort(key=lambda x: x.time_cost)
                 # feasible = feasible[:30]
                 for i, rpc_exe in enumerate(feasible):
-                    f.write(f"{i}: time_cost: {rpc_exe.time_cost} ms, {rpc_exe.time_cost} "
-                            f"sub_device_mesh: {rpc_exe.device_mesh}, "
-                            f"parallel_strategy: {rpc_exe.parallel_strategy}, "
-                            f"mem_cost: {rpc_exe.mem/(1024*1024*1024):02f} GB, "
-                            f"static_mem_cost: {rpc_exe.static_mem/(1024*1024*1024):02f} GB\n")
+                    f.write(
+                        f"{i}: time_cost: {rpc_exe.time_cost} ms, {rpc_exe.time_cost} "
+                        f"sub_device_mesh: {rpc_exe.device_mesh}, "
+                        f"parallel_strategy: {rpc_exe.parallel_strategy}, "
+                        f"mem_cost: {rpc_exe.mem/(1024*1024*1024):02f} GB, "
+                        f"static_mem_cost: {rpc_exe.static_mem/(1024*1024*1024):02f} GB\n"
+                    )
                 f.write("\n")
                 log_flag = True
 
@@ -198,16 +208,20 @@ def make_rpc_exe_list(
             feasible.sort(key=lambda x: x.time_cost)
             # feasible = feasible[:10]
             for i, rpc_exe in enumerate(feasible):
-                print(f"{i}: time_cost: {rpc_exe.time_cost} ms, "
-                      f"sub_device_mesh: {rpc_exe.device_mesh}, "
-                      f"parallel_strategy: {rpc_exe.parallel_strategy}, "
-                      f"mem_cost: {rpc_exe.mem/(1024*1024*1024):02f} GB, "
-                      f"static_mem_cost: {rpc_exe.static_mem/(1024*1024*1024):02f} GB")
+                print(
+                    f"{i}: time_cost: {rpc_exe.time_cost} ms, "
+                    f"sub_device_mesh: {rpc_exe.device_mesh}, "
+                    f"parallel_strategy: {rpc_exe.parallel_strategy}, "
+                    f"mem_cost: {rpc_exe.mem/(1024*1024*1024):02f} GB, "
+                    f"static_mem_cost: {rpc_exe.static_mem/(1024*1024*1024):02f} GB"
+                )
 
     return rpc_exe_list
 
 
-def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False) -> Dict[str, int]:
+def make_model_size_dict(
+    rpcs: List[ModelRPC], if_print: bool = False
+) -> Dict[str, int]:
     model_size_dict = {}
 
     for rpc in rpcs:
@@ -218,7 +232,8 @@ def make_model_size_dict(rpcs: List[ModelRPC], if_print: bool = False) -> Dict[s
         model_size_dict[rpc.model_name.role] = rpc.model_type.size
 
         if if_print:
-            print(f"model_name: {rpc.model_name.role}, "
-                  f"model_size: {rpc.model_type.size}")
+            print(
+                f"model_name: {rpc.model_name.role}, "
+                f"model_size: {rpc.model_type.size}"
+            )
     return model_size_dict
-

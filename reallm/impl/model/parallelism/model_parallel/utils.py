@@ -15,8 +15,9 @@ _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {
 
 
 def param_is_not_model_parallel_duplicate(param):
-    return (hasattr(param, "tensor_model_parallel")
-            and param.tensor_model_parallel) or (model_parallel_rank() == 0)
+    return (
+        hasattr(param, "tensor_model_parallel") and param.tensor_model_parallel
+    ) or (model_parallel_rank() == 0)
 
 
 def set_tensor_model_parallel_attributes(tensor, is_parallel, dim, stride):
@@ -43,7 +44,9 @@ def copy_tensor_model_parallel_attributes(destination_tensor, source_tensor):
 
     def maybe_copy(attribute):
         if hasattr(source_tensor, attribute):
-            setattr(destination_tensor, attribute, getattr(source_tensor, attribute))
+            setattr(
+                destination_tensor, attribute, getattr(source_tensor, attribute)
+            )
 
     for attribute in _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS:
         maybe_copy(attribute)
@@ -52,7 +55,9 @@ def copy_tensor_model_parallel_attributes(destination_tensor, source_tensor):
 def _initialize_affine_weight_gpu(weight, init_method, partition_dim, stride=1):
     """Initialize affine weight for model parallel on GPU."""
 
-    set_tensor_model_parallel_attributes(tensor=weight, is_parallel=True, dim=partition_dim, stride=stride)
+    set_tensor_model_parallel_attributes(
+        tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
+    )
 
     # with get_cuda_rng_tracker().fork():
     init_method(weight)
@@ -75,16 +80,22 @@ def _initialize_affine_weight_cpu(
     Build the master weight on all processes and scatter
     the relevant chunk."""
 
-    set_tensor_model_parallel_attributes(tensor=weight, is_parallel=True, dim=partition_dim, stride=stride)
+    set_tensor_model_parallel_attributes(
+        tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
+    )
 
     # Initialize master weight
-    master_weight = torch.empty(output_size, input_size, dtype=torch.float, requires_grad=False)
+    master_weight = torch.empty(
+        output_size, input_size, dtype=torch.float, requires_grad=False
+    )
     init_method(master_weight)
     master_weight = master_weight.to(dtype=params_dtype)
 
     # Split and copy
     per_partition_per_stride_size = divide(per_partition_size, stride)
-    weight_list = torch.split(master_weight, per_partition_per_stride_size, dim=partition_dim)
+    weight_list = torch.split(
+        master_weight, per_partition_per_stride_size, dim=partition_dim
+    )
     rank = model_parallel_rank()
     world_size = model_parallel_world_size()
     my_weight_list = weight_list[rank::world_size]
@@ -98,7 +109,9 @@ def _initialize_affine_weight_cpu(
 
 def ensure_divisibility(numerator, denominator):
     """Ensure that numerator is divisible by the denominator."""
-    assert numerator % denominator == 0, "{} is not divisible by {}".format(numerator, denominator)
+    assert numerator % denominator == 0, "{} is not divisible by {}".format(
+        numerator, denominator
+    )
 
 
 def divide(numerator, denominator):
@@ -187,7 +200,9 @@ def gather_split_1d_tensor(tensor):
     # as opposed to torch.distributed.all_gather for efficiency reasons.
     # This API calls directly NCCL all-gather versus the former does
     # internal copies and can potentially cause slow down.
-    torch.distributed._all_gather_base(gathered, tensor, group=model_parallel_group())
+    torch.distributed._all_gather_base(
+        gathered, tensor, group=model_parallel_group()
+    )
     return gathered
 
 
@@ -199,18 +214,21 @@ class VocabUtility:
     """
 
     @staticmethod
-    def vocab_range_from_per_partition_vocab_size(per_partition_vocab_size: int, rank,
-                                                  world_size: int) -> Sequence[int]:
+    def vocab_range_from_per_partition_vocab_size(
+        per_partition_vocab_size: int, rank, world_size: int
+    ) -> Sequence[int]:
         index_f = rank * per_partition_vocab_size
         index_l = index_f + per_partition_vocab_size
         return index_f, index_l
 
     @staticmethod
-    def vocab_range_from_global_vocab_size(global_vocab_size: int, rank: int,
-                                           world_size: int) -> Sequence[int]:
+    def vocab_range_from_global_vocab_size(
+        global_vocab_size: int, rank: int, world_size: int
+    ) -> Sequence[int]:
         per_partition_vocab_size = divide(global_vocab_size, world_size)
-        return VocabUtility.vocab_range_from_per_partition_vocab_size(per_partition_vocab_size, rank,
-                                                                      world_size)
+        return VocabUtility.vocab_range_from_per_partition_vocab_size(
+            per_partition_vocab_size, rank, world_size
+        )
 
 
 def assert_viewless_tensor(tensor, extra_msg=None):
@@ -221,9 +239,11 @@ def assert_viewless_tensor(tensor, extra_msg=None):
         return tensor
     if not isinstance(tensor, torch.Tensor):
         return tensor
-    assert tensor._base is None, ("Ensure tensor._base is None before setting tensor.data or storing "
-                                  "tensor to memory buffer. Otherwise, a memory leak will occur (and "
-                                  "likely accumulate over iterations). %s") % extra_msg
+    assert tensor._base is None, (
+        "Ensure tensor._base is None before setting tensor.data or storing "
+        "tensor to memory buffer. Otherwise, a memory leak will occur (and "
+        "likely accumulate over iterations). %s"
+    ) % extra_msg
     return tensor
 
 
@@ -235,7 +255,10 @@ def safely_set_viewless_tensor_data(tensor, new_data_tensor):
     """
     assert_viewless_tensor(
         tensor,
-        extra_msg="FYI, tensor._base has shape %s, and new_data_tensor has shape %s." %
-        ("--" if tensor._base is None else tensor._base.shape, new_data_tensor.shape),
+        extra_msg="FYI, tensor._base has shape %s, and new_data_tensor has shape %s."
+        % (
+            "--" if tensor._base is None else tensor._base.shape,
+            new_data_tensor.shape,
+        ),
     )
     tensor.data = new_data_tensor

@@ -11,15 +11,31 @@ from reallm.base import logging
 try:
     import reallm._C.interval_op_cuda as interval_op_cuda
 except ImportError:
-    print("interval_op_cuda not found. "
-          "This should only appear on workers without CUDA supports.")
+    print(
+        "interval_op_cuda not found. "
+        "This should only appear on workers without CUDA supports."
+    )
 
-from .real_llm_base import (OutputHead, real_model_embed_param_count, real_model_embedding_param_keys,
-                            real_model_head_param_count, real_model_head_param_keys,
-                            real_model_tblock_param_count, real_model_tblock_param_keys, ReaLModelBlock,
-                            SequenceParallelActorHead, SequenceParallelCriticHead, VocabPositionEmbedding)
-from .real_llm_parallel import (get_real_model_param_shape, intervals_partition_fn, mp_partition_key,
-                                partition_pipeline_layers, shape_partition_fn)
+from .real_llm_base import (
+    OutputHead,
+    real_model_embed_param_count,
+    real_model_embedding_param_keys,
+    real_model_head_param_count,
+    real_model_head_param_keys,
+    real_model_tblock_param_count,
+    real_model_tblock_param_keys,
+    ReaLModelBlock,
+    SequenceParallelActorHead,
+    SequenceParallelCriticHead,
+    VocabPositionEmbedding,
+)
+from .real_llm_parallel import (
+    get_real_model_param_shape,
+    intervals_partition_fn,
+    mp_partition_key,
+    partition_pipeline_layers,
+    shape_partition_fn,
+)
 
 logger = logging.getLogger("FlattenParam")
 
@@ -63,12 +79,14 @@ def slice_intervals(
 ) -> torch.Tensor:
     assert len(tensor.shape) == 1
     if len(intervals_cpu) == 1:
-        return tensor[intervals_cpu[0][0]:intervals_cpu[0][1]]
+        return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
     elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
         return torch.cat([tensor[start:end] for start, end in intervals_cpu])
 
     interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    offsets = torch.nn.functional.pad(
+        interval_sizes.cumsum(0)[:-1], (1, 0), value=0
+    )
     assert tensor.dtype == torch.half
     return interval_op_cuda.slice_intervals_cuda_half(
         tensor,
@@ -91,12 +109,14 @@ def set_intervals(
     if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
         offset = 0
         for i, j in intervals_cpu:
-            dst[i:j] = src[offset:offset + j - i]
+            dst[i:j] = src[offset : offset + j - i]
             offset += j - i
         assert offset == src.shape[0]
         return
     interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    offsets = torch.nn.functional.pad(
+        interval_sizes.cumsum(0)[:-1], (1, 0), value=0
+    )
     interval_op_cuda.set_intervals_cuda_half(
         src,
         dst,
@@ -132,8 +152,12 @@ def build_param_spec(
     param_spec = {}
     param_size = 0
     for k in sd_keys:
-        shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
-        param_spec[k] = ContiguousParamSpec(param_size, param_size + int(np.prod(shape)), shape)
+        shape = get_real_model_param_shape(
+            k, config, mp_size, sequence_parallel
+        )
+        param_spec[k] = ContiguousParamSpec(
+            param_size, param_size + int(np.prod(shape)), shape
+        )
         param_size += int(np.prod(shape))
     return param_spec, param_size
 
@@ -160,25 +184,41 @@ def param_intervals_from_keys(
     intervals = []
     for k in sd_keys:
         if (
-                model_name,
-                k.split(".", 1)[1],
-                mp_size,
-                portion_rank,
-                portion_size,
+            model_name,
+            k.split(".", 1)[1],
+            mp_size,
+            portion_rank,
+            portion_size,
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
-                get_real_model_param_shape(k, config, mp_size, sequence_parallel),
+                get_real_model_param_shape(
+                    k, config, mp_size, sequence_parallel
+                ),
                 portion_rank,
                 portion_size,
                 config,
                 partition_fn=intervals_partition_fn,
             )
-            _FLAT_PARAM_INDICES_CACHE[(model_name, k.split(".", 1)[1], mp_size, portion_rank,
-                                       portion_size)] = zero_start_intervals
+            _FLAT_PARAM_INDICES_CACHE[
+                (
+                    model_name,
+                    k.split(".", 1)[1],
+                    mp_size,
+                    portion_rank,
+                    portion_size,
+                )
+            ] = zero_start_intervals
         else:
-            zero_start_intervals = _FLAT_PARAM_INDICES_CACHE[(model_name, k.split(".", 1)[1], mp_size,
-                                                              portion_rank, portion_size)]
+            zero_start_intervals = _FLAT_PARAM_INDICES_CACHE[
+                (
+                    model_name,
+                    k.split(".", 1)[1],
+                    mp_size,
+                    portion_rank,
+                    portion_size,
+                )
+            ]
         intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
     # assert len(set([x[0] for x in intervals])) == len(intervals)
     intervals = sorted(intervals, key=lambda x: x[0])
@@ -196,7 +236,9 @@ def map_param_to_contigous_memory(
         for k, v in l.named_parameters():
             spec = param_spec[f"{layer_idx}.{k}"]
             old_param_data = v.data
-            recursive_getattr(l, k).data = contiguous_param[spec.start_idx:spec.end_idx].view(spec.shape)
+            recursive_getattr(l, k).data = contiguous_param[
+                spec.start_idx : spec.end_idx
+            ].view(spec.shape)
             # This is for reward model. We should initialize the reward head instead of letting it be all-zero.
             if old_param_data.shape == spec.shape:
                 v.data.copy_(old_param_data)

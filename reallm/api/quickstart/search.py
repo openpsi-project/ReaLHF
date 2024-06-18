@@ -19,12 +19,14 @@ class RPCExecution:
         return f"RPCExecution({self.rpc}, {self.device_mesh}, {self.parallel_strategy})"
 
     def __hash__(self):
-        return hash((
-            self.rpc.name,
-            self.device_mesh.cluster_mesh,
-            self.device_mesh.device_mesh_name,
-            str(self.parallel_strategy),
-        ))
+        return hash(
+            (
+                self.rpc.name,
+                self.device_mesh.cluster_mesh,
+                self.device_mesh.device_mesh_name,
+                str(self.parallel_strategy),
+            )
+        )
 
 
 @dataclasses.dataclass
@@ -42,8 +44,10 @@ class RPCInstance:
         if len(self.parents) == 0 and len(self.children) == 0:
             return f"RPCInstance({self.rpc.name}, {self.iteration_id})"
         else:
-            return (f"RPCInstance({self.rpc.name}, {self.iteration_id}, "
-                    f"{self.parents}, {self.children})")
+            return (
+                f"RPCInstance({self.rpc.name}, {self.iteration_id}, "
+                f"{self.parents}, {self.children})"
+            )
 
     def __hash__(self):
         return hash((self.rpc.name, self.iteration_id))

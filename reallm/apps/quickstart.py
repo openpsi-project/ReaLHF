@@ -32,21 +32,33 @@ def launch_hydra_task(name: str, func: hydra.TaskFunction):
         sys.argv += ["hydra/job_logging=disabled"]
 
     if any("experiment_name=" in x for x in sys.argv):
-        experiment_name = next(x for x in sys.argv if "experiment_name=" in x).split("=")[1]
+        experiment_name = next(
+            x for x in sys.argv if "experiment_name=" in x
+        ).split("=")[1]
         if "_" in experiment_name:
             raise RuntimeError("experiment_name should not contain `_`.")
     else:
         experiment_name = f"quickstart-{name}"
-        print(f"Experiment name not manually set. Default to {experiment_name}.")
+        print(
+            f"Experiment name not manually set. Default to {experiment_name}."
+        )
         sys.argv += [f"experiment_name={experiment_name}"]
 
-    if ("--multirun" in sys.argv or "hydra.mode=MULTIRUN" in sys.argv or "-m" in sys.argv):
+    if (
+        "--multirun" in sys.argv
+        or "hydra.mode=MULTIRUN" in sys.argv
+        or "-m" in sys.argv
+    ):
         raise NotImplementedError("Hydra multi-run is not supported.")
     # non-multirun mode, add trial_name and hydra run dir
     if any("trial_name=" in x for x in sys.argv):
-        trial_name = next(x for x in sys.argv if "trial_name=" in x).split("=")[1]
+        trial_name = next(x for x in sys.argv if "trial_name=" in x).split("=")[
+            1
+        ]
     else:
-        trial_name = f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        trial_name = (
+            f"run{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        )
         sys.argv += [f"trial_name={trial_name}"]
     if "_" in trial_name:
         raise RuntimeError("trial_name should not contain `_`.")

@@ -8,7 +8,12 @@ import subprocess
 import warnings
 
 from packaging.version import parse, Version
-from torch.utils.cpp_extension import BuildExtension, CUDA_HOME, CUDAExtension, ROCM_HOME
+from torch.utils.cpp_extension import (
+    BuildExtension,
+    CUDA_HOME,
+    CUDAExtension,
+    ROCM_HOME,
+)
 import setuptools
 import torch
 import torch.utils.cpp_extension as torch_cpp_ext
@@ -29,7 +34,8 @@ NVCC_FLAGS = ["-O3", "-std=c++17"]
 
 if _is_cuda() and CUDA_HOME is None:
     raise RuntimeError(
-        "Cannot find CUDA_HOME. In GPU environment, CUDA must be available to build the package.")
+        "Cannot find CUDA_HOME. In GPU environment, CUDA must be available to build the package."
+    )
 
 ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
 CXX_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
@@ -42,7 +48,9 @@ def glob(pattern: str):
 
 
 def get_pybind11_include_path() -> str:
-    pybind11_meta = subprocess.check_output("pip show pybind11", shell=True).decode("ascii")
+    pybind11_meta = subprocess.check_output(
+        "pip show pybind11", shell=True
+    ).decode("ascii")
     for line in pybind11_meta.split("\n"):
         line = line.strip()
         if line.startswith("Location: "):
@@ -54,7 +62,9 @@ def get_nvcc_cuda_version(cuda_dir: str) -> Version:
 
     Adapted from https://github.com/NVIDIA/apex/blob/8b7a1ff183741dd8f9b87e7bafd04cfde99cea28/setup.py
     """
-    nvcc_output = subprocess.check_output([cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True)
+    nvcc_output = subprocess.check_output(
+        [cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True
+    )
     output = nvcc_output.split()
     release_idx = output.index("release") + 1
     nvcc_cuda_version = parse(output[release_idx].split(",")[0])
@@ -78,13 +88,17 @@ def get_torch_arch_list() -> Set[str]:
         return set()
 
     # Filter out the invalid architectures and print a warning.
-    valid_archs = NVIDIA_SUPPORTED_ARCHS.union({s + "+PTX" for s in NVIDIA_SUPPORTED_ARCHS})
+    valid_archs = NVIDIA_SUPPORTED_ARCHS.union(
+        {s + "+PTX" for s in NVIDIA_SUPPORTED_ARCHS}
+    )
     arch_list = torch_arch_list.intersection(valid_archs)
     # If none of the specified architectures are valid, raise an error.
     if not arch_list:
-        raise RuntimeError("None of the CUDA architectures in `TORCH_CUDA_ARCH_LIST` env "
-                           f"variable ({env_arch_list}) is supported. "
-                           f"Supported CUDA architectures are: {valid_archs}.")
+        raise RuntimeError(
+            "None of the CUDA architectures in `TORCH_CUDA_ARCH_LIST` env "
+            f"variable ({env_arch_list}) is supported. "
+            f"Supported CUDA architectures are: {valid_archs}."
+        )
     invalid_arch_list = torch_arch_list - valid_archs
     if invalid_arch_list:
         warnings.warn(
@@ -107,7 +121,9 @@ if _is_cuda() and not compute_capabilities:
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
         if major < 7:
-            raise RuntimeError("GPUs with compute capability below 7.0 are not supported.")
+            raise RuntimeError(
+                "GPUs with compute capability below 7.0 are not supported."
+            )
         compute_capabilities.add(f"{major}.{minor}")
 
 ext_modules = []
@@ -125,9 +141,15 @@ if _is_cuda():
             compute_capabilities.remove("9.0")
     # Validate the NVCC CUDA version.
     if nvcc_cuda_version < Version("11.0"):
-        raise RuntimeError("CUDA 11.0 or higher is required to build the package.")
-    if nvcc_cuda_version < Version("11.1") and any(cc.startswith("8.6") for cc in compute_capabilities):
-        raise RuntimeError("CUDA 11.1 or higher is required for compute capability 8.6.")
+        raise RuntimeError(
+            "CUDA 11.0 or higher is required to build the package."
+        )
+    if nvcc_cuda_version < Version("11.1") and any(
+        cc.startswith("8.6") for cc in compute_capabilities
+    ):
+        raise RuntimeError(
+            "CUDA 11.1 or higher is required for compute capability 8.6."
+        )
     if nvcc_cuda_version < Version("11.8"):
         if any(cc.startswith("8.9") for cc in compute_capabilities):
             # CUDA 11.8 is required to generate the code targeting compute capability 8.9.
@@ -140,10 +162,14 @@ if _is_cuda():
                 "Targeting compute capability 8.0 instead.",
                 stacklevel=2,
             )
-            compute_capabilities = set(cc for cc in compute_capabilities if not cc.startswith("8.9"))
+            compute_capabilities = set(
+                cc for cc in compute_capabilities if not cc.startswith("8.9")
+            )
             compute_capabilities.add("8.0+PTX")
         if any(cc.startswith("9.0") for cc in compute_capabilities):
-            raise RuntimeError("CUDA 11.8 or higher is required for compute capability 9.0.")
+            raise RuntimeError(
+                "CUDA 11.8 or higher is required for compute capability 9.0."
+            )
 
     NVCC_FLAGS_PUNICA = NVCC_FLAGS.copy()
 
@@ -154,7 +180,10 @@ if _is_cuda():
         if capability.endswith("+PTX"):
             NVCC_FLAGS += ["-gencode", f"arch=compute_{num},code=compute_{num}"]
         if int(capability[0]) >= 8:
-            NVCC_FLAGS_PUNICA += ["-gencode", f"arch=compute_{num},code=sm_{num}"]
+            NVCC_FLAGS_PUNICA += [
+                "-gencode",
+                f"arch=compute_{num},code=sm_{num}",
+            ]
             if capability.endswith("+PTX"):
                 NVCC_FLAGS_PUNICA += [
                     "-gencode",
@@ -221,7 +250,8 @@ if _is_cuda():
         ],
         extra_compile_args={
             "cxx": CXX_FLAGS,
-            "nvcc": NVCC_FLAGS + [
+            "nvcc": NVCC_FLAGS
+            + [
                 "--expt-relaxed-constexpr",
                 "--expt-extended-lambda",
                 "--use_fast_math",

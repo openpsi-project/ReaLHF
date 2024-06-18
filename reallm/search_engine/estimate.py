@@ -32,7 +32,12 @@ PROFILE_RESULT_PATH = os.path.join(
 )
 
 
-def get_param_realloc_stats(model_family: ModelFamily, model_path: str, n_nodes: int, use_cache: bool = True):
+def get_param_realloc_stats(
+    model_family: ModelFamily,
+    model_path: str,
+    n_nodes: int,
+    use_cache: bool = True,
+):
     non_critic = ModelFamily(model_family._class, model_family.size, False)
     table_path = os.path.join(
         constants.PROFILER_CACHE_PATH,
@@ -40,22 +45,30 @@ def get_param_realloc_stats(model_family: ModelFamily, model_path: str, n_nodes:
         f"prtc_{non_critic}_n{n_nodes}.pkl",
     )
     if not os.path.exists(table_path):
-        print(f"Calculating estimation of param realloc time cost for {model_family} at {model_path}")
+        print(
+            f"Calculating estimation of param realloc time cost for {model_family} at {model_path}"
+        )
         estimate_param_realloc_time_cost(n_nodes, {non_critic: model_path})
 
     print(f"Loading param realloc stats from {table_path}")
     return pickle.load(open(table_path, "rb"))
 
 
-def get_organized_op_stats(model_family: ModelFamily, model_path: str, use_cache: bool = True):
+def get_organized_op_stats(
+    model_family: ModelFamily, model_path: str, use_cache: bool = True
+):
     non_critic = ModelFamily(model_family._class, model_family.size, False)
     # parse raw stats into list of OpInfo used for estimation
-    cache_path = os.path.join(constants.PROFILER_CACHE_PATH, "organized_stats", f"{non_critic}.pkl")
+    cache_path = os.path.join(
+        constants.PROFILER_CACHE_PATH, "organized_stats", f"{non_critic}.pkl"
+    )
     if use_cache and os.path.exists(cache_path):
         with open(cache_path, "rb") as f:
             return pickle.load(f)
 
-    raw_result_path = os.path.join(constants.PROFILER_CACHE_PATH, "layer_stats", str(non_critic))
+    raw_result_path = os.path.join(
+        constants.PROFILER_CACHE_PATH, "layer_stats", str(non_critic)
+    )
     if not os.path.exists(raw_result_path):
         from reallm.apps.main import _main_profile_layers
 
@@ -89,13 +102,16 @@ def get_organized_op_stats(model_family: ModelFamily, model_path: str, use_cache
     num_mp_list = raw_stats["num_mp"].unique()
     organized_stats = defaultdict(list)
 
-    for op_name, bs, seq_len, layer_name, num_mp in itertools.product(op_name_list, bs_list, seq_len_list,
-                                                                      layer_name_list, num_mp_list):
-        filter_cond = ((raw_stats["op_name"] == op_name)
-                       & (raw_stats["bs"] == bs)
-                       & (raw_stats["seq_len"] == seq_len)
-                       & (raw_stats["layer_name"] == layer_name)
-                       & (raw_stats["num_mp"] == num_mp))
+    for op_name, bs, seq_len, layer_name, num_mp in itertools.product(
+        op_name_list, bs_list, seq_len_list, layer_name_list, num_mp_list
+    ):
+        filter_cond = (
+            (raw_stats["op_name"] == op_name)
+            & (raw_stats["bs"] == bs)
+            & (raw_stats["seq_len"] == seq_len)
+            & (raw_stats["layer_name"] == layer_name)
+            & (raw_stats["num_mp"] == num_mp)
+        )
         avg_time_ns = raw_stats[filter_cond]["time_ns"].mean()
         x = int(bs) if op_name == "fwd_gen_1" else int(bs * seq_len)
 
@@ -128,24 +144,37 @@ def computation_instruction_time_cost(
     layer_names = ["embedding_layer", "block_0", "head"]
     num_pp = parallel_strategy.pipeline_parallel_size
     num_mp = parallel_strategy.model_parallel_size
-    op_stats = op_stats[(op_stats["op_name"] == op_name) & (op_stats["num_mp"] == num_mp)]
+    op_stats = op_stats[
+        (op_stats["op_name"] == op_name) & (op_stats["num_mp"] == num_mp)
+    ]
 
     op_cost = {}
     embed_stats = op_stats[op_stats["layer_name"] == "embedding_layer"]
-    if embed_stats[(embed_stats["bs"] == bs) & (embed_stats["seq_len"] == seqlen)].empty:
+    if embed_stats[
+        (embed_stats["bs"] == bs) & (embed_stats["seq_len"] == seqlen)
+    ].empty:
         # do linear interpolation for data points that does not exist
         for layer_name in layer_names:
             layer_stats = op_stats[op_stats["layer_name"] == layer_name]
-            assert layer_stats[(layer_stats["bs"] == bs) & (layer_stats["seq_len"] == seqlen)].empty
-            assert not layer_stats.empty, (layer_name, op_name, num_mp, op_stats)
+            assert layer_stats[
+                (layer_stats["bs"] == bs) & (layer_stats["seq_len"] == seqlen)
+            ].empty
+            assert not layer_stats.empty, (
+                layer_name,
+                op_name,
+                num_mp,
+                op_stats,
+            )
             xs = layer_stats["x"]
             ys = layer_stats["avg_time_ns"]
             x = int(bs) if op_name == "fwd_gen_1" else int(bs * seqlen)
             y = np.interp(x, xs, ys)
             if max(xs) < x or min(xs) > x:
-                logger.warning(f"Interpolated value outside profiling range, "
-                               f"parallel strategy {parallel_strategy}: "
-                               f"{x} in {sorted(list(set(xs)))}")
+                logger.warning(
+                    f"Interpolated value outside profiling range, "
+                    f"parallel strategy {parallel_strategy}: "
+                    f"{x} in {sorted(list(set(xs)))}"
+                )
                 # estimate using largest or smallest value
                 if max(xs) < x:
                     y = ys.max() * (x / xs[ys.idxmax()])
@@ -155,16 +184,20 @@ def computation_instruction_time_cost(
     else:
         for layer_name in layer_names:
             assert not op_stats[op_stats["layer_name"] == layer_name].empty
-            required_stats = op_stats[(op_stats["layer_name"] == layer_name)
-                                      & (op_stats["bs"] == bs)
-                                      & (op_stats["seq_len"] == seqlen)]
+            required_stats = op_stats[
+                (op_stats["layer_name"] == layer_name)
+                & (op_stats["bs"] == bs)
+                & (op_stats["seq_len"] == seqlen)
+            ]
             assert required_stats.shape[0] == 1
             op_cost[layer_name] = required_stats["avg_time_ns"].values[0]
 
     embedding_layer_cost = op_cost["embedding_layer"]
     block_0_cost = op_cost["block_0"]
     head_cost = op_cost["head"]
-    cost = (embedding_layer_cost + num_layers * block_0_cost + head_cost) / num_pp
+    cost = (
+        embedding_layer_cost + num_layers * block_0_cost + head_cost
+    ) / num_pp
     return cost
 
 
@@ -190,8 +223,11 @@ def estimate_instruction_time_costs(
     num_dp = parallel_strategy.data_parallel_size
     num_gpus = num_dp * num_mp * num_pp
 
-    train_mbs = (batch_size / (2 * num_pp * num_dp * n_ppo_minibatches) if num_pp > 1 else batch_size /
-                 (num_dp * n_ppo_minibatches))
+    train_mbs = (
+        batch_size / (2 * num_pp * num_dp * n_ppo_minibatches)
+        if num_pp > 1
+        else batch_size / (num_dp * n_ppo_minibatches)
+    )
     gen_mbs = batch_size / (num_pp * num_dp)
 
     # pprint.pprint(op_cost, indent=4)
@@ -208,19 +244,21 @@ def estimate_instruction_time_costs(
 
     for inst_key, op_name in zip(inst_keys, op_names):
         mbs = train_mbs if "train" in inst_key else gen_mbs
-        inst_stats[inst_key] = computation_instruction_time_cost(op_stats, op_name, num_layers,
-                                                                 parallel_strategy, mbs, seq_len)
+        inst_stats[inst_key] = computation_instruction_time_cost(
+            op_stats, op_name, num_layers, parallel_strategy, mbs, seq_len
+        )
 
     comm_type = "remote_send" if num_gpus // num_pp >= 8 else "local_send"
 
-    inst_stats["act_p2p"] = communication_instruction_time_cost(comm_stats,
-                                                                2 * hidden_dim * train_mbs * seq_len,
-                                                                comm_type)
-    inst_stats["grad_p2p"] = communication_instruction_time_cost(comm_stats,
-                                                                 2 * hidden_dim * train_mbs * seq_len,
-                                                                 comm_type)
-    inst_stats["gen_act_p2p"] = communication_instruction_time_cost(comm_stats, 2 * hidden_dim * gen_mbs,
-                                                                    comm_type)
+    inst_stats["act_p2p"] = communication_instruction_time_cost(
+        comm_stats, 2 * hidden_dim * train_mbs * seq_len, comm_type
+    )
+    inst_stats["grad_p2p"] = communication_instruction_time_cost(
+        comm_stats, 2 * hidden_dim * train_mbs * seq_len, comm_type
+    )
+    inst_stats["gen_act_p2p"] = communication_instruction_time_cost(
+        comm_stats, 2 * hidden_dim * gen_mbs, comm_type
+    )
     return inst_stats
 
 
@@ -246,11 +284,18 @@ def _estimate_rpc_time_cost(
     elif model_interface_type == ModelInterfaceType.TRAIN_STEP:
         # TODO: add reduce grads, add ppo micro batches
         num_micro_batches = num_pp * 2 if num_pp > 1 else 1
-        compute_cost = (inst_stats["train_fwd"] + inst_stats["train_bwd"]) * (num_pp + num_micro_batches -
-                                                                              1) + inst_stats["train_opt"]
+        compute_cost = (inst_stats["train_fwd"] + inst_stats["train_bwd"]) * (
+            num_pp + num_micro_batches - 1
+        ) + inst_stats["train_opt"]
         if gradient_checkpointing:
-            compute_cost += inst_stats["train_fwd"] * (num_pp + num_micro_batches - 1)
-        comm_cost = ((inst_stats["grad_p2p"] + inst_stats["act_p2p"]) * (num_pp + num_micro_batches - 2) * 2)
+            compute_cost += inst_stats["train_fwd"] * (
+                num_pp + num_micro_batches - 1
+            )
+        comm_cost = (
+            (inst_stats["grad_p2p"] + inst_stats["act_p2p"])
+            * (num_pp + num_micro_batches - 2)
+            * 2
+        )
         compute_cost = compute_cost * n_ppo_minibatches
         comm_cost = comm_cost * n_ppo_minibatches
         if num_pp * num_dp <= 1:
@@ -260,8 +305,10 @@ def _estimate_rpc_time_cost(
     elif model_interface_type == ModelInterfaceType.GENERATE:
         num_micro_batches = num_pp
         num_gen_tokens = num_gen_tokens
-        compute_cost = (inst_stats["gen_fwd_0"] * (num_pp + num_micro_batches - 1) + inst_stats["gen_fwd_1"] *
-                        (num_gen_tokens - 1) * num_micro_batches)
+        compute_cost = (
+            inst_stats["gen_fwd_0"] * (num_pp + num_micro_batches - 1)
+            + inst_stats["gen_fwd_1"] * (num_gen_tokens - 1) * num_micro_batches
+        )
 
         if num_dp * num_mp > 1:
             compute_cost = compute_cost * (1 - min(num_dp * num_mp, 8) * 0.03)
@@ -304,14 +351,16 @@ def estimate_rpc_time_cost(
         seq_len,
         n_ppo_minibatches=n_ppo_minibatches,
     )
-    return (_estimate_rpc_time_cost(
-        inst_cost,
-        parallel_strategy,
-        rpc.interface_type,
-        num_gen_tokens=num_gen_tokens,
-        gradient_checkpointing=gradient_checkpointing,
-        n_ppo_minibatches=n_ppo_minibatches,
-    )) / 1e6
+    return (
+        _estimate_rpc_time_cost(
+            inst_cost,
+            parallel_strategy,
+            rpc.interface_type,
+            num_gen_tokens=num_gen_tokens,
+            gradient_checkpointing=gradient_checkpointing,
+            n_ppo_minibatches=n_ppo_minibatches,
+        )
+    ) / 1e6
 
 
 def default_communication_stats(if_print=False):
@@ -374,13 +423,17 @@ def estimate_rpc_memory_cost(
     # enable sequence parallel
     if interface_type == ModelInterfaceType.TRAIN_STEP:
         # gradient checkpointing is always enabled for flash attn
-        static_mem = (param_mem + grad_mem) // (num_pp * num_mp) + optimizer_mem // (num_pp * num_dp * num_mp)
+        static_mem = (param_mem + grad_mem) // (
+            num_pp * num_mp
+        ) + optimizer_mem // (num_pp * num_dp * num_mp)
         micro_bs = b // (2 * num_pp * num_dp) if num_pp > 0 else b // (num_dp)
         if gradient_checkpointing:
             active_mem = (micro_bs * s * h * num_pp * 2) // (num_pp * num_mp)
         else:
             # FIXME: calculate other memory entries
-            active_mem = (micro_bs * s * h * num_pp * 2) * 2 * L // (num_pp * num_mp)
+            active_mem = (
+                (micro_bs * s * h * num_pp * 2) * 2 * L // (num_pp * num_mp)
+            )
         return static_mem + active_mem, static_mem
     elif interface_type == ModelInterfaceType.INFERENCE:
         static_mem = int(2 * param_mem // (num_pp * num_mp))
@@ -396,7 +449,9 @@ def estimate_rpc_memory_cost(
             static_mem = static_mem * 1.25
         if num_mp == 0 and num_pp == 0:
             static_mem = static_mem * 1.25
-        active_mem = (2 * (2 * b * (gs + s) * h) * L // (num_pp * num_mp * num_dp))  # kv cache
+        active_mem = (
+            2 * (2 * b * (gs + s) * h) * L // (num_pp * num_mp * num_dp)
+        )  # kv cache
         return static_mem + active_mem, static_mem
 
 
@@ -417,7 +472,9 @@ def example(rpcs):
     bs = 128
     seq_len = 1024
 
-    p1 = ParallelismConfig(pipeline_parallel_size=1, model_parallel_size=4, data_parallel_size=8)
+    p1 = ParallelismConfig(
+        pipeline_parallel_size=1, model_parallel_size=4, data_parallel_size=8
+    )
     rpc_cost = estimate_rpc_time_cost(
         train,
         p1,
@@ -428,7 +485,9 @@ def example(rpcs):
         n_ppo_minibatches=4,
     )
     mem_cost, static_mem = estimate_rpc_memory_cost(rollout, p1, bs, seq_len)
-    print(f"{p1} rpc cost {rpc_cost:.2f} seconds mem cost {mem_cost/(1024**3):.2f} GB")
+    print(
+        f"{p1} rpc cost {rpc_cost:.2f} seconds mem cost {mem_cost/(1024**3):.2f} GB"
+    )
 
 
 if __name__ == "__main__":

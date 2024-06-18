@@ -74,9 +74,15 @@ class NameResolvingRequstClient:
             send_port = s.bind_to_random_port(f"tcp://{host_ip}")
             s.setsockopt(zmq.LINGER, 0)
 
-            master_send_name = names.request_reply_stream(experiment_name, trial_name, f"master_send_{i}")
-            name_resolve.add(name=master_send_name, value=f"{host_ip}:{send_port}")
-            logger.debug(f"Add master send address {host_ip}:{send_port} as {master_send_name}")
+            master_send_name = names.request_reply_stream(
+                experiment_name, trial_name, f"master_send_{i}"
+            )
+            name_resolve.add(
+                name=master_send_name, value=f"{host_ip}:{send_port}"
+            )
+            logger.debug(
+                f"Add master send address {host_ip}:{send_port} as {master_send_name}"
+            )
             self.send_sockets.append(s)
 
         self.recv_socket: zmq.Socket = self.context.socket(zmq.PULL)
@@ -84,18 +90,28 @@ class NameResolvingRequstClient:
         self.recv_socket.setsockopt(zmq.LINGER, 0)
         self.recv_address = f"{host_ip}:{recv_port}"
 
-        master_recv_name = names.request_reply_stream(experiment_name, trial_name, "master_recv")
+        master_recv_name = names.request_reply_stream(
+            experiment_name, trial_name, "master_recv"
+        )
         name_resolve.add(name=master_recv_name, value=self.recv_address)
-        logger.debug(f"Add master send address {self.recv_address} as {master_recv_name}")
+        logger.debug(
+            f"Add master send address {self.recv_address} as {master_recv_name}"
+        )
 
         self._response_buffer: Dict[uuid.UUID, Payload] = {}
         self._handler_routing = handler_routing
 
         # master needs to wait all peers (subscribers) to connect
-        while (len(
+        while (
+            len(
                 name_resolve.get_subtree(
-                    names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME)))
-               < n_subscribers):
+                    names.request_reply_stream(
+                        experiment_name, trial_name, PUBSUB_BARRIER_NAME
+                    )
+                )
+            )
+            < n_subscribers
+        ):
             time.sleep(0.1)
         logger.debug(
             f"Master discovered all {n_subscribers} "
@@ -112,19 +128,25 @@ class NameResolvingRequstClient:
         self.close()
 
     def post(self, payload: Payload) -> uuid.UUID:
-        assert payload.request_id is not None and payload.handle_name is not None
+        assert (
+            payload.request_id is not None and payload.handle_name is not None
+        )
         payload.send_time = time.monotonic()
         idx = self._handler_routing[payload.handler]
         self.send_sockets[idx].send(pickle.dumps(payload))
         return payload.request_id
 
-    def poll(self, pattern: re.Pattern | None = None, block: bool = False) -> Payload:
+    def poll(
+        self, pattern: re.Pattern | None = None, block: bool = False
+    ) -> Payload:
         payloads = self.poll_batch(pattern=pattern, block=block)
         for p in payloads[1:]:
             self._response_buffer[p.request_id] = p
         return payloads[0]
 
-    def poll_batch(self, pattern: re.Pattern | None = None, block: bool = False) -> List[Payload]:
+    def poll_batch(
+        self, pattern: re.Pattern | None = None, block: bool = False
+    ) -> List[Payload]:
         """Collect responses that match some pattern from the stream.
 
         This function may NOT actually pull from the stream. It may fetch something
@@ -146,7 +168,9 @@ class NameResolvingRequstClient:
                 except NoMessage:
                     time.sleep(0.05)
 
-    def _poll_batch_nonblock(self, pattern: Optional[re.Pattern] = None) -> List[Payload]:
+    def _poll_batch_nonblock(
+        self, pattern: Optional[re.Pattern] = None
+    ) -> List[Payload]:
         # Check whether there's response in the buffer.
         # If so, return immediately.
         if pattern is None:
@@ -191,14 +215,18 @@ class NameResolvingReplyServer:
     ):
         self.context = zmq.Context.instance(io_threads=ZMQ_IO_THREADS)
 
-        send_name = names.request_reply_stream(experiment_name, trial_name, "master_recv")
+        send_name = names.request_reply_stream(
+            experiment_name, trial_name, "master_recv"
+        )
         try:
             master_recv_addr = name_resolve.wait(send_name, timeout=300)
         except TimeoutError as e:
             logger.error(f"Worker timeout waiting for master receive stream.")
             raise e
 
-        recv_name = names.request_reply_stream(experiment_name, trial_name, f"master_send_{idx}")
+        recv_name = names.request_reply_stream(
+            experiment_name, trial_name, f"master_send_{idx}"
+        )
         try:
             master_send_addr = name_resolve.wait(recv_name, timeout=300)
         except TimeoutError as e:
@@ -208,7 +236,9 @@ class NameResolvingReplyServer:
         self.accept(master_send_addr, master_recv_addr)
 
         name_resolve.add_subentry(
-            name=names.request_reply_stream(experiment_name, trial_name, PUBSUB_BARRIER_NAME),
+            name=names.request_reply_stream(
+                experiment_name, trial_name, PUBSUB_BARRIER_NAME
+            ),
             value=socket.gethostbyname(socket.gethostname()),
             keepalive_ttl=60,
         )
@@ -225,14 +255,18 @@ class NameResolvingReplyServer:
         self.send_socket = send_socket
 
     def post(self, payload: Payload) -> uuid.UUID:
-        assert payload.request_id is not None and payload.handle_name is not None
+        assert (
+            payload.request_id is not None and payload.handle_name is not None
+        )
         payload.send_time = time.monotonic()
         self.send_socket.send(pickle.dumps(payload))
         return payload.request_id
 
     def poll(self, block: bool = False) -> Payload:
         try:
-            payload_bytes = self.recv_socket.recv(flags=0 if block else zmq.NOBLOCK)
+            payload_bytes = self.recv_socket.recv(
+                flags=0 if block else zmq.NOBLOCK
+            )
         except zmq.ZMQError:
             raise NoMessage()
 

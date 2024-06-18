@@ -24,7 +24,9 @@ def profile_layer_func(
 
     import reallm.base.constants as constants
 
-    testing.init_global_constants(1, world_size, 1, sequence_parallel=False, gradient_checkpointing=False)
+    testing.init_global_constants(
+        1, world_size, 1, sequence_parallel=False, gradient_checkpointing=False
+    )
     device = torch.device("cuda")
     with constants.model_scope(testing.MODEL_NAME):
         from reallm.search_engine.layers import make_profile_layers
@@ -33,7 +35,9 @@ def profile_layer_func(
 
         st = time.monotonic_ns()
         for i in range(warm_up_rounds + profile_rounds):
-            for bs, seq_len in itertools.product(batch_size_range, seq_len_range):
+            for bs, seq_len in itertools.product(
+                batch_size_range, seq_len_range
+            ):
                 profile_layers.fwd_gen(bs, seq_len)
                 profile_layers.fwd_bwd_opt(bs, seq_len)
 

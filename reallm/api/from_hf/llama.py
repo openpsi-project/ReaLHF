@@ -62,7 +62,9 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     return new_state_dict
 
 
-def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: ReaLModelConfig) -> Dict:
+def to_llama_state_dict(
+    state_dict: Dict[str, torch.Tensor], config: ReaLModelConfig
+) -> Dict:
     if constants.use_te_impl():
         # remove all extra states
         keys = list(state_dict.keys())
@@ -73,7 +75,9 @@ def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: ReaLModelCo
         # split gate && up weight
         for i in range(config.n_layers):
             w = state_dict[f"{i + 1}.mlp.fc1_weight"]
-            gate_w, upproj_w = w.split((w.shape[0] // 2, w.shape[0] // 2), dim=0)
+            gate_w, upproj_w = w.split(
+                (w.shape[0] // 2, w.shape[0] // 2), dim=0
+            )
             state_dict[f"{i + 1}.mlp.gate_proj.weight"] = gate_w.contiguous()
             state_dict[f"{i + 1}.mlp.up_proj.weight"] = upproj_w.contiguous()
             state_dict.pop(f"{i + 1}.mlp.fc1_weight")
@@ -103,20 +107,49 @@ def to_llama_state_dict(state_dict: Dict[str, torch.Tensor], config: ReaLModelCo
         elif i == config.n_layers + 1:
             new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
         else:
-            new_sd[f"model.layers.{i-1}.input_layernorm.weight"] = state_dict[f"{i}.attn.c_attn.ln.weight"]
-            new_sd[f"model.layers.{i-1}.mlp.down_proj.weight"] = state_dict[f"{i}.mlp.down_proj.weight"]
-            new_sd[f"model.layers.{i-1}.mlp.gate_proj.weight"] = state_dict[f"{i}.mlp.gate_proj.weight"]
-            new_sd[f"model.layers.{i-1}.mlp.up_proj.weight"] = state_dict[f"{i}.mlp.up_proj.weight"]
-            new_sd[f"model.layers.{i-1}.post_attention_layernorm.weight"] = state_dict[f"{i}.mlp.ln.weight"]
+            new_sd[f"model.layers.{i-1}.input_layernorm.weight"] = state_dict[
+                f"{i}.attn.c_attn.ln.weight"
+            ]
+            new_sd[f"model.layers.{i-1}.mlp.down_proj.weight"] = state_dict[
+                f"{i}.mlp.down_proj.weight"
+            ]
+            new_sd[f"model.layers.{i-1}.mlp.gate_proj.weight"] = state_dict[
+                f"{i}.mlp.gate_proj.weight"
+            ]
+            new_sd[f"model.layers.{i-1}.mlp.up_proj.weight"] = state_dict[
+                f"{i}.mlp.up_proj.weight"
+            ]
+            new_sd[f"model.layers.{i-1}.post_attention_layernorm.weight"] = (
+                state_dict[f"{i}.mlp.ln.weight"]
+            )
             new_sd[f"model.layers.{i-1}.self_attn.k_proj.weight"] = state_dict[
-                f"{i}.attn.c_attn.k_attn.weight"]
-            new_sd[f"model.layers.{i-1}.self_attn.o_proj.weight"] = state_dict[f"{i}.attn.c_proj.weight"]
+                f"{i}.attn.c_attn.k_attn.weight"
+            ]
+            new_sd[f"model.layers.{i-1}.self_attn.o_proj.weight"] = state_dict[
+                f"{i}.attn.c_proj.weight"
+            ]
             new_sd[f"model.layers.{i-1}.self_attn.q_proj.weight"] = state_dict[
-                f"{i}.attn.c_attn.q_attn.weight"]
+                f"{i}.attn.c_attn.q_attn.weight"
+            ]
             new_sd[f"model.layers.{i-1}.self_attn.v_proj.weight"] = state_dict[
-                f"{i}.attn.c_attn.v_attn.weight"]
-            new_sd[f"model.layers.{i-1}.self_attn.rotary_emb.inv_freq"] = 1.0 / (config.rotary_base**(
-                torch.arange(0, config.head_dim, 2, device=device, dtype=torch.float32) / config.head_dim))
+                f"{i}.attn.c_attn.v_attn.weight"
+            ]
+            new_sd[f"model.layers.{i-1}.self_attn.rotary_emb.inv_freq"] = (
+                1.0
+                / (
+                    config.rotary_base
+                    ** (
+                        torch.arange(
+                            0,
+                            config.head_dim,
+                            2,
+                            device=device,
+                            dtype=torch.float32,
+                        )
+                        / config.head_dim
+                    )
+                )
+            )
             if i == config.n_layers:
                 new_sd["model.norm.weight"] = state_dict[f"{i}.ln_f.weight"]
 
@@ -128,7 +161,9 @@ def llama_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
     return ["model.embed_tokens.weight"]
 
 
-def llama_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
+def llama_transformer_block_param_name(
+    config: ReaLModelConfig, idx: int
+) -> List[str]:
     names = [
         f"model.layers.{idx}.input_layernorm.weight",
         f"model.layers.{idx}.mlp.down_proj.weight",
@@ -150,7 +185,9 @@ def llama_output_head_param_name(config: ReaLModelConfig) -> List[str]:
     return ["lm_head.weight"]
 
 
-def convert_config_llama(hf_config: transformers.LlamaConfig) -> ReaLModelConfig:
+def convert_config_llama(
+    hf_config: transformers.LlamaConfig,
+) -> ReaLModelConfig:
     return ReaLModelConfig(
         n_layers=hf_config.num_hidden_layers,
         n_kv_heads=hf_config.num_key_value_heads,
@@ -160,7 +197,11 @@ def convert_config_llama(hf_config: transformers.LlamaConfig) -> ReaLModelConfig
         vocab_size=hf_config.vocab_size,
         n_positions=hf_config.max_position_embeddings,
         embd_pdrop=0.0,
-        attn_pdrop=(hf_config.attention_dropout if hasattr(hf_config, "attention_dropout") else 0.1),
+        attn_pdrop=(
+            hf_config.attention_dropout
+            if hasattr(hf_config, "attention_dropout")
+            else 0.1
+        ),
         layer_norm_epsilon=hf_config.rms_norm_eps,
         activation_function=hf_config.hidden_act,
         use_attention_bias=hf_config.attention_bias,
@@ -170,12 +211,22 @@ def convert_config_llama(hf_config: transformers.LlamaConfig) -> ReaLModelConfig
         apply_rotary=True,
         rotary_base=hf_config.rope_theta,
         rotary_interleaved=False,
-        rotary_scaling=(None if hf_config.rope_scaling is None else hf_config.rope_scaling["factor"]),
-        rotary_scaling_type=(None if hf_config.rope_scaling is None else hf_config.rope_scaling["type"]),
+        rotary_scaling=(
+            None
+            if hf_config.rope_scaling is None
+            else hf_config.rope_scaling["factor"]
+        ),
+        rotary_scaling_type=(
+            None
+            if hf_config.rope_scaling is None
+            else hf_config.rope_scaling["type"]
+        ),
     )
 
 
-def convert_config_back_llama(config: ReaLModelConfig) -> transformers.LlamaConfig:
+def convert_config_back_llama(
+    config: ReaLModelConfig,
+) -> transformers.LlamaConfig:
     rope_scaling = {}
     if config.rotary_scaling is not None:
         rope_scaling["factor"] = config.rotary_scaling
@@ -199,9 +250,9 @@ def convert_config_back_llama(config: ReaLModelConfig) -> transformers.LlamaConf
 
 
 for name in [
-        "llama",
-        "codellama",
-        "deepseek",
+    "llama",
+    "codellama",
+    "deepseek",
 ]:
     register_hf_family(
         name=name,

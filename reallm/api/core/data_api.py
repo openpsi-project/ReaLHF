@@ -73,15 +73,22 @@ def load_shuffle_split_dataset(
             with open(dataset_path, "r") as f:
                 data = json.load(f)
         else:
-            raise NotImplementedError(f"Unkown dataset extension: {dataset_path}")
+            raise NotImplementedError(
+                f"Unkown dataset extension: {dataset_path}"
+            )
     else:
         assert dataset_builder is not None
         data = dataset_builder()
 
     datasize_per_rank = len(data) // util.world_size
-    shuffle_indices = get_shuffle_indices(util.seed, datasize_per_rank * util.world_size)
-    subset_indices = shuffle_indices[util.ddp_rank * datasize_per_rank:(util.ddp_rank + 1) *
-                                     datasize_per_rank]
+    shuffle_indices = get_shuffle_indices(
+        util.seed, datasize_per_rank * util.world_size
+    )
+    subset_indices = shuffle_indices[
+        util.ddp_rank
+        * datasize_per_rank : (util.ddp_rank + 1)
+        * datasize_per_rank
+    ]
     data: List[Dict[str, str]] = [data[i] for i in subset_indices]
 
     return data
@@ -106,7 +113,9 @@ def make_dataset(
     seed: int,
     ddp_rank: int,
     world_size: int,
-    tokenizer_or_tokenizer_name: Union[transformers.PreTrainedTokenizerFast, str],
+    tokenizer_or_tokenizer_name: Union[
+        transformers.PreTrainedTokenizerFast, str
+    ],
     experiment_name: str,
     trial_name: str,
     cache_root: Optional[str] = None,
@@ -132,8 +141,12 @@ def make_dataset(
         return dataset_cls(util=util, **cfg.args)
 
     # Create and check cache path.
-    if not cache_root.startswith(cluster_spec.fileroot) and not cache_root.startswith("/home"):
-        raise ValueError(f"Data cache path {cache_root} should be /home or under {cluster_spec.fileroot}.")
+    if not cache_root.startswith(
+        cluster_spec.fileroot
+    ) and not cache_root.startswith("/home"):
+        raise ValueError(
+            f"Data cache path {cache_root} should be /home or under {cluster_spec.fileroot}."
+        )
     if "_" in experiment_name or "_" in trial_name:
         raise ValueError(f"Invalid experiment/trial name.")
 
@@ -153,13 +166,19 @@ def make_dataset(
 
     tik = time.perf_counter()
     if not cache_found:
-        logger.info(f"No data cache found for rank {ddp_rank}. Create it from scratch.")
-        dataset = ALL_DATASET_CLASSES[cfg.type_](seed, ddp_rank, world_size, **cfg.args)
+        logger.info(
+            f"No data cache found for rank {ddp_rank}. Create it from scratch."
+        )
+        dataset = ALL_DATASET_CLASSES[cfg.type_](
+            seed, ddp_rank, world_size, **cfg.args
+        )
         torch.save(dataset, os.path.join(output_path, fname))
     else:
         logger.info(f"Rank {ddp_rank} find existing data cache, load it.")
         dataset = torch.load(os.path.join(output_path, fname))
-    logger.info(f"Dataset creation/loading time: {time.perf_counter() - tik:.3f}s")
+    logger.info(
+        f"Dataset creation/loading time: {time.perf_counter() - tik:.3f}s"
+    )
 
     return dataset
 
@@ -172,8 +191,9 @@ def register_dataloader(name, dataloader_cls):
     ALL_DATALOADER_CLASSES[name] = dataloader_cls
 
 
-def make_dataloader(cfg: Union[str, system_api.DataLoader],
-                    dataset: torch.utils.data.Dataset) -> torch.utils.data.DataLoader:
+def make_dataloader(
+    cfg: Union[str, system_api.DataLoader], dataset: torch.utils.data.Dataset
+) -> torch.utils.data.DataLoader:
     if isinstance(cfg, str):
         cfg = system_api.DataLoader(type_=cfg)
     dataloader_cls = ALL_DATALOADER_CLASSES[cfg.type_]
@@ -217,7 +237,9 @@ def split_sequences(
 ) -> List[namedarray.NamedArray]:
     # FIXME: remove cu_seqlens here
     if src.metadata.get("seqlens", None) is None:
-        raise ValueError("seqlens must be in the metadata of the input namedarray.")
+        raise ValueError(
+            "seqlens must be in the metadata of the input namedarray."
+        )
 
     seqlens = src.metadata["seqlens"]
 
@@ -234,7 +256,9 @@ def split_sequences(
     # We use numpy/list for indexing to avoid host-device synchronization
     batch_seqlens = [sum(seqlens[start:end]) for start, end in partitions]
     offsets = [0] + np.cumsum(batch_seqlens).tolist()[:-1]
-    short1batch_seqlens = [sum(seqlens[start:end]) - (end - start) for start, end in partitions]
+    short1batch_seqlens = [
+        sum(seqlens[start:end]) - (end - start) for start, end in partitions
+    ]
     short1offsets = [0] + np.cumsum(short1batch_seqlens).tolist()[:-1]
 
     splitted_data = [collections.defaultdict() for _ in range(n_dp)]
@@ -251,59 +275,73 @@ def split_sequences(
             elif k in ["prompt_cu_seqlens", "cu_seqlens"]:
                 continue
             elif k in [
-                    "prompt_lens",
-                    "input_lens",
-                    "seq_no_eos_mask",
-                    "rewards",
-                    "reward_score",
-                    "group_factor",
-                    "prompt_lens",
-                    "pos_input_lens",
-                    "group_input_lens",
-                    "seqlogp",
+                "prompt_lens",
+                "input_lens",
+                "seq_no_eos_mask",
+                "rewards",
+                "reward_score",
+                "group_factor",
+                "prompt_lens",
+                "pos_input_lens",
+                "group_input_lens",
+                "seqlogp",
             ]:
                 start, end = partitions[i]
                 sp[k] = v[start:end]
             elif k in [
-                    "packed_seq",
-                    "packed_logits_mask",
-                    "prompt_mask",
-                    "packed_input_ids",
-                    "values",
-                    "logits_mask",
-                    "packed_prompts",
+                "packed_seq",
+                "packed_logits_mask",
+                "prompt_mask",
+                "packed_input_ids",
+                "values",
+                "logits_mask",
+                "packed_prompts",
             ]:
-                sp[k] = v[offsets[i]:offsets[i] + batch_seqlens[i]]
+                sp[k] = v[offsets[i] : offsets[i] + batch_seqlens[i]]
             elif k in [
-                    "packed_logprobs",
-                    "packed_ref_logprobs",
-                    "old_logp",
-                    "ref_logp",
-                    "advantages",
-                    "ppo_loss_mask",
-                    "kl_rewards",
-                    "returns",
+                "packed_logprobs",
+                "packed_ref_logprobs",
+                "old_logp",
+                "ref_logp",
+                "advantages",
+                "ppo_loss_mask",
+                "kl_rewards",
+                "returns",
             ]:
-                sp[k] = v[short1offsets[i]:short1offsets[i] + short1batch_seqlens[i]]
+                sp[k] = v[
+                    short1offsets[i] : short1offsets[i] + short1batch_seqlens[i]
+                ]
             elif not torch.is_tensor(src[k]):
                 # for constant, preserve value for each splitted instance
                 sp[k] = src[k]
             else:
-                raise RuntimeError(f"Unknown key {k} in packed data. We don't know how to split it. "
-                                   f"Check api/core/data_api.py for implemented keys.")
+                raise RuntimeError(
+                    f"Unknown key {k} in packed data. We don't know how to split it. "
+                    f"Check api/core/data_api.py for implemented keys."
+                )
 
     if "cu_seqlens" in src.keys():
         for x, (start, end) in zip(splitted_data, partitions):
-            slens = torch.tensor(seqlens[start:end], dtype=torch.int32, device=src["cu_seqlens"].device)
-            x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
+            slens = torch.tensor(
+                seqlens[start:end],
+                dtype=torch.int32,
+                device=src["cu_seqlens"].device,
+            )
+            x["cu_seqlens"] = torch.nn.functional.pad(
+                slens.cumsum(dim=0), (1, 0)
+            ).int()
 
     if "prompt_cu_seqlens" in src.keys():
-        raw_prompt_lens = src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
+        raw_prompt_lens = (
+            src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
+        )
         all_prompt_lens: List[torch.IntTensor] = [
             raw_prompt_lens[start:end].int() for start, end in partitions
         ]
         for x, pslens in zip(splitted_data, all_prompt_lens):
-            x["prompt_cu_seqlens"] = torch.nn.functional.pad(pslens.cumsum(dim=0), (1, 0)).int()
+            x["prompt_cu_seqlens"] = torch.nn.functional.pad(
+                pslens.cumsum(dim=0), (1, 0)
+            ).int()
 
     splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
     for x, (start, end) in zip(splitted_data, partitions):
@@ -325,21 +363,32 @@ def gather_sequences(src: List[namedarray.NamedArray]) -> namedarray.NamedArray:
     seqlens = []
     for x in src:
         if x.metadata.get("seqlens", None) is None:
-            raise ValueError("seqlens must be in the metadata of the input namedarray.")
+            raise ValueError(
+                "seqlens must be in the metadata of the input namedarray."
+            )
         seqlens += x.metadata["seqlens"]
 
     res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
 
     if "cu_seqlens" in src[0]:
-        slens = torch.cat([x["cu_seqlens"][1:] - x["cu_seqlens"][:-1] for x in src], dim=0)
-        res["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
+        slens = torch.cat(
+            [x["cu_seqlens"][1:] - x["cu_seqlens"][:-1] for x in src], dim=0
+        )
+        res["cu_seqlens"] = torch.nn.functional.pad(
+            slens.cumsum(dim=0), (1, 0)
+        ).int()
 
     if "prompt_cu_seqlens" in src[0]:
         slens = torch.cat(
-            [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src],
+            [
+                x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1]
+                for x in src
+            ],
             dim=0,
         )
-        res["prompt_cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
+        res["prompt_cu_seqlens"] = torch.nn.functional.pad(
+            slens.cumsum(dim=0), (1, 0)
+        ).int()
 
     res.register_metadata(seqlens=seqlens)
     return res
@@ -347,13 +396,13 @@ def gather_sequences(src: List[namedarray.NamedArray]) -> namedarray.NamedArray:
 
 def get_shape_from_key_and_seqlen(k: str, seqlen: int, vocab_size: int):
     if k in [
-            "input_lens",
-            "prompt_lens",
-            "seq_no_eos_mask",
-            "rewards",
-            "reward_score",
-            "group_factor",
-            "pos_input_lens",
+        "input_lens",
+        "prompt_lens",
+        "seq_no_eos_mask",
+        "rewards",
+        "reward_score",
+        "group_factor",
+        "pos_input_lens",
     ]:
         shape = (1,)
     elif k in ["cu_seqlens", "prompt_cu_seqlens"]:
@@ -362,22 +411,22 @@ def get_shape_from_key_and_seqlen(k: str, seqlen: int, vocab_size: int):
     elif k in ["seqlogp"]:
         shape = (1, 2)
     elif k in [
-            "packed_seq",
-            "prompt_mask",
-            "packed_input_ids",
-            "values",
-            "packed_prompts",
+        "packed_seq",
+        "prompt_mask",
+        "packed_input_ids",
+        "values",
+        "packed_prompts",
     ]:
         shape = (seqlen,)
     elif k in [
-            "packed_logprobs",
-            "packed_ref_logprobs",
-            "old_logp",
-            "ref_logp",
-            "advantages",
-            "ppo_loss_mask",
-            "kl_rewards",
-            "returns",
+        "packed_logprobs",
+        "packed_ref_logprobs",
+        "old_logp",
+        "ref_logp",
+        "advantages",
+        "ppo_loss_mask",
+        "kl_rewards",
+        "returns",
     ]:
         shape = (seqlen - 1,)
     elif k in ["logits_mask", "packed_logits_mask"]:
@@ -389,30 +438,30 @@ def get_shape_from_key_and_seqlen(k: str, seqlen: int, vocab_size: int):
 
 def get_dtype_from_key(k: str):
     if k in [
-            "seq_no_eos_mask",
-            "ppo_loss_mask",
-            "prompt_mask",
-            "logits_mask",
-            "packed_logits_mask",
+        "seq_no_eos_mask",
+        "ppo_loss_mask",
+        "prompt_mask",
+        "logits_mask",
+        "packed_logits_mask",
     ]:
         dtype = torch.bool
     elif k in [
-            "reward_score",
-            "packed_ref_logprobs",
-            "old_logp",
-            "ref_logp",
-            "advantages",
-            "kl_rewards",
-            "returns",
-            "values",
+        "reward_score",
+        "packed_ref_logprobs",
+        "old_logp",
+        "ref_logp",
+        "advantages",
+        "kl_rewards",
+        "returns",
+        "values",
     ]:
         dtype = torch.float16
     elif k in [
-            "input_lens",
-            "prompt_lens",
-            "cu_seqlens",
-            "prompt_cu_seqlens",
-            "pos_input_lens",
+        "input_lens",
+        "prompt_lens",
+        "cu_seqlens",
+        "prompt_cu_seqlens",
+        "pos_input_lens",
     ]:
         dtype = torch.int32
     elif k in ["packed_seq", "packed_input_ids", "packed_prompts"]:

@@ -72,11 +72,15 @@ def check_slurm_availability():
     import os
     import subprocess
 
-    slurm_available = (int(
-        subprocess.run(
-            "squeue",
-            shell=True,
-            stdout=open(os.devnull, "wb"),
-            stderr=open(os.devnull, "wb"),
-        ).returncode) == 0)
+    slurm_available = (
+        int(
+            subprocess.run(
+                "squeue",
+                shell=True,
+                stdout=open(os.devnull, "wb"),
+                stderr=open(os.devnull, "wb"),
+            ).returncode
+        )
+        == 0
+    )
     return slurm_available

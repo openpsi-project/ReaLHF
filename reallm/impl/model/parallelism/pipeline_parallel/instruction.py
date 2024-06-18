@@ -43,7 +43,9 @@ class PipeInstruction:
         self.name = self.__class__.__name__
         self.step_id = step_id
         self.args = (stage_id, micro_batch_id, step_id)
-        self.__str_encode = (f"{self.name};{self.stage_id};{self.micro_batch_id};{self.step_id}")
+        self.__str_encode = (
+            f"{self.name};{self.stage_id};{self.micro_batch_id};{self.step_id}"
+        )
         self.schedule_id = schedule_id
 
     def __repr__(self):
@@ -51,16 +53,28 @@ class PipeInstruction:
         # return call_to_str(self.name, self.args, self.kwargs)
 
     def __eq__(self, other: "PipeInstruction"):
-        return (self.stage_id == other.stage_id and self.micro_batch_id == other.micro_batch_id
-                and self.step_id == other.step_id and self.name == other.name)
+        return (
+            self.stage_id == other.stage_id
+            and self.micro_batch_id == other.micro_batch_id
+            and self.step_id == other.step_id
+            and self.name == other.name
+        )
 
     def __lt__(self, other: "PipeInstruction"):
         # order by stage_id, micro_batch_id, step_id
         # used to sort finded results in InstructionSet
-        return (self.stage_id < other.stage_id
-                or (self.stage_id == other.stage_id and self.micro_batch_id < other.micro_batch_id)
-                or (self.stage_id == other.stage_id and self.micro_batch_id == other.micro_batch_id
-                    and self.step_id < other.step_id))
+        return (
+            self.stage_id < other.stage_id
+            or (
+                self.stage_id == other.stage_id
+                and self.micro_batch_id < other.micro_batch_id
+            )
+            or (
+                self.stage_id == other.stage_id
+                and self.micro_batch_id == other.micro_batch_id
+                and self.step_id < other.step_id
+            )
+        )
 
     def encode_str(self) -> str:
         return self.__str_encode

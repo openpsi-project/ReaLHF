@@ -22,7 +22,9 @@ class SchedulerError(Exception):
 class JobException(Exception):
 
     def __init__(self, run_name, worker_type, host, reason: JobState):
-        super().__init__(f"Job {run_name}:{worker_type} {reason} at node {host}")
+        super().__init__(
+            f"Job {run_name}:{worker_type} {reason} at node {host}"
+        )
         self.run_name = run_name
         self.worker_type = worker_type
         self.host = host
@@ -115,30 +117,35 @@ def remote_worker_cmd(expr_name, trial_name, debug, worker_type):
     return (
         f"python3 {'' if debug else '-O'} -m reallm.apps.remote worker -w {worker_type} "
         f"-e {expr_name} -f {trial_name} -i {{jobstep_id}} -g {{n_jobsteps}} -r {{worker_submission_index}} "
-        f"-p {{wprocs_per_jobstep}} -j {{wprocs_in_job}} -o {{wproc_offset}}")
+        f"-p {{wprocs_per_jobstep}} -j {{wprocs_in_job}} -o {{wproc_offset}}"
+    )
 
 
 def setup_cmd(expr_name, trial_name, debug):
     bash_cmd = (  # f"pip3 install -e $REAL_PACKAGE_PATH --no-build-isolation && "
         f"python3 {'' if debug else '-O'} -m reallm.apps.remote "
-        f"reset_name_resolve -e {expr_name} -f {trial_name}")
+        f"reset_name_resolve -e {expr_name} -f {trial_name}"
+    )
     # return f"bash -c \"{bash_cmd}\""
     return bash_cmd
 
 
-def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_type):
+def control_cmd(
+    expr_name, trial_name, debug, ignore_worker_error, controller_type
+):
     bash_cmd = (  # f"pip3 install -e $REAL_PACKAGE_PATH --no-build-isolation && "
         f"python3 {'' if debug else '-O'} -m reallm.apps.remote controller "
         f"-e {expr_name} -f {trial_name} "
         f"--{'ignore_worker_error' if ignore_worker_error else 'raise_worker_error'} "
-        f"--type {controller_type}")
+        f"--type {controller_type}"
+    )
     # return f"bash -c \"{bash_cmd}\""
     return bash_cmd
 
 
 def ray_cluster_cmd(expr_name, trial_name, worker_type):
     flags = [f"-e {expr_name}", f"-f {trial_name}", f"-w {worker_type}"]
-    return (f"python3 -m reallm.apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}")
+    return f"python3 -m reallm.apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}"
 
 
 def make(mode, expr_name, trial_name, **kwargs) -> SchedulerClient:

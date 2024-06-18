@@ -37,7 +37,8 @@ def gpu_memory_mb(name):
 
     logger.debug(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
-        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB")
+        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB"
+    )
 
 
 def mock_time_mark(name, identifier, t, step):
@@ -47,7 +48,9 @@ def mock_time_mark(name, identifier, t, step):
 
 def time_mark(name, identifier, step=0):
     if IF_MARK:
-        logger.debug(f"*{name}* #{identifier}#  ${int(time.time_ns())}$ ns step &{step}&")
+        logger.debug(
+            f"*{name}* #{identifier}#  ${int(time.time_ns())}$ ns step &{step}&"
+        )
 
 
 def parse_time_mark_in_line(line, name, step_range=None):
@@ -115,17 +118,17 @@ MATPLOTLIB_COLORS = [
 
 
 def summary_time_points(
-        start_keys,
-        end_keys,
-        identifiers,
-        dir_name=None,
-        file_name=None,
-        start_time=None,
-        figsize=(12, 4),
-        end_time=None,
-        step_range=None,
-        save_fig_path="time_points.png",
-        draw_boundary=False,
+    start_keys,
+    end_keys,
+    identifiers,
+    dir_name=None,
+    file_name=None,
+    start_time=None,
+    figsize=(12, 4),
+    end_time=None,
+    step_range=None,
+    save_fig_path="time_points.png",
+    draw_boundary=False,
 ):
     """Plot and summary time marks in logs"""
     import matplotlib.pyplot as plt
@@ -134,14 +137,22 @@ def summary_time_points(
     all_time_points = {}
     if file_name is None:
         for k in start_keys:
-            all_time_points[k] = parse_time_mark_in_dir(dir_name, k, step_range=step_range)
+            all_time_points[k] = parse_time_mark_in_dir(
+                dir_name, k, step_range=step_range
+            )
         for k in end_keys:
-            all_time_points[k] = parse_time_mark_in_dir(dir_name, k, step_range=step_range)
+            all_time_points[k] = parse_time_mark_in_dir(
+                dir_name, k, step_range=step_range
+            )
     else:
         for k in start_keys:
-            all_time_points[k] = parse_time_mark_in_file(file_name, k, step_range=step_range)
+            all_time_points[k] = parse_time_mark_in_file(
+                file_name, k, step_range=step_range
+            )
         for k in end_keys:
-            all_time_points[k] = parse_time_mark_in_file(file_name, k, step_range=step_range)
+            all_time_points[k] = parse_time_mark_in_file(
+                file_name, k, step_range=step_range
+            )
 
     fig, ax = plt.subplots(1, 1, figsize=figsize)
     ax.set_ylim(-1, len(identifiers))
@@ -155,12 +166,16 @@ def summary_time_points(
     for id_index, identifier in enumerate(identifiers):
         time_sum = {}
         time_list = {}
-        for start_key_idx, (start_key, end_key) in enumerate(zip(start_keys, end_keys)):
+        for start_key_idx, (start_key, end_key) in enumerate(
+            zip(start_keys, end_keys)
+        ):
             # print(start_key, identifier, all_time_points[start_key])
             time_sum[start_key] = 0
             time_list[start_key] = []
             try:
-                start_time_points = np.array(all_time_points[start_key][identifier])
+                start_time_points = np.array(
+                    all_time_points[start_key][identifier]
+                )
                 end_time_points = np.array(all_time_points[end_key][identifier])
             except KeyError:
                 continue
@@ -169,7 +184,9 @@ def summary_time_points(
             if start_time is not None:
                 valid_indices_st = np.where(start_time_points > start_time)
                 valid_indices_et = np.where(start_time_points < end_time)
-                valid_indices = np.intersect1d(valid_indices_st, valid_indices_et)
+                valid_indices = np.intersect1d(
+                    valid_indices_st, valid_indices_et
+                )
                 start_time_points = start_time_points[valid_indices]
                 end_time_points = end_time_points[valid_indices]
 
@@ -219,7 +236,9 @@ def summary_time_points(
 
     ax.set_xlim(min_time, max_time)
     total_width = max_time - min_time
-    xticks = np.arange(min_time - total_width // 12, max_time - total_width // 12, 10 * 1e9)
+    xticks = np.arange(
+        min_time - total_width // 12, max_time - total_width // 12, 10 * 1e9
+    )
     xtick_labels = [f"{int((i//1e9)%1000)}" for i in xticks]
     ax.set_xticks(xticks)
     ax.set_xticklabels(xtick_labels)
@@ -233,14 +252,28 @@ def summary_time_points(
         for k in time_sum:
             time_perc = round(time_sum[k] / (max_time - min_time) * 100, 2)
             # print time cost percent
-            avg_val = (round(mean(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-")
-            max_val = (round(max(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-")
-            min_val = (round(min(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-")
+            avg_val = (
+                round(mean(time_list[k]) / 10e6, 2)
+                if len(time_list[k]) > 0
+                else "-"
+            )
+            max_val = (
+                round(max(time_list[k]) / 10e6, 2)
+                if len(time_list[k]) > 0
+                else "-"
+            )
+            min_val = (
+                round(min(time_list[k]) / 10e6, 2)
+                if len(time_list[k]) > 0
+                else "-"
+            )
 
             bubble_time -= time_perc
-            print(f"{k} -- {time_perc} %, "
-                  f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
-                  f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}")
+            print(
+                f"{k} -- {time_perc} %, "
+                f"avg, min, max = {avg_val}, {min_val}, {max_val} ms, "
+                f"sum, n = {round(time_sum[k]/10e6, 2)} ms, {len(time_list[k])}"
+            )
         print(f"bubble time -- {round(bubble_time, 2)}%")
 
     plt.legend(loc=(1.01, 0.0))
@@ -257,13 +290,17 @@ def gpu_utilization_monitor(worker_idx: int, interval: float, ttl: float):
         handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
         utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
         memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
+        total_memory = memory_info.total / (
+            1024**2
+        )  # Convert bytes to megabytes
         used_memory = memory_info.used / (1024**2)
         memory_usage_percentage = (used_memory / total_memory) * 100
-        logger.debug(f"Worker Index {worker_idx}, GPU {gpu_idx}: "
-                     f"Compute Utilization - {utilization.gpu}%, "
-                     f"Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, "
-                     f"Memory Usage - {memory_usage_percentage:.2f}%")
+        logger.debug(
+            f"Worker Index {worker_idx}, GPU {gpu_idx}: "
+            f"Compute Utilization - {utilization.gpu}%, "
+            f"Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, "
+            f"Memory Usage - {memory_usage_percentage:.2f}%"
+        )
         time.sleep(interval)
     pynvml.nvmlShutdown()
 
@@ -279,7 +316,13 @@ def calculate_llama_train_flops(
     vocab_size: int,
 ):
     return checkpoint_activations_factor * caculuate_llama_forward_flops(
-        batch_size, seqlens, num_layers, hidden_size, intermediate_size, vocab_size)
+        batch_size,
+        seqlens,
+        num_layers,
+        hidden_size,
+        intermediate_size,
+        vocab_size,
+    )
 
 
 def caculuate_llama_forward_flops(
@@ -292,9 +335,16 @@ def caculuate_llama_forward_flops(
 ):
     assert len(seqlens) == batch_size
     attn_flops = sum(x**2 for x in seqlens) * hidden_size
-    return (2 * num_layers * (4 * sum(seqlens) * hidden_size**2 + 2 * attn_flops +
-                              3 * sum(seqlens) * hidden_size * intermediate_size) +
-            4 * sum(seqlens) * vocab_size * hidden_size)
+    return (
+        2
+        * num_layers
+        * (
+            4 * sum(seqlens) * hidden_size**2
+            + 2 * attn_flops
+            + 3 * sum(seqlens) * hidden_size * intermediate_size
+        )
+        + 4 * sum(seqlens) * vocab_size * hidden_size
+    )
 
 
 def calculate_llama_gen_flops(
@@ -306,15 +356,26 @@ def calculate_llama_gen_flops(
     intermediate_size,
     vocab_size,
 ):
-    flops = caculuate_llama_forward_flops(batch_size, prompt_lens, num_layers, hidden_size, intermediate_size,
-                                          vocab_size)
+    flops = caculuate_llama_forward_flops(
+        batch_size,
+        prompt_lens,
+        num_layers,
+        hidden_size,
+        intermediate_size,
+        vocab_size,
+    )
     for i in range(gen_len):
         prefix_lens = [x + i for x in prompt_lens]
         flops += (
-            2 * num_layers *
-            (4 * batch_size * hidden_size**2 + 2 *
-             (sum(prefix_lens) + batch_size) * hidden_size + 3 * batch_size * hidden_size * intermediate_size)
-            + 4 * batch_size * vocab_size * hidden_size)
+            2
+            * num_layers
+            * (
+                4 * batch_size * hidden_size**2
+                + 2 * (sum(prefix_lens) + batch_size) * hidden_size
+                + 3 * batch_size * hidden_size * intermediate_size
+            )
+            + 4 * batch_size * vocab_size * hidden_size
+        )
     return flops
 
 
@@ -355,7 +416,9 @@ def cuda_tmark(name: str, type_: CUDATimeMarkType):
                 torch.cuda.synchronize()
                 tok = time.time_ns()
                 global TIME_MARK_DB
-                TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
+                TIME_MARK_DB.append(
+                    TimeMarkEntry(name, _model_name, type_, tik, tok)
+                )
                 return res
 
             return _wrapped_f
@@ -465,8 +528,11 @@ class CUDAKernelTime:  # in us
                 unknown_keys.append(x)
         if unknown_keys:
             raise NotImplementedError(
-                f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}")
-        return cls(compute=compute_time, comm=comm_time, mem=mem_time, misc=misc_time)
+                f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}"
+            )
+        return cls(
+            compute=compute_time, comm=comm_time, mem=mem_time, misc=misc_time
+        )
 
     def __add__(self, other):
         return CUDAKernelTime(

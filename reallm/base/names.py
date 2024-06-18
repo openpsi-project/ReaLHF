@@ -17,7 +17,9 @@ def trial_root(experiment_name, trial_name):
 
 
 def worker_status(experiment_name, trial_name, worker_name):
-    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/status/{worker_name}"
+    return (
+        f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/status/{worker_name}"
+    )
 
 
 def worker_root(experiment_name, trial_name):
@@ -25,7 +27,9 @@ def worker_root(experiment_name, trial_name):
 
 
 def worker(experiment_name, trial_name, worker_name):
-    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/worker/{worker_name}"
+    return (
+        f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/worker/{worker_name}"
+    )
 
 
 def worker2(experiment_name, trial_name, worker_type, worker_index):
@@ -36,12 +40,14 @@ def inference_stream(experiment_name, trial_name, stream_name):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/inference_stream/{stream_name}"
 
 
-def inference_stream_constant(experiment_name, trial_name, stream_name, constant_name):
+def inference_stream_constant(
+    experiment_name, trial_name, stream_name, constant_name
+):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/inference_stream_consts/{stream_name}/{constant_name}"
 
 
 def sample_stream(experiment_name, trial_name, stream_name):
-    return (f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/sample_stream/{stream_name}")
+    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/sample_stream/{stream_name}"
 
 
 def request_reply_stream(experiment_name, trial_name, stream_name):
@@ -49,7 +55,7 @@ def request_reply_stream(experiment_name, trial_name, stream_name):
 
 
 def trainer_ddp_peer(experiment_name, trial_name, model_name):
-    return (f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/trainer_ddp_peer/{model_name}")
+    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/trainer_ddp_peer/{model_name}"
 
 
 def trainer_ddp_local_peer(experiment_name, trial_name, host_name, model_name):
@@ -73,10 +79,12 @@ def parameter_server(experiment_name, trial_name, parameter_id_str):
 
 
 def shared_memory(experiment_name, trial_name, stream_name):
-    return (f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/shared_memory/{stream_name}")
+    return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/shared_memory/{stream_name}"
 
 
-def shared_memory_dock_server(experiment_name, trial_name, stream_name, server_type):
+def shared_memory_dock_server(
+    experiment_name, trial_name, stream_name, server_type
+):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/shared_memory_dock_server/{server_type}/{stream_name}"
 
 
@@ -88,5 +96,7 @@ def model_controller(experiment_name, trial_name, model_name, dp_rank, mp_rank):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/model_controller/{model_name}/{dp_rank}/{mp_rank}"
 
 
-def model_controller_barrier(experiment_name, trial_name, model_name, dp_rank, mp_rank):
+def model_controller_barrier(
+    experiment_name, trial_name, model_name, dp_rank, mp_rank
+):
     return f"{USER_NAMESPACE}/{experiment_name}/{trial_name}/model_controller_barrier/{model_name}/{dp_rank}/{mp_rank}"

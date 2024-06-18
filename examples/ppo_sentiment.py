@@ -23,10 +23,16 @@ class SentimentScoringInterface(model_api.ModelInterface):
 
     def __post_init__(self):
         super().__post_init__()
-        self.score_model = (transformers.AutoModelForSequenceClassification.from_pretrained("/path/to/score_model").cuda())
+        self.score_model = (
+            transformers.AutoModelForSequenceClassification.from_pretrained(
+                "/path/to/score_model"
+            ).cuda()
+        )
         self.score_model.eval()
 
-        self.score_tokenizer = transformers.AutoTokenizer.from_pretrained("/path/to/score_model")
+        self.score_tokenizer = transformers.AutoTokenizer.from_pretrained(
+            "/path/to/score_model"
+        )
 
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -48,13 +54,19 @@ class SentimentScoringInterface(model_api.ModelInterface):
             device=device,
             dtype=torch.long,
         )
-        indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
+        indices = torch.nonzero(
+            attention_mask.flatten(), as_tuple=False
+        ).flatten()
         input_ids[indices] = packed_input_ids
         input_ids = input_ids.view(bs, max_seqlen)
 
         # Re-tokenize.
-        texts = model.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
-        encoding = self.score_tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
+        texts = model.tokenizer.batch_decode(
+            input_ids, skip_special_tokens=True
+        )
+        encoding = self.score_tokenizer(
+            texts, return_tensors="pt", padding=True, truncation=True
+        )
 
         # Inference to get the score.
         logits = self.score_model(
@@ -84,10 +96,13 @@ model_api.register_interface("sentiment_scoring", SentimentScoringInterface)
 class MyPPOConfig(PPOConfig):
 
     def initial_setup(self) -> ExperimentConfig:
-        if (self.rew_inf.parallel.model_parallel_size > 1
-                or self.rew_inf.parallel.pipeline_parallel_size > 1):
+        if (
+            self.rew_inf.parallel.model_parallel_size > 1
+            or self.rew_inf.parallel.pipeline_parallel_size > 1
+        ):
             raise ValueError(
-                "For this example, the reward model does not support model parallel or pipeline parallel.")
+                "For this example, the reward model does not support model parallel or pipeline parallel."
+            )
 
         cfg = super().initial_setup()
 
@@ -97,7 +112,9 @@ class MyPPOConfig(PPOConfig):
                 if s.id.model_name.role == "reward":
                     s.model = config_api.Model(
                         "tokenizer",
-                        args=dict(tokenizer_path=self.rew.path,),
+                        args=dict(
+                            tokenizer_path=self.rew.path,
+                        ),
                     )
                     s.backend = config_api.ModelBackend("null")
 

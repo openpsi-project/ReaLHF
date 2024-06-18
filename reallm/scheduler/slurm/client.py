@@ -7,9 +7,18 @@ import time
 
 from reallm.base.cluster import spec as cluster_spec
 from reallm.base.constants import SLURM_LOCK_FILE_NAME as LOCK_FILE_NAME
-from reallm.scheduler.client import JobException, JobInfo, JobState, SchedulerClient
-from reallm.scheduler.slurm.utils import (allocate_resources, SlurmLaunchInfo, SlurmResource,
-                                          SlurmResourceNotEnoughException)
+from reallm.scheduler.client import (
+    JobException,
+    JobInfo,
+    JobState,
+    SchedulerClient,
+)
+from reallm.scheduler.slurm.utils import (
+    allocate_resources,
+    SlurmLaunchInfo,
+    SlurmResource,
+    SlurmResourceNotEnoughException,
+)
 import reallm.base.logging as logging
 
 logger = logging.getLogger("Slurm-scheduler")
@@ -59,7 +68,9 @@ class SlurmSchedulerClient(SchedulerClient):
         launch_info = SlurmLaunchInfo(
             worker_type=worker_type,
             wprocs_in_job=count,
-            resource_requirement=SlurmResource(mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type),
+            resource_requirement=SlurmResource(
+                mem=mem, cpu=cpu, gpu=gpu, gpu_type=gpu_type
+            ),
             cmd=cmd,
             run_name=self.run_name,
             exper_name=self.expr_name,
@@ -78,8 +89,13 @@ class SlurmSchedulerClient(SchedulerClient):
             time_limit=time_limit,
         )
 
-        if (launch_info.slurm_name in self.__pending_jobs or launch_info.slurm_name in self.__committed_jobs):
-            raise ValueError(f"job name {launch_info.slurm_name} already existed.")
+        if (
+            launch_info.slurm_name in self.__pending_jobs
+            or launch_info.slurm_name in self.__committed_jobs
+        ):
+            raise ValueError(
+                f"job name {launch_info.slurm_name} already existed."
+            )
 
         if launch_info.multiprog:
             launch_info = self.__resolve_multiprog_file(launch_info)
@@ -88,7 +104,9 @@ class SlurmSchedulerClient(SchedulerClient):
         self.__wprocs_counter[worker_type] += count
 
         self.__pending_jobs[launch_info.slurm_name] = launch_info
-        logger.info(f"Registered Slurm job {launch_info.slurm_name} to scheduler.")
+        logger.info(
+            f"Registered Slurm job {launch_info.slurm_name} to scheduler."
+        )
 
     def __resolve_multiprog_file(self, launch_info: SlurmLaunchInfo):
         worker_type = launch_info.worker_type
@@ -100,7 +118,9 @@ class SlurmSchedulerClient(SchedulerClient):
             wprocs_in_job=launch_info.wprocs_in_job,
             wproc_offset=self.__wprocs_counter[worker_type],
         )
-        launch_info.multiprog_content = f"0-{launch_info.n_jobsteps - 1} {cmd}\n"
+        launch_info.multiprog_content = (
+            f"0-{launch_info.n_jobsteps - 1} {cmd}\n"
+        )
         return launch_info
 
     def __allocate_and_commit_pending_jobs(self):
@@ -120,12 +140,22 @@ class SlurmSchedulerClient(SchedulerClient):
                 #     logger.info(info)
                 break
             except SlurmResourceNotEnoughException:
-                logger.critical("Not enough resources to allocate all pending jobs. Retrying ...")
-                logger.warning("Time since start: %d seconds", time.monotonic() - start_time)
+                logger.critical(
+                    "Not enough resources to allocate all pending jobs. Retrying ..."
+                )
+                logger.warning(
+                    "Time since start: %d seconds",
+                    time.monotonic() - start_time,
+                )
                 fcntl.flock(fp, fcntl.LOCK_UN)
                 time.sleep(SCHEDULING_RETRY_INTERVAL_SECONDS)
-                if time.monotonic() - start_time > SCHEDULING_TIMEOUT_MAX_SECONDS:
-                    raise TimeoutError(f"Timeout waiting for {self.run_name} to schedule.")
+                if (
+                    time.monotonic() - start_time
+                    > SCHEDULING_TIMEOUT_MAX_SECONDS
+                ):
+                    raise TimeoutError(
+                        f"Timeout waiting for {self.run_name} to schedule."
+                    )
 
         try:
             for slurm_name, launch_info in self.__pending_jobs.items():
@@ -183,15 +213,15 @@ class SlurmSchedulerClient(SchedulerClient):
         return infos
 
     def wait(
-            self,
-            timeout=None,
-            check_status: Tuple[JobState, ...] = (
-                JobState.CANCELLED,
-                JobState.FAILED,
-                JobState.NOT_FOUND,
-            ),
-            remove_status: Tuple[JobState, ...] = (JobState.COMPLETED,),
-            update=False,
+        self,
+        timeout=None,
+        check_status: Tuple[JobState, ...] = (
+            JobState.CANCELLED,
+            JobState.FAILED,
+            JobState.NOT_FOUND,
+        ),
+        remove_status: Tuple[JobState, ...] = (JobState.COMPLETED,),
+        update=False,
     ):
         # before wait, commit all remaining pending jobs
         # TODO: grab global file lock to avoid multi-experiment deadlocks
@@ -201,19 +231,23 @@ class SlurmSchedulerClient(SchedulerClient):
         left = set(self.__committed_jobs.keys())
         num_jobs_left = len(left)
         logger.info(
-            f"Waiting for {num_jobs_left} jobs. Jobs IDs: {','.join(sorted([x.job_info.slurm_id for x in self.__committed_jobs.values()]))}."
+            f"Waiting for {num_jobs_left} jobs. Jobs IDs: "
+            f"{','.join(sorted([x.job_info.slurm_id for x in self.__committed_jobs.values()]))}."
         )
         while len(left) > 0:
             if len(left) < num_jobs_left:
                 num_jobs_left = len(left)
                 logger.info(f"Waiting for {num_jobs_left} jobs.")
             if deadline is not None and time.time() > deadline:
-                raise TimeoutError(f"Timeout waiting for {self.run_name}: {', '.join(sorted(left))}")
+                raise TimeoutError(
+                    f"Timeout waiting for {self.run_name}: {', '.join(sorted(left))}"
+                )
             try:
                 self.__update_all()
             except subprocess.CalledProcessError:
                 logger.warning(
-                    "Calling squeue failed. Check slurm manually if you continue to see this warning.")
+                    "Calling squeue failed. Check slurm manually if you continue to see this warning."
+                )
                 time.sleep(30)
                 continue
             for job_slurm_name in list(left):
@@ -229,7 +263,9 @@ class SlurmSchedulerClient(SchedulerClient):
                         reason=launch_info.job_info.state,
                     )
                 if launch_info.job_info.state in remove_status:
-                    logger.info(f"Job {launch_info.slurm_name} is {launch_info.job_info.state}.(Removed)")
+                    logger.info(
+                        f"Job {launch_info.slurm_name} is {launch_info.job_info.state}.(Removed)"
+                    )
                     left.remove(job_slurm_name)
                     if update:
                         self.__committed_jobs.pop(job_slurm_name)

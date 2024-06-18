@@ -5,9 +5,15 @@ from deepspeed.runtime.engine import DeepSpeedEngine, MEMORY_OPT_ALLREDUCE_SIZE
 from deepspeed.runtime.zero.config import ZeroStageEnum
 
 try:
-    from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel as MegatronDDP
-    from megatron.core.distributed.finalize_model_grads import finalize_model_grads
-    from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer as MegatronDistOptim
+    from megatron.core.distributed.distributed_data_parallel import (
+        DistributedDataParallel as MegatronDDP,
+    )
+    from megatron.core.distributed.finalize_model_grads import (
+        finalize_model_grads,
+    )
+    from megatron.core.optimizer.distrib_optimizer import (
+        DistributedOptimizer as MegatronDistOptim,
+    )
 except ImportError or ModuleNotFoundError:
     pass
 import torch
@@ -20,12 +26,22 @@ from reallm.base.namedarray import NamedArray
 from reallm.impl.model.backend.utils import MegatronEngine
 from reallm.impl.model.nn.real_llm_api import ReaLModel
 from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
-from reallm.impl.model.nn.real_llm_generate import (_gather_gen_output_from_list,
-                                                    _gather_minibatch_gen_outputs, GenerationConfig, genstep,
-                                                    init_kv_cache)
-from reallm.impl.model.parallelism.pipeline_parallel.instruction import PipeInstruction
-from reallm.impl.model.parallelism.pipeline_parallel.static_schedule import PipeSchedule
-from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
+from reallm.impl.model.nn.real_llm_generate import (
+    _gather_gen_output_from_list,
+    _gather_minibatch_gen_outputs,
+    GenerationConfig,
+    genstep,
+    init_kv_cache,
+)
+from reallm.impl.model.parallelism.pipeline_parallel.instruction import (
+    PipeInstruction,
+)
+from reallm.impl.model.parallelism.pipeline_parallel.static_schedule import (
+    PipeSchedule,
+)
+from reallm.impl.model.parallelism.pipeline_parallel.tensor_storage import (
+    TensorBuffer,
+)
 from reallm.impl.model.utils.padding import pad_sequence_parallel_input
 import reallm.base.constants as constants
 import reallm.base.logging as logging
@@ -69,24 +85,30 @@ def _prepare_input(
         )
         n_seqs = input_lens_for_partition.shape[0]
     else:
-        data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
+        data = NamedArray(
+            packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens
+        )
         n_seqs = cu_seqlens.shape[0] - 1
     data.register_metadata(seqlens=seqlens_cpu)
 
     # split into sequences
     n_mbs = num_micro_batches
     assert n_seqs >= n_mbs
-    splitted, partitions = data_api.split_sequences(data,
-                                                    n_mbs,
-                                                    min_size=n_seqs // n_mbs,
-                                                    return_partitions=True)
+    splitted, partitions = data_api.split_sequences(
+        data, n_mbs, min_size=n_seqs // n_mbs, return_partitions=True
+    )
     batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
 
     # Sanity check to ensure that the order of splitted sequences
     # is the same across pipeline parallel ranks.
-    _batch_seqlen = torch.tensor([sum(x) for x in batch_seqlens], device=cu_seqlens.device, dtype=torch.long)
+    _batch_seqlen = torch.tensor(
+        [sum(x) for x in batch_seqlens],
+        device=cu_seqlens.device,
+        dtype=torch.long,
+    )
     _batch_seqlen_all_gathered = [
-        torch.zeros_like(_batch_seqlen) for _ in range(constants.pipe_parallel_world_size())
+        torch.zeros_like(_batch_seqlen)
+        for _ in range(constants.pipe_parallel_world_size())
     ]
     _batch_seqlen_all_gathered[constants.pipe_parallel_rank()] = _batch_seqlen
     dist.all_gather(
@@ -101,14 +123,18 @@ def _prepare_input(
                 f"Current rank (dp={constants.data_parallel_rank()},"
                 f"tp={constants.model_parallel_rank()},pp={constants.pipe_parallel_rank()}), "
                 f"gathered batch seqlens={_batch_seqlen_all_gathered}, "
-                f"Have you ensured that the order of dataset across ranks is the same?",)
+                f"Have you ensured that the order of dataset across ranks is the same?",
+            )
 
     if input_lens_for_partition is not None:
         splitted = [
             NamedArray(
                 packed_input_ids=x["packed_input_ids"],
-                cu_seqlens=torch.nn.functional.pad(x["group_input_lens"].view(-1).cumsum(0), (1, 0)),
-            ) for x in splitted
+                cu_seqlens=torch.nn.functional.pad(
+                    x["group_input_lens"].view(-1).cumsum(0), (1, 0)
+                ),
+            )
+            for x in splitted
         ]
 
     if loss_fn is not None:
@@ -135,8 +161,11 @@ def _prepare_input(
 
         # sequence parallel input padding
         if constants.sequence_parallel():
-            packed_input_ids, cu_seqlens, max_seqlen, pad_size = (pad_sequence_parallel_input(
-                packed_input_ids, cu_seqlens, max_seqlen))
+            packed_input_ids, cu_seqlens, max_seqlen, pad_size = (
+                pad_sequence_parallel_input(
+                    packed_input_ids, cu_seqlens, max_seqlen
+                )
+            )
             tensor_buffer.put("pad_size", mbid, pad_size)
         x = PipeTransferData(
             cu_seqlens=cu_seqlens.int(),
@@ -144,12 +173,17 @@ def _prepare_input(
             store_kv_cache=store_kv_cache,
         )
         if constants.is_first_pipe_stage():
-            ys = [PipeCacheData(packed_input_ids=packed_input_ids)
-                  ] + [PipeCacheData() for _ in range(module.num_layers - 1)]
+            ys = [PipeCacheData(packed_input_ids=packed_input_ids)] + [
+                PipeCacheData() for _ in range(module.num_layers - 1)
+            ]
         else:
             ys = [PipeCacheData() for _ in range(module.num_layers)]
-        total_len = (packed_input_ids.shape[0] if not constants.sequence_parallel() else
-                     packed_input_ids.shape[0] // constants.model_parallel_world_size())
+        total_len = (
+            packed_input_ids.shape[0]
+            if not constants.sequence_parallel()
+            else packed_input_ids.shape[0]
+            // constants.model_parallel_world_size()
+        )
         mb_seq_lens.append(total_len)
         return (x, ys)
 
@@ -214,13 +248,17 @@ def _exec_pipe_schedule(
         for cmd in step_cmds:
             if type(cmd) not in instr_map:
                 raise RuntimeError(
-                    f"Pipeline instruction executor does not understand instruction {repr(cmd)}")
+                    f"Pipeline instruction executor does not understand instruction {repr(cmd)}"
+                )
 
             if will_break:
                 # With the termination mechanism, skip communication instructions
                 # because its peer stages have been terminated
-                if (is_last_stage and burn_out_steps < num_stages - 1
-                        and type(cmd) != schedule.RecvActivation):
+                if (
+                    is_last_stage
+                    and burn_out_steps < num_stages - 1
+                    and type(cmd) != schedule.RecvActivation
+                ):
                     continue
                 elif not is_last_stage and type(cmd) != schedule.SendActivation:
                     continue
@@ -228,9 +266,11 @@ def _exec_pipe_schedule(
             try:
                 instr_map[type(cmd)](module, tensor_buffer, *cmd.args)
             except Exception as e:
-                logger.error(f"Model name {constants.model_name()} rank {parllelism_rank}"
-                             f" (global rank {global_rank}) step {step_count}, "
-                             f"Exception in cmd: {cmd}")
+                logger.error(
+                    f"Model name {constants.model_name()} rank {parllelism_rank}"
+                    f" (global rank {global_rank}) step {step_count}, "
+                    f"Exception in cmd: {cmd}"
+                )
                 raise e
         step_count += 1
 
@@ -267,11 +307,15 @@ class PipeInferenceInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
-        buf = tensor_buffer.get("recv_act_buf", micro_batch_id, remove=True, raise_error=False)
+        buf = tensor_buffer.get(
+            "recv_act_buf", micro_batch_id, remove=True, raise_error=False
+        )
         ys = tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
 
         if buf is not None:
-            others = tensor_buffer.get("pipe_transfer_infos", micro_batch_id, remove=False)
+            others = tensor_buffer.get(
+                "pipe_transfer_infos", micro_batch_id, remove=False
+            )
             x = PipeTransferData(pp_input=buf, **others)
             tensor_buffer.put("batch_input_x", micro_batch_id, x)
         else:
@@ -281,7 +325,9 @@ class PipeInferenceInstrSet:
         _zero_grads(ys)
         x, ys = module.forward(x, ys)
 
-        tensor_buffer.put("batch_output_x", micro_batch_id, x)  # Used by send_activation
+        tensor_buffer.put(
+            "batch_output_x", micro_batch_id, x
+        )  # Used by send_activation
 
         if constants.is_last_pipe_stage():
             logits = x.pp_output
@@ -315,9 +361,13 @@ class PipeInferenceInstrSet:
         dtype = module.dtype
         hidden_dim = module.config.hidden_dim
 
-        mb_seq_len = tensor_buffer.get("mb_seq_lens", micro_batch_id, remove=False)
+        mb_seq_len = tensor_buffer.get(
+            "mb_seq_lens", micro_batch_id, remove=False
+        )
         act_shape = (mb_seq_len, hidden_dim)
-        buf = torch.empty(act_shape, dtype=dtype, device=device, requires_grad=False)
+        buf = torch.empty(
+            act_shape, dtype=dtype, device=device, requires_grad=False
+        )
 
         p2p.recv(buf, constants.prev_pipe_stage(), async_op=False)
         tensor_buffer.put("recv_act_buf", micro_batch_id, buf)
@@ -358,14 +408,20 @@ class PipeGenInstrSet:
 
         if buf is not None:
             if is_first_stage:
-                x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
-                ys = tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
+                x = tensor_buffer.get(
+                    "batch_input_x", micro_batch_id, remove=True
+                )
+                ys = tensor_buffer.get(
+                    "batch_input_ys", micro_batch_id, remove=False
+                )
                 ys[0].packed_input_ids = (
                     buf  # sequence parallel forward only accept one dim input_ids
                 )
                 ys[0].packed_position_ids = None
             else:
-                others = tensor_buffer.get("pipe_transfer_infos", micro_batch_id, remove=False)
+                others = tensor_buffer.get(
+                    "pipe_transfer_infos", micro_batch_id, remove=False
+                )
                 x = PipeTransferData(pp_input=buf, **others)
                 tensor_buffer.put("batch_input_x", micro_batch_id, x)
         else:
@@ -400,11 +456,17 @@ class PipeGenInstrSet:
             if constants.is_last_pipe_stage():
                 for y in ys[:-1]:
                     y.cache_seqlens += 1
-                assert all(torch.allclose(ys[0].cache_seqlens, y.cache_seqlens) for y in ys[:-1])
+                assert all(
+                    torch.allclose(ys[0].cache_seqlens, y.cache_seqlens)
+                    for y in ys[:-1]
+                )
             else:
                 for y in ys:
                     y.cache_seqlens += 1
-                assert all(torch.allclose(ys[0].cache_seqlens, y.cache_seqlens) for y in ys)
+                assert all(
+                    torch.allclose(ys[0].cache_seqlens, y.cache_seqlens)
+                    for y in ys
+                )
 
         # Perform a decoding step.
         if constants.is_last_pipe_stage():
@@ -413,28 +475,48 @@ class PipeGenInstrSet:
             if is_prefill_phase:
                 logits = logits[x.cu_seqlens[1:] - 1]
 
-            unfinished_sequences = tensor_buffer.get("unfinished_sequences", micro_batch_id)
+            unfinished_sequences = tensor_buffer.get(
+                "unfinished_sequences", micro_batch_id
+            )
             generated_idx = tensor_buffer.get("generated_idx", micro_batch_id)
 
-            next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (genstep(
+            (
+                next_tokens,
+                logprob,
+                logits_mask,
+                terminate,
+                unfinished_sequences,
+            ) = genstep(
                 logits,
                 tokenizer,
                 unfinished_sequences,
                 generated_idx,
                 gconfig,
-            ))
+            )
 
             if isinstance(terminate, bool):
-                terminate = torch.tensor(terminate, device=logits.device, dtype=torch.bool)
+                terminate = torch.tensor(
+                    terminate, device=logits.device, dtype=torch.bool
+                )
 
             tensor_buffer.put("terminate", micro_batch_id, terminate)
-            tensor_buffer.put("unfinished_sequences", micro_batch_id, unfinished_sequences)
-            tensor_buffer.put("generated_idx", micro_batch_id, generated_idx + 1)
+            tensor_buffer.put(
+                "unfinished_sequences", micro_batch_id, unfinished_sequences
+            )
+            tensor_buffer.put(
+                "generated_idx", micro_batch_id, generated_idx + 1
+            )
             assert next_tokens is not None and logprob is not None
-            tensor_buffer.get("gen_token_ph", micro_batch_id).append(next_tokens)
+            tensor_buffer.get("gen_token_ph", micro_batch_id).append(
+                next_tokens
+            )
             tensor_buffer.get("gen_logprob_ph", micro_batch_id).append(logprob)
-            tensor_buffer.get("gen_logits_mask_ph", micro_batch_id).append(logits_mask)
-            tensor_buffer.put("next_tokens_to_send", micro_batch_id, next_tokens)
+            tensor_buffer.get("gen_logits_mask_ph", micro_batch_id).append(
+                logits_mask
+            )
+            tensor_buffer.put(
+                "next_tokens_to_send", micro_batch_id, next_tokens
+            )
 
     def _exec_send_activations(
         module: ReaLModel,
@@ -443,7 +525,9 @@ class PipeGenInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
-        PipeInferenceInstrSet._exec_send_activations(module, tensor_buffer, stage_id, micro_batch_id, step_id)
+        PipeInferenceInstrSet._exec_send_activations(
+            module, tensor_buffer, stage_id, micro_batch_id, step_id
+        )
         tensor_buffer.put("first_token", micro_batch_id, False)
         terminate = tensor_buffer.get("terminate", micro_batch_id)
         p2p.send(terminate, constants.next_pipe_stage())
@@ -461,18 +545,29 @@ class PipeGenInstrSet:
         dtype = module.dtype
         hidden_dim = module.config.hidden_dim
 
-        mb_seq_len = tensor_buffer.get("mb_seq_lens", micro_batch_id, remove=False)
+        mb_seq_len = tensor_buffer.get(
+            "mb_seq_lens", micro_batch_id, remove=False
+        )
         act_shape = (mb_seq_len, hidden_dim)
 
         ft = tensor_buffer.get("first_token", micro_batch_id, remove=False)
         if ft:
-            buf = torch.empty(act_shape, dtype=dtype, device=device, requires_grad=False)
+            buf = torch.empty(
+                act_shape, dtype=dtype, device=device, requires_grad=False
+            )
         else:
-            batch_length = tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
-            batch_length = (batch_length // constants.model_parallel_world_size()
-                            if constants.sequence_parallel() else batch_length)
+            batch_length = tensor_buffer.get(
+                "batch_lengths", micro_batch_id, remove=False
+            )
+            batch_length = (
+                batch_length // constants.model_parallel_world_size()
+                if constants.sequence_parallel()
+                else batch_length
+            )
             act_shape = (batch_length, hidden_dim)
-            buf = torch.empty(act_shape, dtype=dtype, device=device, requires_grad=False)
+            buf = torch.empty(
+                act_shape, dtype=dtype, device=device, requires_grad=False
+            )
 
         prev_stage = constants.prev_pipe_stage()
         p2p.recv(buf, prev_stage, async_op=False)
@@ -492,7 +587,9 @@ class PipeGenInstrSet:
         """When generating, send next tokens from the last stage to the first stage."""
         assert constants.is_last_pipe_stage()
         next_stage = constants.next_pipe_stage()
-        next_tokens_to_send = tensor_buffer.get("next_tokens_to_send", micro_batch_id, remove=True)
+        next_tokens_to_send = tensor_buffer.get(
+            "next_tokens_to_send", micro_batch_id, remove=True
+        )
         p2p.send(next_tokens_to_send, next_stage, async_op=False)
         p2p.send(tensor_buffer.get("terminate", micro_batch_id), next_stage)
         tensor_buffer.put("first_token", micro_batch_id, False)
@@ -508,7 +605,9 @@ class PipeGenInstrSet:
         Construct next forward input
         """
         assert constants.is_first_pipe_stage()
-        batch_length = tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
+        batch_length = tensor_buffer.get(
+            "batch_lengths", micro_batch_id, remove=False
+        )
 
         device = module.device
         prev_stage = constants.prev_pipe_stage()
@@ -519,7 +618,9 @@ class PipeGenInstrSet:
 
         x = PipeTransferData(
             store_kv_cache=True,
-            cu_seqlens=torch.arange(batch_length + 1, dtype=torch.int32, device=device),
+            cu_seqlens=torch.arange(
+                batch_length + 1, dtype=torch.int32, device=device
+            ),
             max_seqlen=1,
         )
         tensor_buffer.put("batch_input_x", micro_batch_id, x)
@@ -546,20 +647,34 @@ class PipeTrainForwardCommInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
-        PipeInferenceInstrSet._exec_forward_pass(module, tensor_buffer, stage_id, micro_batch_id, step_id)
+        PipeInferenceInstrSet._exec_forward_pass(
+            module, tensor_buffer, stage_id, micro_batch_id, step_id
+        )
 
         loss_fn = tensor_buffer.get("loss_fn", micro_batch_id)
         if loss_fn is not None and constants.is_last_pipe_stage():
-            model_output = tensor_buffer.get("batch_output_x", micro_batch_id).pp_output
+            model_output = tensor_buffer.get(
+                "batch_output_x", micro_batch_id
+            ).pp_output
             if constants.sequence_parallel():
-                pad_size = tensor_buffer.get("pad_size", micro_batch_id, remove=True)
-                model_output = (model_output[:-pad_size] if pad_size > 0 else model_output)
-            loss_kwargs = tensor_buffer.get("loss_inputs", micro_batch_id, remove=True)
-            input_cache = tensor_buffer.get("input_cache", micro_batch_id, remove=True)
+                pad_size = tensor_buffer.get(
+                    "pad_size", micro_batch_id, remove=True
+                )
+                model_output = (
+                    model_output[:-pad_size] if pad_size > 0 else model_output
+                )
+            loss_kwargs = tensor_buffer.get(
+                "loss_inputs", micro_batch_id, remove=True
+            )
+            input_cache = tensor_buffer.get(
+                "input_cache", micro_batch_id, remove=True
+            )
             packed_input_ids = input_cache.packed_input_ids
             cu_seqlens = input_cache.cu_seqlens
 
-            loss, stats = loss_fn(model_output, packed_input_ids, cu_seqlens, **loss_kwargs)
+            loss, stats = loss_fn(
+                model_output, packed_input_ids, cu_seqlens, **loss_kwargs
+            )
             loss = loss / tensor_buffer.get("num_micro_batches", micro_batch_id)
             tensor_buffer.put("losses", micro_batch_id, loss)
             tensor_buffer.put("stats", micro_batch_id, stats)
@@ -573,7 +688,9 @@ class PipeTrainForwardCommInstrSet:
     ):
         assert stage_id != constants.pipe_parallel_world_size() - 1
         # NOTE: This is different from inference, we remain batch_output_x for backward.
-        x: PipeTransferData = tensor_buffer.get("batch_output_x", micro_batch_id)
+        x: PipeTransferData = tensor_buffer.get(
+            "batch_output_x", micro_batch_id
+        )
         p2p.send(x.pp_output, constants.next_pipe_stage(), async_op=False)
 
     def _exec_recv_activations(
@@ -589,7 +706,9 @@ class PipeTrainForwardCommInstrSet:
         dtype = module.dtype
         hidden_dim = module.config.hidden_dim
 
-        mb_seq_len = tensor_buffer.get("mb_seq_lens", micro_batch_id, remove=False)
+        mb_seq_len = tensor_buffer.get(
+            "mb_seq_lens", micro_batch_id, remove=False
+        )
         act_shape = (mb_seq_len, hidden_dim)
 
         buf = tensor_buffer.alloc(
@@ -612,7 +731,9 @@ class PipeTrainForwardCommInstrSet:
         step_id: int,
     ):
         assert not constants.is_first_pipe_stage()
-        activation = tensor_buffer.get("activation", micro_batch_id, remove=True)
+        activation = tensor_buffer.get(
+            "activation", micro_batch_id, remove=True
+        )
         assert activation.grad is not None
         p2p.send(activation.grad, constants.prev_pipe_stage(), async_op=False)
 
@@ -627,9 +748,13 @@ class PipeTrainForwardCommInstrSet:
         device = module.device
         dtype = module.dtype
         hidden_dim = module.config.hidden_dim
-        mb_seq_len = tensor_buffer.get("mb_seq_lens", micro_batch_id, remove=False)
+        mb_seq_len = tensor_buffer.get(
+            "mb_seq_lens", micro_batch_id, remove=False
+        )
         grad_shape = (mb_seq_len, hidden_dim)
-        buf = tensor_buffer.alloc("grad", micro_batch_id, grad_shape, dtype, device)
+        buf = tensor_buffer.alloc(
+            "grad", micro_batch_id, grad_shape, dtype, device
+        )
         p2p.recv(buf, constants.next_pipe_stage(), async_op=False)
 
     INSTRUCTION_MAP = {
@@ -658,11 +783,14 @@ class PipeTrainBackwardReduceInstrSetForDeepSpeed:
         step_id: int,
     ):
         assert self.ds_engine is not None
-        assert self.ds_engine.optimizer is not None, ("must provide optimizer during "
-                                                      "init in order to use backward")
+        assert self.ds_engine.optimizer is not None, (
+            "must provide optimizer during " "init in order to use backward"
+        )
         # The last stage just runs backward on the loss using DeepSpeed's typical
         # mechanisms.
-        output_x = tensor_buffer.get("batch_output_x", micro_batch_id, remove=True)
+        output_x = tensor_buffer.get(
+            "batch_output_x", micro_batch_id, remove=True
+        )
 
         # We schedule the all-reduces, so disable it in super().backward()
         self.ds_engine.enable_backward_allreduce = False
@@ -728,7 +856,10 @@ class PipeTrainBackwardReduceInstrSetForDeepSpeed:
 
         self.ds_engine.set_gradient_accumulation_boundary(True)
         if self.ds_engine.bfloat16_enabled():
-            if self.ds_engine.zero_optimization_stage() < ZeroStageEnum.gradients:
+            if (
+                self.ds_engine.zero_optimization_stage()
+                < ZeroStageEnum.gradients
+            ):
                 # Make our own list of gradients from the optimizer's FP32 grads
                 self.ds_engine.buffered_allreduce_fallback(
                     grads=self.ds_engine.optimizer.get_grads_for_reduction(),
@@ -737,7 +868,9 @@ class PipeTrainBackwardReduceInstrSetForDeepSpeed:
             else:
                 raise NotImplementedError("PP+BF16 only work for ZeRO Stage 1")
         else:
-            self.ds_engine.allreduce_gradients(bucket_size=MEMORY_OPT_ALLREDUCE_SIZE)
+            self.ds_engine.allreduce_gradients(
+                bucket_size=MEMORY_OPT_ALLREDUCE_SIZE
+            )
 
     def _exec_optimizer_step(
         self,
@@ -755,7 +888,9 @@ class PipeTrainBackwardReduceInstrSetForDeepSpeed:
         # sync loss scale across pipeline stages
         if not self.ds_engine.bfloat16_enabled():
             loss_scale = self.ds_engine.optimizer.loss_scale
-            total_scale_cuda = torch.FloatTensor([float(loss_scale)]).to(module.device)
+            total_scale_cuda = torch.FloatTensor([float(loss_scale)]).to(
+                module.device
+            )
             dist.all_reduce(
                 total_scale_cuda,
                 op=dist.ReduceOp.MIN,
@@ -764,8 +899,11 @@ class PipeTrainBackwardReduceInstrSetForDeepSpeed:
             # all_loss_scale = total_scale_cuda[0].item()
             logger.info(
                 f"loss scale: {total_scale_cuda}, "
-                f"group: {dist.get_process_group_ranks(self.ds_engine.mpu.get_model_parallel_group())}")
-            self.ds_engine.optimizer.loss_scaler.cur_scale = min(total_scale_cuda[0].item(), 8192)
+                f"group: {dist.get_process_group_ranks(self.ds_engine.mpu.get_model_parallel_group())}"
+            )
+            self.ds_engine.optimizer.loss_scaler.cur_scale = min(
+                total_scale_cuda[0].item(), 8192
+            )
 
     @property
     def INSTRUCTION_MAP(self):
@@ -805,14 +943,18 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
         micro_batch_id: int,
         step_id: int,
     ):
-        output_x = tensor_buffer.get("batch_output_x", micro_batch_id, remove=True)
+        output_x = tensor_buffer.get(
+            "batch_output_x", micro_batch_id, remove=True
+        )
 
         if micro_batch_id == self.num_micro_batches - 1:
             self.enable_grad_sync()
 
         is_last_stage = constants.is_last_pipe_stage()
         if is_last_stage:
-            loss: torch.Tensor = tensor_buffer.get("losses", micro_batch_id, remove=True)
+            loss: torch.Tensor = tensor_buffer.get(
+                "losses", micro_batch_id, remove=True
+            )
             loss = self.engine.optim.scale_loss(loss)
             loss.backward()
             tensor_buffer.put("losses", micro_batch_id, loss.detach().clone())
@@ -841,16 +983,23 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
         micro_batch_id: int,
         step_id: int,
     ):
-        update_successful, grad_norm, num_zeros_in_grad = self.engine.optim.step()
+        update_successful, grad_norm, num_zeros_in_grad = (
+            self.engine.optim.step()
+        )
 
         version_steps = tensor_buffer.get("version_steps", 0)
         if update_successful:
             self.engine.lr_scheduler.step_absolute(version_steps)
-        if constants.data_parallel_rank() == 0 and constants.model_parallel_rank() == 0:
-            logger.info(f"Pipeline rank {constants.pipe_parallel_rank()}. "
-                        f"Update success? {update_successful}. "
-                        f"Grad Norm: {grad_norm}. "
-                        f"Current loss scale: {self.engine.optim.get_loss_scale()}. ")
+        if (
+            constants.data_parallel_rank() == 0
+            and constants.model_parallel_rank() == 0
+        ):
+            logger.info(
+                f"Pipeline rank {constants.pipe_parallel_rank()}. "
+                f"Update success? {update_successful}. "
+                f"Grad Norm: {grad_norm}. "
+                f"Current loss scale: {self.engine.optim.get_loss_scale()}. "
+            )
         return update_successful, grad_norm, num_zeros_in_grad
 
     @property
@@ -864,7 +1013,9 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
 
 @dataclasses.dataclass
 class PipeTrainInstrSet:
-    backend: str = dataclasses.field(metadata={"choices": ["deepspeed", "megatron"]})
+    backend: str = dataclasses.field(
+        metadata={"choices": ["deepspeed", "megatron"]}
+    )
     num_micro_batches: int
     ds_engine: Optional[DeepSpeedEngine] = None
     megatron_engine: Optional[MegatronEngine] = None
@@ -874,7 +1025,9 @@ class PipeTrainInstrSet:
         if self.backend == "deepspeed":
             return {
                 **PipeTrainForwardCommInstrSet.INSTRUCTION_MAP,
-                **PipeTrainBackwardReduceInstrSetForDeepSpeed(self.ds_engine).INSTRUCTION_MAP,
+                **PipeTrainBackwardReduceInstrSetForDeepSpeed(
+                    self.ds_engine
+                ).INSTRUCTION_MAP,
             }
         elif self.backend == "megatron":
             return {
@@ -966,11 +1119,15 @@ class PipelineRunner:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        gconfig: GenerationConfig = dataclasses.field(
+            default_factory=GenerationConfig
+        ),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         if constants.sequence_parallel():
-            raise NotImplementedError("Sequence parallel is not supported for generation")
+            raise NotImplementedError(
+                "Sequence parallel is not supported for generation"
+            )
 
         if num_micro_batches is None:
             num_micro_batches = self.default_inf_mbs
@@ -1002,7 +1159,9 @@ class PipelineRunner:
             tensor_buffer.put(
                 "unfinished_sequences",
                 mbid,
-                torch.ones(batch_length, dtype=torch.long, device=self.module.device),
+                torch.ones(
+                    batch_length, dtype=torch.long, device=self.module.device
+                ),
             )
             tensor_buffer.put("gen_token_ph", mbid, [])
             tensor_buffer.put("gen_logprob_ph", mbid, [])
@@ -1019,7 +1178,12 @@ class PipelineRunner:
         )
 
         def terminate_condition():
-            return all([tensor_buffer.get("terminate", mbid) for mbid in range(num_micro_batches)])
+            return all(
+                [
+                    tensor_buffer.get("terminate", mbid)
+                    for mbid in range(num_micro_batches)
+                ]
+            )
 
         _exec_pipe_schedule(
             self.module,
@@ -1037,13 +1201,21 @@ class PipelineRunner:
         for mbid in range(num_micro_batches):
             generate_output += [
                 _gather_gen_output_from_list(
-                    gen_token_ph=tensor_buffer.get("gen_token_ph", mbid, remove=True),
-                    gen_logprob_ph=tensor_buffer.get("gen_logprob_ph", mbid, remove=True),
-                    gen_logits_mask_ph=tensor_buffer.get("gen_logits_mask_ph", mbid, remove=True),
+                    gen_token_ph=tensor_buffer.get(
+                        "gen_token_ph", mbid, remove=True
+                    ),
+                    gen_logprob_ph=tensor_buffer.get(
+                        "gen_logprob_ph", mbid, remove=True
+                    ),
+                    gen_logits_mask_ph=tensor_buffer.get(
+                        "gen_logits_mask_ph", mbid, remove=True
+                    ),
                 )
             ]
 
-        gen_tokens, log_probs, logits_mask = _gather_minibatch_gen_outputs(*list(zip(*generate_output)))
+        gen_tokens, log_probs, logits_mask = _gather_minibatch_gen_outputs(
+            *list(zip(*generate_output))
+        )
 
         return gen_tokens, log_probs, logits_mask, None, None
 
@@ -1060,7 +1232,9 @@ class PipelineRunner:
         **loss_fn_kwargs,
     ):
         if not torch._C.is_grad_enabled():
-            raise RuntimeError(f"train_batch() requires gradients enabled. Use eval_batch() instead.")
+            raise RuntimeError(
+                f"train_batch() requires gradients enabled. Use eval_batch() instead."
+            )
 
         if num_micro_batches is None:
             num_micro_batches = self.default_train_mbs
@@ -1097,7 +1271,9 @@ class PipelineRunner:
                 num_micro_batches=num_micro_batches,
             ).INSTRUCTION_MAP
         else:
-            raise NotImplementedError(f"Unknown backend type for training: {type(engine)}")
+            raise NotImplementedError(
+                f"Unknown backend type for training: {type(engine)}"
+            )
 
         sched = schedule.TrainSchedule(
             micro_batches=num_micro_batches,
@@ -1118,7 +1294,9 @@ class PipelineRunner:
                 stats.append(tensor_buffer.get("stats", mbid))
             agg_stats = dict()
             for key in stats[0].keys():
-                agg_stats[key] = torch.stack([stat[key] for stat in stats]).sum()
+                agg_stats[key] = torch.stack(
+                    [stat[key] for stat in stats]
+                ).sum()
 
         return agg_stats
 
@@ -1173,5 +1351,7 @@ class PipelineRunner:
                 stats.append(tensor_buffer.get("stats", mbid))
             agg_stats = dict()
             for key in stats[0].keys():
-                agg_stats[key] = torch.stack([stat[key] for stat in stats]).sum()
+                agg_stats[key] = torch.stack(
+                    [stat[key] for stat in stats]
+                ).sum()
         return agg_stats
