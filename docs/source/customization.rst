@@ -104,7 +104,7 @@ To register a convertable HuggingFace model, the user should implement\:
 - Three functions specifying the names of parameters in the embedding layer, transformer blocks, and the output layer, respectively.
 
 Steps to support a new HuggingFace model
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - Create a new model file under ``api/from_hf/``.
 - Implement the required helper functions as described above.

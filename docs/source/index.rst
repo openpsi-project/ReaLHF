@@ -7,7 +7,7 @@ Welcome to ReaL's documentation!
 ====================================
 
    **ReaL is a highly efficient system
-   for LLM RLHF training at all scales.**
+   for LLM RLHF training.**
 
 
 Highlights
@@ -16,37 +16,32 @@ Highlights
 **Efficient at all scales**
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-ReaL proposes a novel *parameter realloaction* technique.
-It dynamically shifts parameters and changes parallel strategies
-of LLMs during training.
-This technique can largely reduce the communication overhead and improve
-GPU utilization for RLHF.
+ReaL introduces a novel *parameter reallocation* technique. It dynamically shifts parameters and 
+adjusts parallel strategies of LLMs during training. This technique significantly reduces communication 
+overhead and improves GPU utilization for RLHF.
 
-Together with the most advanced
-techniques for LLM training, such as 3D parallelism,
-ZeRO optimization, and offloading,
-ReaL can scale RLHF training to
-hundreds or thousands of GPUs,
-maintaining high throughput and efficiency.
+Combined with advanced techniques for LLM training, such as 3D parallelism, ZeRO optimization, and offloading, 
+ReaL can scale RLHF training to hundreds or thousands of GPUs, maintaining high throughput and efficiency.
 
-Beyond large-scale training, ReaL is also memory-efficient with limited resources.
-For example, ReaL can train 70B LLMs with offloading on a single node.
+Beyond large-scale training, ReaL is also memory-efficient with limited resources. For example, ReaL can 
+train 70B LLMs with offloading on a single node.
 
 For more details, check our `introduction page <intro>`_.
 
 **Easy to use**
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Install with PyPI or use our Docker image, then
-run your experiment with a single command!
+Install with PyPI or use our Docker image, then run your experiment with a single command!
+
 Check our `quickstart guide <quickstart>`_ for more details.
 
 **Flexible**
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-ReaL's system implementations are fully decoupled with
-algorithm interfaces. Get the best performance for your
-customized application within 100 lines of code!
+ReaL's system implementations are fully decoupled from algorithm interfaces. Achieve optimal performance 
+for your customized application within 100 lines of code!
+
+Please refer to our `customization guide <customization>`_ for more details.
 
 Contents
 ----------------
