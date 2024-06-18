@@ -61,7 +61,9 @@ def run_worker(
 def make_controller(type_, experiment_name, trial_name):
     module = importlib.import_module("realrlhf.system.controller")
     if type_ == "zmq":
-        control_module = importlib.import_module("realrlhf.system.worker_control")
+        control_module = importlib.import_module(
+            "realrlhf.system.worker_control"
+        )
         panel = getattr(control_module, "make_control")(
             "zmq", experiment_name, trial_name
         )

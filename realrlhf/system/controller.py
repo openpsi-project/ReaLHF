@@ -15,7 +15,12 @@ import ray.util.queue as rq
 
 from realrlhf.base import logging, name_resolve, names
 from realrlhf.base.cluster import spec as cluster_spec
-from realrlhf.system import load_worker, worker_base, worker_control, WORKER_TYPES
+from realrlhf.system import (
+    load_worker,
+    worker_base,
+    worker_control,
+    WORKER_TYPES,
+)
 from realrlhf.system.worker_base import WorkerServerStatus as Wss
 import realrlhf.api.core.system_api as system_api
 

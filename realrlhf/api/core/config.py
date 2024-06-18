@@ -38,12 +38,13 @@ class ModelBackend:
 @dataclasses.dataclass(unsafe_hash=True, order=True)
 class ModelName:
     """A unique identifier for a model.
-    
+
     :param role: The role of the model, e.g. "actor", "critic".
     :type role: str
     :param replica_id: The replica id of the model.
     :type replica_id: int
     """
+
     role: str
     replica_id: int
 

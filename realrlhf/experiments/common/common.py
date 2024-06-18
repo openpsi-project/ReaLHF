@@ -9,8 +9,8 @@ import numpy as np
 
 from realrlhf.api.core.config import Dataset
 from realrlhf.api.core.dfg import (
-    ModelInterfaceType,
     MFCDef,
+    ModelInterfaceType,
     OffloadHook,
     SyncParamHook,
 )

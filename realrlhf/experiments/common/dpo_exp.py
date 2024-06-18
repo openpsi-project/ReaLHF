@@ -1,9 +1,9 @@
 import dataclasses
 
 from realrlhf.api.core.dfg import (
+    MFCDef,
     ModelInterface,
     ModelInterfaceType,
-    MFCDef,
     OffloadHook,
 )
 from realrlhf.api.core.system_api import *

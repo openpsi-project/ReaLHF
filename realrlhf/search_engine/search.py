@@ -13,10 +13,13 @@ try:
 except ModuleNotFoundError:
     mdm_search = None
 
-from realrlhf.api.core.dfg import ModelInterfaceType, MFCDef
+from realrlhf.api.core.dfg import MFCDef, ModelInterfaceType
 from realrlhf.api.core.model_api import ModelFamily
 from realrlhf.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
-from realrlhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
+from realrlhf.api.quickstart.model import (
+    ModelTrainEvalConfig,
+    ParallelismConfig,
+)
 from realrlhf.api.quickstart.search import RPCExecution
 import realrlhf.base.constants as constants
 

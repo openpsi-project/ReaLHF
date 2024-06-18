@@ -1,10 +1,10 @@
 import torch
 
 from realrlhf.api.core.dfg import (
+    MFCDef,
     ModelFamily,
     ModelInterface,
     ModelInterfaceType,
-    MFCDef,
 )
 from realrlhf.api.core.system_api import *
 from realrlhf.api.quickstart.dataset import PromptOnlyDatasetConfig

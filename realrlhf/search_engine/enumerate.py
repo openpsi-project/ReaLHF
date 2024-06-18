@@ -1,7 +1,7 @@
 from typing import List
 
 from realrlhf.api.core.dfg import build_graph as build_dfg
-from realrlhf.api.core.dfg import ModelInterfaceType, MFCDef
+from realrlhf.api.core.dfg import MFCDef, ModelInterfaceType
 from realrlhf.api.quickstart.device_mesh import (
     DeviceMesh,
     find_parallel_strategies,

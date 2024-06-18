@@ -104,6 +104,7 @@ class MFCDef:
         using quickstart experiments.
     :type post_hooks: List[RPCHook]
     """
+
     model_name: ModelName
     model_type: ModelFamily
     model_path: str
@@ -139,9 +140,7 @@ class MFCDef:
     parents: List[str] = dataclasses.field(default_factory=lambda: [])
     children: List[str] = dataclasses.field(default_factory=lambda: [])
 
-    parent_rpcs: List["MFCDef"] = dataclasses.field(
-        default_factory=lambda: []
-    )
+    parent_rpcs: List["MFCDef"] = dataclasses.field(default_factory=lambda: [])
     children_rpcs: List["MFCDef"] = dataclasses.field(
         default_factory=lambda: []
     )

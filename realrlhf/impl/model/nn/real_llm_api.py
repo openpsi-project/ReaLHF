@@ -27,10 +27,7 @@ from realrlhf.impl.model.comm.param_realloc import (
 from realrlhf.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from realrlhf.impl.model.utils.padding import pad_input, unpad_input
 
-from .flatten_param import (
-    build_param_spec,
-    map_param_to_contigous_memory,
-)
+from .flatten_param import build_param_spec, map_param_to_contigous_memory
 from .real_llm_base import (
     OutputHead,
     PipeCacheData,
