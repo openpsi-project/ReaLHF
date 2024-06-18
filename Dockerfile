@@ -11,12 +11,14 @@ RUN apt install -y net-tools python3-pip pkg-config libopenblas-base libopenmpi-
 
 RUN pip3 install -U pip
 RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# Install PyTorch in advance to prevent rebuilding this large Docker layer.
+RUN pip3 install torch
 
 COPY ./requirements.txt /requirements.txt
 RUN pip3 install -r /requirements.txt && rm /requirements.txt
 
 COPY . /reallm
-RUN pip3 install -e /reallm --no-build-isolation
+RUN REAL_CUDA=0 pip3 install -e /reallm --no-build-isolation
 WORKDIR /reallm
 
 # >>>>>> Documentation images
@@ -45,10 +47,25 @@ RUN pip3 install -U pip
 RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # set environment variables for building transformer engine
-ENV NVTE_WITH_USERBUFFERS=1 NVTE_FRAMEWORK=pytorch REAL_CUDA=1 MAX_JOBS=8 MPI_HOME=/usr/local/mpi
+ENV NVTE_WITH_USERBUFFERS=1 NVTE_FRAMEWORK=pytorch MAX_JOBS=8 MPI_HOME=/usr/local/mpi
 ENV PATH="${PATH}:/opt/hpcx/ompi/bin:/opt/hpcx/ucx/bin"
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 
+# NOTE: we should also install flash_attn and transformer_engine in the image
+# However, using `pip install flash_attn -no-build-isolation` will cause the
+# building process to get stuck forever, so we have to pre-compile the wheel
+# and install it locally. If these wheels do not exist in your docker build
+# environment, please copy their source code and build them first.
+# If you can't build these packages, use our provided docker image.
+
+ENV TE_WHL_NAME=transformer_engine-1.7.0+4e7caa1-cp310-cp310-linux_x86_64.whl
+ENV FLA_WHL_NAME=flash_attn-2.5.9-cp310-cp310-linux_x86_64.whl
+COPY ./dist/$TE_WHL_NAME /$TE_WHL_NAME
+# We don't use TransformerEngine's flash-attn integration, so it's okay to disrespect dependencies
+RUN pip3 install /$TE_WHL_NAME --no-dependencies && rm /$TE_WHL_NAME
+COPY ./dist/$FLA_WHL_NAME /$FLA_WHL_NAME
+RUN pip3 install /$FLA_WHL_NAME && rm /$FLA_WHL_NAME
+
 COPY . /reallm
-RUN pip3 install -e /reallm --no-build-isolation
+RUN REAL_CUDA=1 pip3 install -e /reallm --no-build-isolation
 WORKDIR /reallm

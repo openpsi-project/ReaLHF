@@ -347,18 +347,16 @@ def loads(b):
 
 
 class NamedArray:
-    """A class decorator modified from the `namedarraytuple` class in rlpyt repo,
-    referring to
-    https://github.com/astooke/rlpyt/blob/master/rlpyt/utils/collections.py#L16.
+    """A class acting like a dict that holds torch tensors as values.
 
     NamedArray supports dict-like unpacking and string indexing, and exposes integer slicing reads
     and writes applied to all contained objects, which must share
     indexing (__getitem__) behavior (e.g. numpy arrays or torch tensors).
 
-    Note that namedarray supports nested structure.,
-    i.e., the elements of a NamedArray could also be NamedArray.
+    NamedArray also supports metadata, which is useful for recording sequence lengths.
 
     Example:
+
     >>> class Point(NamedArray):
     ...     def __init__(self,
     ...         x: np.ndarray,
@@ -403,11 +401,6 @@ class NamedArray:
     _reserved_slots = ["_NamedArray__metadata", "_fields"]
 
     def __init__(self, **kwargs):
-        """
-
-        Args:
-            data: key-value following {field_name: otherNamedArray/None/np.ndarray/torch.Tensor}
-        """
         self._fields = list(sorted(kwargs.keys()))
         self.__metadata = types.MappingProxyType({})
         for k, v in kwargs.items():
@@ -415,9 +408,19 @@ class NamedArray:
 
     @property
     def metadata(self):
+        """Return the metadata of the NamedArray object.
+        
+        :return: A dict-like metadata of the NamedArray object.
+        :rtype: MappingProxyType
+        """
         return self.__metadata
 
     def register_metadata(self, **kwargs):
+        """Register metadata to the NamedArray object.
+        
+        :param kwargs: Metadata to be registered.
+        :type kwargs: Dict
+        """
         for k in self._fields:
             if k in kwargs.keys():
                 raise KeyError("Keys of metadata should be different from data fields!")
@@ -425,12 +428,20 @@ class NamedArray:
         self.__metadata = types.MappingProxyType({**self.__metadata, **kwargs})
 
     def pop_metadata(self, key):
+        """Clear a single metadata entry named "key".
+        
+        :param key: The key to be removed.
+        :type key: str
+        :return: The value of the removed key.
+        :rtype: Any
+        """
         metadatadict = dict(self.__metadata)
         value = metadatadict.pop(key)
         self.__metadata = types.MappingProxyType(metadatadict)
         return value
 
     def clear_metadata(self):
+        """Clear all metadata recorded in this object."""
         self.__metadata = types.MappingProxyType({})
 
     def __iter__(self):
@@ -442,8 +453,10 @@ class NamedArray:
 
         Unknown fields cannot be created.
 
-        Args:
-            loc (str): attribute name to be set.
+        :param loc: The attribute name to be set.
+        :type loc: str or slice
+        :param value: The value to be set.
+        :type value: Any
         """
         if not (loc in NamedArray._reserved_slots or loc in self._fields):
             self._fields.append(loc)
@@ -454,15 +467,11 @@ class NamedArray:
         If the index is integer/slice, return a new dataclass instance containing
         the selected index or slice from each field.
 
-        Args:
-            loc (str or slice): Key or indices to get.
-
-        Raises:
-            Exception: To locate in which field the error occurs.
-
-        Returns:
-            Any: An element of the dataclass or a new dataclass
-                object composed of the subarrays.
+        :param loc: Key or indices to get.
+        :type loc: str or slice
+        :return: An element of NamedArray or a new NamedArray
+            object composed of the slices.
+        :rtype: NamedArray or Any
         """
         if isinstance(loc, str):
             # str indexing like in dict
@@ -486,13 +495,11 @@ class NamedArray:
         field.  Else, assign whole of value to selected index or slice of
         all fields. Ignore fields that are both None.
 
-        Args:
-            loc (str or slice): Key or indices to set.
-            value (Any): A dataclass instance with the same structure
-                or elements of the dataclass object.
-
-        Raises:
-            Exception: To locate in which field the error occurs.
+        :param loc: Key or indices to set.
+        :type loc: str or slice
+        :param value: An NamedArray instance with the same structure
+            or elements of the NamedArray object.
+        :type value: Any
         """
         if isinstance(loc, str):
             if loc not in self._fields:
@@ -516,13 +523,12 @@ class NamedArray:
                                 f"'{self._fields[j]}': {e}") from e
 
     def __contains__(self, key):
-        """Checks presence of field name (unlike tuple; like dict).
+        """Checks presence of a field name (unlike tuple; like dict).
 
-        Args:
-            key (str): The queried field name.
-
-        Returns:
-            bool: Query result.
+        :param key: The queried field name.
+        :type key: str
+        :return: Query result.
+        :rtype: bool
         """
         return key in self._fields
 
@@ -561,7 +567,6 @@ class NamedArray:
             raise IndexError(f"No entry has shape on dim={dim}.")
 
     def unique_of(self, field, exclude_values=(None,)):
-        """Get the unique value of a field"""
         unique_values = np.unique(self[field])
         unique_values = unique_values[np.in1d(unique_values, exclude_values, invert=True)]
         if len(unique_values) != 1:
@@ -569,53 +574,8 @@ class NamedArray:
         else:
             return unique_values[0]
 
-    def average_of(self, field, ignore_negative=True):
-        """Get the average value of the sample
-        Returns:
-            version: average version of the sample in trainer steps. None if no version is specified for any data.
-        """
-        values = self[field]
-        if len(values) > 0:
-            if ignore_negative:
-                return np.nanmean(np.where(values >= 0, values, np.nan))
-            else:
-                return values.mean()
-        else:
-            return None
-
-    def max_of(self, field, ignore_negative=True):
-        """Get the average value of the sample
-        Returns:
-            version: average version of the sample in trainer steps. None if no version is specified for any data.
-        """
-        values = self[field]
-        if len(values) > 0:
-            if ignore_negative:
-                return np.nanmax(np.where(values >= 0, values, np.nan))
-            else:
-                return values.max()
-        else:
-            return None
-
-    def min_of(self, field, ignore_negative=True):
-        """Get the average value of the sample
-        Returns:
-            version: average version of the sample in trainer steps. None if no version is specified for any data.
-        """
-        values = self[field]
-        if len(values) > 0:
-            if ignore_negative:
-                return np.nanmin(np.where(values >= 0, values, np.nan))
-            else:
-                return values.min()
-        else:
-            return None
-
     def items(self):
-        """Iterate over ordered (field_name, value) pairs.
-
-        Yields:
-            tuple[str,Any]: (field_name, value) pairs
+        """Iterate over ordered (field_name, value) pairs like a dict.
         """
         for k, v in zip(self._fields, self):
             yield k, v
@@ -682,11 +642,7 @@ class NamedArray:
 
 def from_dict(values: Dict):
     """Create namedarray object from Nested Dict of arrays.
-    Args:
-        values: Nested key-value object of data. value should of type None, Numpy Array, or Torch Tensor.
-                Return None if length of value is 0.
-    Returns:
-        NamedArray with the same data structure as input. If values is None, return None.
+
     Example:
     >>> a = from_dict({"x": np.array([1, 2]), "y": np.array([3,4])})
     >>> a.x
@@ -703,6 +659,11 @@ def from_dict(values: Dict):
      [9]])
     >>> obs_na.state
     NamedArray(position=[4 5],speed=[1 2 3])
+
+    :param values: Nested key-value object of data. value should of type None, Numpy Array, or Torch Tensor.
+    :type values: Dict
+    :return: NamedArray with the same data structure as input. If values is empty, return None.
+    :rtype: NamedArray
     """
     if values is None or len(values) == 0:
         return None
@@ -741,13 +702,12 @@ def recursive_aggregate(xs, aggregate_fn):
     """Recursively aggregate a list of namedarray instances.
     Typically recursively stacking or concatenating.
 
-    Args:
-        xs (List[Any]): A list of namedarrays or
-            appropriate aggregation targets (e.g. numpy.ndarray).
-        aggregate_fn (function): The aggregation function to be applied.
-
-    Returns:
-        Any: The aggregated result with the same data type of elements in xs.
+    :param xs: A list of NamedArrays or appropriate aggregation targets (e.g. numpy.ndarray).
+    :type xs: List[NamedArray or Any]
+    :param aggregate_fn: The aggregation function to be applied.
+    :type aggregate_fn: Callable
+    :return: The aggregated result with the same data type of elements in xs.
+    :rtype: NamedArray or Any
     """
     __array_filter_none(xs)
     if isinstance(xs[0], NamedArray):
@@ -776,12 +736,14 @@ def recursive_aggregate(xs, aggregate_fn):
 
 
 def recursive_apply(x, fn):
-    """Recursively apply a function to a namedarray x.
+    """Recursively apply a function to an NamedArray x.
 
-    Args:
-        x (Any): The instance of a namedarray subclass
-            or an appropriate target to apply fn.
-        fn (function): The function to be applied.
+    :param x: The instance of a namedarray subclass or an appropriate target to apply fn.
+    :type x: NamedArray or Any
+    :param fn: The function to be applied.
+    :type fn: Callable
+    :return: The result of applying fn to x, preserving metadata.
+    :rtype: NamedArray or Any
     """
     if isinstance(x, NamedArray):
         entries = dict()

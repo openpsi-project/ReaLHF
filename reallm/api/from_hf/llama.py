@@ -201,10 +201,7 @@ def convert_config_back_llama(config: ReaLModelConfig) -> transformers.LlamaConf
 for name in [
         "llama",
         "codellama",
-        "deepseek-base",
-        "deepseek-chat",
-        "deepseek-coder",
-        "deepseek-coder-instr",
+        "deepseek",
 ]:
     register_hf_family(
         name=name,

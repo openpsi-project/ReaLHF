@@ -10,3 +10,4 @@ from .experiments.common.dpo_exp import DPOConfig
 from .experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 from .experiments.common.rw_exp import RWConfig
 from .experiments.common.sft_exp import SFTConfig
+from .api.core.model_api import ReaLModelConfig

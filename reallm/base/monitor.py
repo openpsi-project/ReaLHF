@@ -11,7 +11,6 @@ import time
 import numpy as np
 import psutil
 import pynvml
-import viztracer
 
 import reallm.base.constants as constants
 import reallm.base.logging as logging

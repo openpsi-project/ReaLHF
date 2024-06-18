@@ -5,7 +5,6 @@ import math
 import threading
 import time
 
-import prometheus_client
 
 INFINITE_DURATION = 60 * 60 * 24 * 365 * 1000
 
@@ -107,19 +106,6 @@ class EpochStepTimeFreqCtl:
         return x or y or z
 
 
-class PrometheusSummaryObserve:
-
-    def __init__(self, prometheus_metric: prometheus_client.Summary):
-        self.metric = prometheus_metric
-        self.time = None
-
-    def __enter__(self):
-        self.time = time.monotonic_ns()
-        return self.time
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.time = time.monotonic_ns() - self.time
-        self.metric.observe(self.time / 1e9)
 
 
 @dataclasses.dataclass

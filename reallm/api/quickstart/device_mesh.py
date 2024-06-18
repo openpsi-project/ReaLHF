@@ -45,7 +45,7 @@ class DeviceMesh:
 
     def __post_init__(self):
         if self.global_mesh_name is None:
-            self.global_mesh_name = (f"NODE[01-{self.n_nodes:02d}]" if self.n_nodes > 1 else "NODE01")
+            self.global_mesh_name = (f"{cluster_spec.node_name_prefix}[01-{self.n_nodes:02d}]" if self.n_nodes > 1 else f"{cluster_spec.node_name_prefix}01")
 
         if self.global_mesh_name is not None and self.name is None:
             self.name = device_mesh_name_from_mapping(self.global_mesh_name, self.mapping)

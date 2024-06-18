@@ -121,7 +121,7 @@ def main_start(args, recover_count: int = 0):
                         "To change the fileroot, set the fileroot option of your choice in your CLUSTER_SPEC_PATH.")
 
     BASE_ENVIRONS = {
-        "PYTHONPATH": repo_path,
+        "PYTHONPATH": "/reallm",
         "REAL_PACKAGE_PATH": repo_path,
         "WANDB_MODE": args.wandb_mode,
         "REAL_MODE": args.mode.upper(),
@@ -282,7 +282,7 @@ def _main_profile_layers(model_family, model_path):
         from reallm.api.core.system_api import _LLM_ENVVARS
 
         BASE_ENVIRONS = {
-            "PYTHONPATH": repo_path,
+            "PYTHONPATH": "/reallm",
             "REAL_PACKAGE_PATH": repo_path,
             "WANDB_MODE": "disabled",
             "DLLM_MODE": "SLURM",
