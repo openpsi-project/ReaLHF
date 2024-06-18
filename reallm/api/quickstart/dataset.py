@@ -8,16 +8,18 @@ class PromptAnswerDatasetConfig:
 
     The raw data must be a json or jsonl file, where each piece of data is a dictionary
     with keys `prompt` and `answer`. Both `prompt` and `answer` are strings.
-    Check `impl/dataset/common/packed_prompt_answer_dataset.py` or inspect the example
-    dataset for more details.
 
-    Args:
-        train_path (str): Path to the training dataset.
-        valid_path (str): Path to the evaluation dataset.
-        max_seqlen (str): Maximum sequence length (prompt + answer).
-            Sequences longer than this will be truncated.
-        train_bs_n_seqs (int): Number of sequences in each batch during training.
-        valid_bs_n_seqs (int): Number of sequences in each batch during validation.
+    :param train_path: Path to the training dataset.
+    :type train_path: str
+    :param valid_path: Path to the evaluation dataset.
+    :type valid_path: str
+    :param max_seqlen: Maximum sequence length (prompt + answer).
+        Sequences longer than this will be truncated.
+    :type max_seqlen: int
+    :param train_bs_n_seqs: Number of sequences in each batch during training.
+    :type train_bs_n_seqs: int
+    :param valid_bs_n_seqs: Number of sequences in each batch during validation.
+    :type valid_bs_n_seqs: int
     """
 
     train_path: str = ""
@@ -34,24 +36,25 @@ class PairedComparisonDatasetConfig:
     The raw data must be a json or jsonl file, where each piece of data is a dictionary
     with keys `prompt`, `pos_answers`, and `neg_answers`. `prompt` is a string.
     `pos_answers` and `neg_answers` are lists of strings. They must have the same size.
-    Check `impl/dataset/common/packed_rw_paired_dataset.py` or inspect the example
-    dataset for more details.
 
     Answer pairs of the same prompt will be sampled in the same batch. Hence, the number of sequences
     in each batch must be even, in the form of [P1A1+, P1A1-, P1A2+, P1A2-, P2A1+, P2A1-, P2A2+, P2A2-, ...],
     where `P` means prompt, `A` means answer, `+` means positive, and `-` means negative.
 
     The raw dataset may contain multiple answer pairs for each prompt. We will randomly sample
-    `max_pairs_per_prompt` answer pairs for each prompt.
+    `max_pairs_per_prompt` answer pairs for each prompt in each epoch.
 
-    Args:
-        train_path (str): Path to the training dataset.
-        valid_path (str): Path to the evaluation dataset.
-        max_pairs_per_prompt (int): Maximum number of answer pairs per prompt.
-        max_seqlen (str): Maximum sequence length (prompt + answer).
-            Sequences longer than this will be truncated.
-        train_bs_n_seqs (int): Number of sequences in each batch during training.
-        valid_bs_n_seqs (int): Number of sequences in each batch during validation.
+    :param train_path: Path to the training dataset.
+    :type train_path: str
+    :param valid_path: Path to the evaluation dataset.
+    :type valid_path: str
+    :param max_pairs_per_prompt: Maximum number of answer pairs per prompt.
+    :type max_pairs_per_prompt: int
+    :param max_seqlen: Maximum sequence length (prompt + answer).
+        Sequences longer than this will be truncated.
+    :type max_seqlen: int
+    :param train_bs_n_seqs: Number of sequences in each batch during training.
+    :type train_bs_n_seqs: int
     """
 
     train_path: str = ""
@@ -68,22 +71,19 @@ class PromptOnlyDatasetConfig:
 
     The raw data must be a json or jsonl file, where each piece of data is a dictionary
     with a single key called `prompt`, which is a string.
-    Check `impl/dataset/common/prompt_dataset.py` or inspect the example
-    dataset for more details.
 
-    Sampled prompts will be left-padded to `max_prompt_len` for generation.
-
-    Args:
-        max_prompt_len (int): Maximum prompt length. Prompts shorter than this will be left-padded
-            and prompts longer than this will be truncated.
-        train_bs_n_seqs (int): Number of prompts in each batch.
-        path (str): Path to the dataset.
+    :param path: Path to the training dataset.
+    :type path: str
+    :param max_prompt_len: Maximum prompt length.
+        Prompts longer than this will be truncated.
+    :type max_prompt_len: int
+    :param train_bs_n_seqs: Number of prompts in each batch.
+    :type train_bs_n_seqs: int
+    :param pad_to_max_length: Whether to pad prompts to the maximum length.
+    :type pad_to_max_length: bool
     """
 
     path: str = ""
     max_prompt_len: int = 256
     train_bs_n_seqs: int = 256
     pad_to_max_length: bool = False
-
-
-DatasetType = Union[PromptOnlyDatasetConfig, PromptAnswerDatasetConfig, PairedComparisonDatasetConfig]

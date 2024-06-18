@@ -45,7 +45,7 @@ class DeviceMesh:
 
     def __post_init__(self):
         if self.global_mesh_name is None:
-            self.global_mesh_name = (f"NODE[01-{self.n_nodes:02d}]" if self.n_nodes > 1 else "NODE01")
+            self.global_mesh_name = (f"{cluster_spec.node_name_prefix}[01-{self.n_nodes:02d}]" if self.n_nodes > 1 else f"{cluster_spec.node_name_prefix}01")
 
         if self.global_mesh_name is not None and self.name is None:
             self.name = device_mesh_name_from_mapping(self.global_mesh_name, self.mapping)
@@ -78,7 +78,7 @@ class DeviceMesh:
 
     def sub_device_meshes(self, min_n_gpus: int = 4) -> List["DeviceMesh"]:
         """Find sub device meshes of this device mesh with at least min_n_gpus gpus.
-        Sub device meshes have following constraits:
+        Sub device meshes have following constraints:
             1. Sub device meshes have the same cluster mesh.
             2. Sub device meshes of multiple nodes must contain consecutive nodes
                in the cluster mesh.
@@ -254,10 +254,16 @@ class RPCAllocation:
 class AllocationConfig:
     """Allocation configuration for one RPC, used for manual allocation.
 
-    Args:
-        parallel (ParallelismConfig): Parallelism strategy configuration.
-        device_mesh (str): String representation for device mesh, see DeviceMesh for naming rules.
-                           If set to None, the RPC will be allocated to all allocated cluster nodes.
+    :param parallel: Parallelism strategy configuration.
+    :type parallel: ParallelismConfig
+    :param device_mesh: String representation for device mesh.
+        If it is composed of multiple nodes, it should be in the form of
+        slurm nodelist, e.g., node[01-02] or node01,node02.
+        If it is a slice on a single node,
+        we restrict it occupies 1, 2, 4, or 8 contiguous GPUs in the node.
+        In this case, the string representation is similar to the MPI hostfile, e.g.,
+        "node01:0-3" for the first 4 GPUs on node01.
+    :type device_mesh: str
     """
 
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)

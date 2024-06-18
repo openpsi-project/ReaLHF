@@ -53,6 +53,23 @@ class DuckGenerationOutput:
 
 
 class ReaLModel(nn.Module):
+    """The transformer model used in ReaL.
+    
+    This model supports 3D parallelism, offloaded inference,
+    and parameter reallocation. It is usually more efficient
+    than HuggingFace implementations.
+
+    During construction, model parameters are not instantiated
+    immediately because the model may be redistributed.
+    The method ``instantiate`` should be called before using
+    model parameters, e.g., forward or state dict.
+
+    :param config: The model configuration.
+    :type config: model_api.ReaLModelConfig
+    :param dtype: The data type of the model.
+    :type dtype: Optional[torch.dtype], optional
+    :param device: The device of the model.
+    """
 
     def __init__(
         self,
@@ -125,6 +142,11 @@ class ReaLModel(nn.Module):
         return self.config.share_embeddings_and_output_weights
 
     def instantiate(self):
+        """Instantiate the model parameters.
+        
+        Note that users can append hooks to this method
+        to do more processing, such as loading from HuggingFace models.
+        """
         assert not self._instantiated
         layers = []
         for idx in range(self.layer_idx_start, self.layer_idx_end):
@@ -148,6 +170,7 @@ class ReaLModel(nn.Module):
 
     @property
     def num_layers(self):
+        """Return the number of embedding or transformer layers in this pipeline stage."""
         return self.layer_idx_end - self.layer_idx_start
 
     @property
@@ -203,6 +226,7 @@ class ReaLModel(nn.Module):
         return l
 
     def async_offload(self):
+        """Trigger offload asynchronously."""
         assert not self._offloaded
         assert self._instantiated
         if self._offload_buffer is None:
@@ -230,6 +254,7 @@ class ReaLModel(nn.Module):
         self._offloaded = True
 
     def wait_for_offload(self):
+        """Wait for offload to finish."""
         assert self._offloaded
         torch.cuda.current_stream().wait_event(self._offload_event)
 
@@ -489,6 +514,9 @@ class ReaLModel(nn.Module):
         to_model_config: model_api.ReaLModelConfig,
         pg_info: NCCLProcessGroupInfo,
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
+        """Trigger the parameter realloaction from the source model to the target model.
+        """
+
         assert not (is_trainable(from_model_name) and is_trainable(to_model_name))
 
         if (from_model_name, to_model_name) not in self._reparallelize_targets:

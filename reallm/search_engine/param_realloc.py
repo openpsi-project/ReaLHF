@@ -10,9 +10,7 @@ import torch.distributed
 
 from reallm.api.core.config import ModelFamily, ModelName
 from reallm.api.core.model_api import ReaLModelConfig
-from reallm.impl.model.comm.param_realloc import (_create_param_realloc_groups,
-                                                  _derive_reparallelize_comm_plan, ParamReallocInfo)
-from reallm.impl.model.nn.real_llm_api import ReparallelizeReceiverStep, ReparallelizeSenderStep
+
 import reallm.api.core.system_api as system_api
 import reallm.base.constants as constants
 import reallm.base.topology as topology
@@ -39,6 +37,9 @@ def compute_cost(
     bw: float,  # Gbps
     set_interval_cost: float,
 ) -> int:
+    from reallm.impl.model.comm.param_realloc import (_create_param_realloc_groups,
+                                                  _derive_reparallelize_comm_plan, ParamReallocInfo,
+                                                  ReparallelizeReceiverStep, ReparallelizeSenderStep)
 
     param_sync_groups = {}
     param_sync_src_ranks = {}

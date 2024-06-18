@@ -11,9 +11,8 @@ import transformers
 
 from reallm.api.core.model_api import ReaLModelConfig
 # from base.topology import *
-from reallm.impl.model.nn.real_llm_api import ReaLModel
-from reallm.impl.model.nn.real_llm_base import (OutputHead, PipeCacheData, PipeTransferData, ReaLModelBlock,
-                                                VocabPositionEmbedding)
+
+
 import reallm.api.core.model_api as model_api
 import reallm.api.core.system_api as config_package
 import reallm.base.constants as constants
@@ -28,6 +27,8 @@ logger = logging.getLogger("profile layers", "system")
 
 
 def make_layers(config: ReaLModelConfig, dtype, device):
+    from reallm.impl.model.nn.real_llm_base import (OutputHead, ReaLModelBlock,
+                                                VocabPositionEmbedding)
     embedding_layer = VocabPositionEmbedding(
         config,
         dtype=dtype,
@@ -111,6 +112,7 @@ class ProfileLayers:
 
     @torch.no_grad()
     def fwd_gen(self, bs, seq_len):
+        from reallm.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
         input_ids = torch.randint(
             0,
             self.config.vocab_size,
@@ -174,6 +176,7 @@ class ProfileLayers:
             self.insert_data_point(layer_name, "fwd_gen_1", bs, seq_len, time.monotonic_ns() - st)
 
     def fwd_bwd_opt(self, bs, seq_len):
+        from reallm.impl.model.nn.real_llm_base import (PipeCacheData, PipeTransferData)
         input_ids = torch.randint(
             0,
             self.config.vocab_size,
@@ -235,6 +238,7 @@ def make_profile_layers(
     dtype: Optional[str] = None,
     hf_model_type: str = "llama",
 ):
+    from reallm.impl.model.nn.real_llm_api import ReaLModel
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
     elif dtype == "bf16":

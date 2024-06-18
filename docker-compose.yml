@@ -1,0 +1,9 @@
+version: '3'
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: docs
+    ports:
+      - "7780:80"

@@ -6,45 +6,63 @@
 Welcome to ReaL-LLM's documentation!
 ====================================
 
-.. **Lumache** (/lu'make/) is a Python library for cooks and food lovers that
-.. creates recipes mixing random ingredients.  It pulls data from the `Open Food
-.. Facts database <https://world.openfoodfacts.org/>`_ and offers a *simple* and
-.. *intuitive* API.
+   **ReaL is a highly efficient system
+   for LLM RLHF training at all scales.**
 
-**ReaL-LLM** (or *reallm*) is a highly efficient system for LLM RLHF training.
-It introduces a novel technique called *Parameter ReaLlocation*, which dynamically
-shifts model parameters and changes the parallelization strategy during training.
-This technique can significantly reduce the communication overhead and improve
-GPU utilization in RLHF training, leading to a substantial speedup over the state-of-the-art
-open-source systems.
 
 Highlights
-===
+-----------
 
-- **Performant**
-- **Scalable**
-- **Easy to use**
-- **Unified**
-- **Flexible**
-- **Highly efficient**
+**Efficient at all scales**
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+ReaL proposes a novel *parameter realloaction* technique.
+It dynamically shifts parameters and changes parallel strategies
+of LLMs during training.
+This technique can largely reduce the communication overhead and improve
+GPU utilization for RLHF.
 
-.. note::
-   This project is under active development.
+Together with the most advanced
+techniques for LLM training, such as 3D parallelism,
+ZeRO optimization, and offloading,
+ReaL can scale RLHF training to
+hundreds or thousands of GPUs,
+maintaining high throughput and efficiency.
 
-.. .. image:: https://img.shields.io/pypi/v/lumache.svg
-..     :target: https://pypi.org/project/lumache
-..     :alt: PyPI
+Beyond large-scale training, ReaL is also memory-efficient with limited resources.
+For example, ReaL can train 70B LLMs with offloading on a single node.
+
+For more details, check our `introduction page <intro>`_.
+
+**Easy to use**
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Install with PyPI or use our Docker image, then
+run your experiment with a single command!
+Check our `quickstart guide <quickstart>`_ for more details.
+
+**Flexible**
+~~~~~~~~~~~~~~~~~~~~~~~
+
+ReaL's system implementations are fully decoupled with
+algorithm interfaces. Get the best performance for your
+customized application within 100 lines of code!
+
+Contents
+----------------
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+   :maxdepth: 3
+
+   intro
+   install
+   quickstart
+   expconfig
+   customization
+   algo
+   arch
+   contributing
 
 
 
-Indices and tables
-==================
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`

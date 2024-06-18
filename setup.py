@@ -20,7 +20,7 @@ NVIDIA_SUPPORTED_ARCHS = {"7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
 
 
 def _is_cuda() -> bool:
-    return torch.cuda.is_available()
+    return os.getenv("REAL_CUDA", "0") == "1"
 
 
 # Compiler flags.
@@ -39,6 +39,14 @@ NVCC_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
 def glob(pattern: str):
     root = Path(__name__).parent
     return [str(p) for p in root.glob(pattern)]
+
+
+def get_pybind11_include_path() -> str:
+    pybind11_meta = subprocess.check_output("pip show pybind11", shell=True).decode("ascii")
+    for line in pybind11_meta.split("\n"):
+        line = line.strip()
+        if line.startswith("Location: "):
+            return os.path.join(line.split(": ")[1], "pybind11", "include")
 
 
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
@@ -174,6 +182,9 @@ if _is_cuda():
         with contextlib.suppress(ValueError):
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
+with open("requirements.txt", "r") as f:
+    dependencies = f.read().splitlines()
+
 os.makedirs(os.path.join(ROOT_DIR, "reallm", "_C"), exist_ok=True)
 if _is_cuda():
     cr_extension = CUDAExtension(
@@ -237,7 +248,10 @@ search_extension = setuptools.Extension(
         "-fPIC",
         "-std=c++17",
     ],
-    include_dirs=[os.path.join(os.path.dirname(__file__), "csrc", "search")],
+    include_dirs=[
+        os.path.join(os.path.dirname(__file__), "csrc", "search"),
+        get_pybind11_include_path(),
+    ],
 )
 ext_modules.append(search_extension)
 
@@ -246,4 +260,5 @@ setuptools.setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     packages=setuptools.find_packages(),
+    install_requires=dependencies,
 )

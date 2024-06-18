@@ -17,15 +17,6 @@ maintainers = [
     { name = "Wei Fu", email = "fuwth17@gmail.com" },
 ]
 keywords = ["large language models (LLMs)", "RLHF", "distributed training"]
-dependencies = [
-    "torch",
-    "flash-attn",
-    "transformers",
-    "deepspeed==0.14.0",
-    "hydra-core",
-    "pyzmq",
-    "megatron_core==0.6.0",
-]
 classifiers = [
     #   3 - Alpha
     #   4 - Beta
@@ -45,7 +36,7 @@ Repository = "https://github.com/garrett4wade/distributed_llm"
 # Changelog = "https://github.com/garrett4wade/distributed_llm/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
-where = ["."]                    # ["."] by default
+where = ["."] # ["."] by default
 # include = ["csrc/*", "reallm/*"] # ["*"] by default
 # exclude = ["tests", "docker"]    # empty by default
 # namespaces = false               # true by default
@@ -68,6 +59,4 @@ space_between_ending_comma_and_closing_bracket = false
 allow_split_before_dict_value = false
 
 [tool.pytest.ini_options]
-pythonpath = [
-  "."
-]
+pythonpath = ["."]

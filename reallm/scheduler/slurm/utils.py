@@ -364,7 +364,7 @@ class SlurmLaunchInfo:
             srun_env["SLURM_HOSTFILE"] = self.hostfile_path
         # Setup step command.
         # add current directory into container mounts to ensure editable mode for reallm package
-        container_mounts = (f"{os.environ.get('REAL_PACKAGE_PATH', '$PWD')}:/distributed_llm," +
+        container_mounts = (f"{os.environ.get('REAL_PACKAGE_PATH', '$PWD')}:/reallm," +
                             self.container_mounts)
         srun_flags = [
             f"--ntasks={ntasks}",

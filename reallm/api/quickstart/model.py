@@ -9,15 +9,17 @@ logger = logging.getLogger("Quickstart Model Config")
 
 @dataclasses.dataclass
 class ParallelismConfig:
-    """Model parallelism configuration.
+    """Model 3D parallelism configuration.
 
-    Args:
-        model_parallel_size (int): Tensor model parallelism size.
-        pipeline_parallel_size (int): Pipeline parallelism size.
-        data_parallel_size (int): Data parallelism size.
-        use_sequence_parallel (bool): Whether to use sequence parallelism combined with model parallelism.
-        partition_method (str): Partition method for modules using pipeline parallel.
-                                Support "uniform", "parameters" and "parameters_balanced".
+    :param model_parallel_size: Tensor-model parallelism size.
+    :type model_parallel_size: int
+    :param pipeline_parallel_size: The number of pipeline parallelism stages.
+    :type pipeline_parallel_size: int
+    :param data_parallel_size: Data parallelism size for ZeRO optimization.
+    :type data_parallel_size: int
+    :param use_sequence_parallel: Whether to use sequence parallelism
+        in Megatron combined with tensor-model parallelism.
+    :type use_sequence_parallel: bool
     """
 
     model_parallel_size: int = 1
@@ -37,14 +39,9 @@ class ParallelismConfig:
                 f"pp={self.pipeline_parallel_size},"
                 f"dp={self.data_parallel_size})")
 
-    # this will cause error in hydra and omegaconf
-    # def __eq__(self, other: "ParallelismConfig"):
-    #     return (self.model_parallel_size == other.model_parallel_size and
-    #             self.pipeline_parallel_size == other.pipeline_parallel_size and
-    #             self.data_parallel_size == other.data_parallel_size)
-
 
 def parallelism_config_equal(parallel1: ParallelismConfig, parallel2: ParallelismConfig) -> bool:
+    # NOTE: Implementing __eq__ in dataclass will cause error in hydra and omegaconf
     return (parallel1.model_parallel_size == parallel2.model_parallel_size
             and parallel1.pipeline_parallel_size == parallel2.pipeline_parallel_size
             and parallel1.data_parallel_size == parallel2.data_parallel_size)
@@ -52,13 +49,6 @@ def parallelism_config_equal(parallel1: ParallelismConfig, parallel2: Parallelis
 
 @dataclasses.dataclass
 class LoRAConfig:
-    """LoRA configuration.
-
-    Args:
-        dim (int): LoRA dimension.
-        scaling (float): LoRA scaling factor.
-    """
-
     dim: int = 32
     scaling: float = 32.0
 
@@ -67,19 +57,32 @@ class LoRAConfig:
 class OptimizerConfig:
     """Optimizer configuration.
 
-    Args:
-        type (str): Optimizer type. Currently only adam optimizer is supported.
-        lr (float): Learning rate.
-        weight_decay (float): Weight decay.
-        beta1 (float): Adam beta1.
-        beta2 (float): Adam beta2.
-        eps (float): Adam epsilon in the denominator.
-            If pipeline parallelism is used, this should be at most 1.
-        min_lr_ratio (float): Minimum learning rate ratio after learning rate annealing.
-            Should be in the interval of [0.0, 1.0].
-        lr_scheduler_type (str): Learning rate scheduler type.
-        warmup_steps_proportion (float): Proportion of total training steps to warm up.
-            Should be in the interval of [0.0, 1.0].
+    For models that will not be trained, its type should be "empty".
+
+    :param type: Optimizer type. Currently only adam optimizer is supported.
+    :type type: str
+    :param lr: Learning rate.
+    :type lr: float
+    :param weight_decay: Weight decay.
+    :type weight_decay: float
+    :param beta1: Adam beta1.
+    :type beta1: float
+    :param beta2: Adam beta2.
+    :type beta2: float
+    :param eps: Adam epsilon in the denominator.
+    :type eps: float
+    :param min_lr_ratio: Minimum learning rate ratio after learning rate annealing.
+        Should be in the interval of [0.0, 1.0].
+    :type min_lr_ratio: float
+    :param lr_scheduler_type: Learning rate scheduler type.
+        One of "linear", "cosine", "constant".
+    :type lr_scheduler_type: str
+    :param warmup_steps_proportion: Proportion of total training steps to warm up.
+        Should be in the interval of [0.0, 1.0].
+    :type warmup_steps_proportion: float
+    :param offload: Whether to offload optimizer to CPU.
+        Only valid for the deepspeed backend.
+    :type offload: bool
     """
 
     type: str = dataclasses.field(
@@ -108,26 +111,49 @@ class OptimizerConfig:
 
 @dataclasses.dataclass
 class ModelTrainEvalConfig:
-    """Model configuration.
+    """
+    Model (or LLM) runtime configuration in ReaL.
 
-    We use customized model class, i.e., impl.nn.model.real_model, instead of HuggingFace's.
-    This class enables 3D parallelism and flash-attention for better scalibility.
-    The model uses no-pad flash-attn to save GPU memory, i.e., input sequences are packed into
-    a single 1D tensor. The price is that we need to convert each HuggingFace model of interest
-    to this customized model manually.
+    We use a customized model class instead of HuggingFace's.
+    This class enables 3D parallelism and flash-attn for efficiency.
+    The model uses non-pad flash-attn to save GPU memory,
+    i.e., input sequences are packed into a single 1D tensor.
+    The price is that we need to convert each HuggingFace model
+    of interest to this customized model manually.
 
-    If you find that the model of your interest is not supported, please reach out @fuwei for help.
+    If you find that the model of your interest is not supported,
+    please reach out the developers for help.
 
-    Args:
-        type (ModelFamily): Model type. Please check SUPPORTED_MODELS.
-        lora (bool): Whether to use LoRA.
-        gradient_checkpointing (bool): Whether to use gradient checkpointing of MLP inside each block.
-        enable_fp16 (bool): Whether to use fp16.
-        enable_bf16 (bool): Whether to use bf16. Mutual exclusive with fp16.
-        offload (bool): Whether to offload model to CPU.
-        parallel (ParallelismConfig): Parallelism configuration.
-        zero_stage (int): Stage of DeepSpeed ZeRO optimization. Should be one of 0, 1, 2, 3.
-        optimizer (OptimizerConfig): Optimizer configuration.
+    :param type: Model family type, e.g., LLaMA, QWen, etc.
+    :type type: ModelFamily
+    :param backend: Backend for training.
+        Currently only "megatron" and "deepspeed" are supported.
+        For offloaing parameters or optimizer states, use "deepspeed".
+        For parameter reallocation, use "megatron".
+    :type backend: str
+    :param path: Path or identifier of the HuggingFace checkpoint.
+    :type path: str
+    :param lora: Whether to use LoRA.
+    :type lora: LoraConfig
+    :param gradient_checkpointing: Whether to use gradient checkpointing.
+    :type gradient_checkpointing: bool
+    :param enable_fp16: Whether to use fp16.
+    :type enable_fp16: bool
+    :param enable_bf16: Whether to use bf16. Mutual exclusive with fp16.
+    :type enable_bf16: bool
+    :param offload: Whether to offload model parameters to CPU.
+        Only valid for the deepspeed backend.
+    :type offload: bool
+    :param parallel: Parallelism configuration.
+    :type parallel: ParallelismConfig
+    :param zero_stage: Stage of ZeRO optimization.
+        Should be one of 0, 1, 2, 3.
+    :type zero_stage: int
+    :param optimizer: Optimizer configuration.
+    :type optimizer: OptimizerConfig
+    :param init_critic_from_actor: Whether to initialize a
+        critic/reward model from a saved LM checkpoint.
+    :type init_critic_from_actor: bool
     """
 
     type: ModelFamily = dataclasses.field(default=ModelFamily("llama", 7, False))
@@ -137,7 +163,6 @@ class ModelTrainEvalConfig:
     gradient_checkpointing: bool = True
     enable_fp16: bool = True
     enable_bf16: bool = False
-    enable_async_p2p: bool = False
     offload: bool = False
     zero_stage: int = dataclasses.field(
         metadata={"choices": [0, 1, 2, 3]},
@@ -149,15 +174,10 @@ class ModelTrainEvalConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        # if self.enable_bf16 and (self.parallel.model_parallel_size > 1
-        #                          or self.parallel.pipeline_parallel_size > 1):
-        #     raise ValueError("enable_bf16 cannot be used with model parallelism or pipeline parallelism.")
-        # if self.parallel.pipeline_parallel_size > 1 and self.lora is not None:
-        #     raise ValueError("Use LoRA with pipeline parallel is not supported.")
-        # if self.parallel.pipeline_parallel_size > 1 and self.zero_stage > 1:
-        #     logger.warning(f"ZeRO stage should be at most 1 when pipeline parallelism is used. "
-        #                    f"Force to set it to 1. (original {self.zero_stage})")
-        #     self.zero_stage = 1
+        if (self.offload or self.optimizer.offload) and self.backend != "deepspeed":
+            raise ValueError("offload is only valid for the deepspeed backend.")
+        if self.backend == "megatron" and self.zero_stage in [1, 3]:
+            raise ValueError("The Megatron backend only supports zero stage 0 or 2.")
 
 
 def get_real_model_config(

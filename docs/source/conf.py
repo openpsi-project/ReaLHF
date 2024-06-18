@@ -6,6 +6,13 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
+# If extensions (or modules to document with autodoc) are in another directory,
+# add these directories to sys.path here.
+import pathlib
+import sys
+
+sys.path.insert(0, (pathlib.Path(__file__).parents[2] / "reallm").resolve().as_posix())
+
 project = "ReaL-LLM"
 copyright = "2024, Wei Fu & Zhiyu Mei"
 author = "Wei Fu & Zhiyu Mei"
@@ -27,4 +34,12 @@ html_static_path = ["_static"]
 
 extensions = [
     "sphinx.ext.duration",
+    "sphinx.ext.doctest",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.githubpages",
 ]
+
+
+def setup(app):
+    app.add_css_file("custom.css")

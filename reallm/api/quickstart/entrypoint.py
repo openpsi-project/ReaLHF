@@ -40,17 +40,9 @@ QUICKSTART_CONFIG_CLASSES = {}
 QUICKSTART_USERCODE_PATHS = {}
 QUICKSTART_FN = {}
 
-import traceback
-
-
-def g():
-    for line in traceback.format_stack():
-        print(line.strip())
-
 
 def register_quickstart_exp(config_name: str, exp_cls: Callable):
     usercode_path = os.path.abspath(inspect.getfile(inspect.currentframe().f_back))
-    # g()
 
     @hydra.main(version_base=None, config_name=config_name)
     def run(args):
@@ -92,10 +84,10 @@ def register_quickstart_exp(config_name: str, exp_cls: Callable):
 
     cs.store(name=config_name, node=exp_cls)
 
-    assert config_name not in QUICKSTART_CONFIG_CLASSES
+    # assert config_name not in QUICKSTART_CONFIG_CLASSES
     QUICKSTART_CONFIG_CLASSES[config_name] = exp_cls
-    assert config_name not in QUICKSTART_USERCODE_PATHS
+    # assert config_name not in QUICKSTART_USERCODE_PATHS
     QUICKSTART_USERCODE_PATHS[config_name] = usercode_path
-    assert config_name not in QUICKSTART_FN
+    # assert config_name not in QUICKSTART_FN
     QUICKSTART_FN[config_name] = run
     return run

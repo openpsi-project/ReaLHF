@@ -13,7 +13,31 @@ from reallm.experiments.common.common import CommonExperimentConfig
 
 @dataclasses.dataclass
 class SFTConfig(CommonExperimentConfig):
-    seed: int = 1
+    """SFT experiment configuration.
+
+    It is a subclass of :class:`CommonExperimentConfig`,
+    so all CLI options in the base class are available.
+
+    :param total_train_epochs: Total number of training epochs
+        (i.e., the number of times the training dataset is iterated).
+    :type total_train_epochs: int
+    :param save_freq_steps: Save the model every this number of steps.
+        "step" is an optimizer step or a single update of model parameters.
+        If None, the model will not be saved during training.
+        The directory to save the model will be automatically resolved
+        and prompted in the terminal when the experiment starts.
+    :type save_freq_steps: Optional[int]
+    :param eval_freq_epochs: Evaluate the model every this number of epochs.
+        If None, the model will not be evaluated during training.
+    :type eval_freq_epochs: Optional[int]
+    :param model: Model runtime configuration.
+    :type model: ModelTrainEvalConfig
+    :param allocation: Device allocation and parallelism configuration.
+    :type allocation: AllocationConfig
+    :param dataset: Dataset configuration
+    :type dataset: PromptAnswerDatasetConfig
+    """
+
     total_train_epochs: int = 1
     save_freq_steps: Optional[int] = 50
     eval_freq_epochs: Optional[int] = 1
