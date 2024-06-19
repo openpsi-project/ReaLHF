@@ -449,7 +449,6 @@ class ReaLModel(nn.Module):
                     v_cache=v_caches[idx],
                     cache_seqlens=cache_seqlens,
                     max_seqlen=max_seqlen,
-                    attention_mask=None,
                 )
             elif isinstance(
                 l,

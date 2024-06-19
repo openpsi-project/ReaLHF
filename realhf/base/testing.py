@@ -6,19 +6,22 @@ import queue
 import random
 import time
 import traceback
-from typing import Callable, Dict
+from typing import Callable, Dict, Any, Callable, List, Optional, Tuple
 
 import pynvml
 import torch
-import torch.distributed as dist
+import torch.utils.data
+import transformers
 
-from realhf.api.core import config
 from realhf.api.core.config import ModelFamily
-from realhf.base import constants, gpu_utils, name_resolve, namedarray, names, topology
+from realhf.base import (constants, gpu_utils, name_resolve, namedarray,
+                           names, topology)
 from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
+import realhf.api.core.data_api as data_api
+import realhf.api.core.model_api as model_api
+import realhf.api.core.system_api as system_api
 
 # mp.set_start_method("spawn", force=True)  # Otherwise a CUDA reinitialization error will be thrown
-
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
 _DEFAULT_TRIAL_NAME = "test"
@@ -105,6 +108,7 @@ def init_global_constants(
     model_name=None,
     msid2mwid=None,
     sequence_parallel=False,
+    max_prompt_len=None,
     gradient_checkpointing=True,
 ):
     model_name = model_name if model_name is not None else MODEL_NAME
@@ -116,6 +120,7 @@ def init_global_constants(
             num_pp=num_pp,
             sequence_parallel=sequence_parallel,
             gradient_checkpointing=gradient_checkpointing,
+            max_prompt_len=max_prompt_len,
         )
         ws = num_dp * num_mp * num_pp
     else:
@@ -150,6 +155,8 @@ class LocalMultiProcessTest:
     ):
         self.barrier = mp.Barrier(world_size)
         self.err_queue = mp.Queue(world_size)
+        self.expr_name = expr_name
+        self.trial_name = trial_name
         self.processes = [
             StandaloneTestingProcess(
                 rank,
@@ -166,6 +173,7 @@ class LocalMultiProcessTest:
         ]
 
     def launch(self):
+        clear_name_resolve(self.expr_name, self.trial_name)
         assert not torch.cuda.is_initialized()
         [p.start() for p in self.processes]
         assert not torch.cuda.is_initialized()
@@ -185,107 +193,6 @@ def clear_name_resolve(expr_name=None, trial_name=None):
     name_resolve.clear_subtree(
         names.trial_root(experiment_name=expr_name, trial_name=trial_name)
     )
-
-
-def make_finetune_spec(
-    bs_per_device,
-    total_train_epochs=1,
-    total_train_steps=10,
-    steps_per_epoch=10,
-    max_seq_len=1024,
-):
-    import realhf.api.core.model_api as model_api
-
-    finetune_spec = model_api.FinetuneSpec(
-        total_train_epochs=total_train_epochs,
-        total_train_steps=total_train_steps,
-        steps_per_epoch=steps_per_epoch,
-    )
-    return finetune_spec
-
-
-def random_sentence(min_len=100, max_len=128):
-    words = [
-        "the",
-        "quick",
-        "brown",
-        "fox",
-        "jumped",
-        "over",
-        "the",
-        "lazy",
-        "dog",
-    ]
-    sentence_length = random.randint(min_len, max_len)
-    return " ".join(random.choices(words, k=sentence_length))
-    # return "Output less than 50 words:"
-
-
-def make_input(tokenizer, device, s):
-    tokenizer.padding_side = "left"
-    prompts = tokenizer(s, return_tensors="pt", padding=True)
-
-    input_ids, attention_mask = prompts["input_ids"], prompts["attention_mask"]
-    input_ids = input_ids.to(device)
-    attention_mask = attention_mask.to(device)
-
-    # print(f"make input input_ids.shape {input_ids.shape}")
-
-    return input_ids, attention_mask
-
-
-def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
-    random.seed(seed)
-    whole_batch = [random_sentence() for _ in range(batch_size)]
-    dp_batch = whole_batch[
-        batch_size
-        // dp_worldsize
-        * dp_rank : batch_size
-        // dp_worldsize
-        * (dp_rank + 1)
-    ]
-    return make_input(tokenizer, device, dp_batch)
-
-
-def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
-    from realhf.impl.model.utils.padding import unpad_input
-
-    if dp_rank == None:
-        assert num_dp == None
-        dp_rank = constants.data_parallel_rank()
-        num_dp = constants.data_parallel_world_size()
-    input_ids, attention_mask = make_batch(
-        tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed
-    )
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-    prompt_mask = torch.zeros_like(packed_input_ids)
-    data = namedarray.NamedArray(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        prompts=input_ids,
-        prompt_mask=prompt_mask.bool(),
-        prompt_att_mask=attention_mask,
-    )
-    return data
-
-
-def random_sample(bs, seq_len, vocab_size):
-    import torch
-
-    from realhf.impl.model.utils.padding import unpad_input
-
-    input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
-    attention_mask = torch.ones_like(input_ids)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-    prompt_mask = torch.zeros_like(packed_input_ids)
-    data = namedarray.NamedArray(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        prompts=input_ids,
-        prompt_mask=prompt_mask.bool(),
-        prompt_att_mask=attention_mask,
-    )
-    return data
 
 
 def pytorch_memory_burnin(rank):
@@ -388,3 +295,163 @@ def get_llama_config(size):
         apply_rotary=True,
         **size_args,
     )
+
+
+def make_packed_input_batches(
+    dataset: torch.utils.data.Dataset, batch_size: int
+):
+    batches = [
+        [dataset[j] for j in range(i, i + batch_size)]
+        for i in range(0, len(dataset), batch_size)
+    ]
+    batches = [data_api.gather_sequences(batch) for batch in batches]
+    return batches
+
+
+def make_huggingface_generate_input_batches(
+    dataset: List[str],
+    tokenizer: transformers.PreTrainedTokenizerFast,
+    max_length: int,
+    batch_size: int,
+):
+    batches = [
+        [dataset[j]['prompt'] for j in range(i, i + batch_size)]
+        for i in range(0, len(dataset), batch_size)
+    ]
+    tokenizer.padding_side = "left"
+    batches = [
+        tokenizer(
+            batch,
+            return_tensors="pt",
+            max_length=max_length,
+            padding=True,
+            truncation=True,
+            return_attention_mask=True,
+        )
+        for batch in batches
+    ]
+    return batches
+
+
+def make_random_input_batches(
+    shape: Tuple[int], n_batches: int, vocab_size: int
+):
+    batches = [torch.randint(0, vocab_size, shape) for _ in range(n_batches)]
+    return batches
+
+
+def prepare(
+    model_family: ModelFamily,
+    model_path: str,
+    backend_config: system_api.ModelBackend,
+    dataset_config: Optional[system_api.Dataset] = None,
+    device: str = "cuda",
+):
+    from realrlhf.impl.model.nn.real_llm_api import make_real_model, ReaLModel
+    import realrlhf.impl.dataset
+    import realrlhf.impl.model
+
+    with constants.model_scope(MODEL_NAME):
+        if dataset_config is not None:
+            dataset = data_api.make_dataset(
+                dataset_config,
+                seed=1,
+                ddp_rank=constants.data_parallel_rank(),
+                world_size=constants.data_parallel_world_size(),
+                tokenizer_or_tokenizer_name=model_path,
+                experiment_name=_DEFAULT_EXPR_NAME,
+                trial_name=_DEFAULT_TRIAL_NAME,
+            )
+        else:
+            dataset = None
+        model: model_api.Model = make_real_model(
+            MODEL_NAME,
+            device=device,
+            model_path=model_path,
+            is_critic=False,
+            init_critic_from_actor=False,
+            dtype="fp16",
+            hf_model_family=model_family._class,
+        )
+        module: ReaLModel = model.module
+        module.instantiate()
+
+        backend = model_api.make_backend(backend_config)
+        backend.initialize(model, None)
+        return model, dataset, backend
+
+
+def shrink_mconfig(mconfig: model_api.ReaLModelConfig):
+    mconfig.hidden_dim = 128
+    mconfig.head_dim = 16
+    mconfig.n_kv_heads = 1
+    mconfig.intermediate_dim = 256
+    mconfig.n_layers = 2
+    return mconfig
+
+
+def save_test_result(
+    result: Any,
+    path: str,
+    model_family: model_api.ModelFamily,
+    dp_rank: int,
+    identifier: str,
+):
+    os.makedirs(path, exist_ok=True)
+    save_path = os.path.join(
+        path,
+        f"{identifier}-{model_family._class}-{model_family.size}-{dp_rank}.pkl",
+    )
+    import pickle
+
+    with open(save_path, "wb") as f:
+        pickle.dump(result, f)
+
+
+def check_generation_consistency(
+    path: str, model_family: model_api.ModelFamily, identifiers: List[str]
+):
+    import pickle
+
+    prefixs = {
+        identifier: os.path.join(
+            path, f"{identifier}-{model_family._class}-{model_family.size}"
+        )
+        for identifier in identifiers
+    }
+    paths = {identifier: [] for identifier in identifiers}
+    for f in os.listdir(path):
+        if not f.endswith(".pkl"):
+            continue
+        for identifier, prefix in prefixs.items():
+            if f.startswith(prefix):
+                paths[identifier].append(f)
+
+    results = {
+        identifier: pickle.load(open(path, "rb"))
+        for identifier, path in paths.items()
+    }
+    baseline_result = results[identifiers[0]]
+    for identifier, result in results.items():
+        if identifier == identifiers[0]:
+            continue
+        for i, (a, b) in enumerate(zip(baseline_result, result)):
+            assert torch.is_tensor(a) and torch.is_tensor(b)
+            assert a.shape == b.shape and a.dim() == 2
+            bs, gen_len = a.shape
+            matched_seqs = 0
+            matched_tokens = 0
+            for j in range(bs):
+                for k in range(gen_len):
+                    if a[j, k] != b[j, k]:
+                        print(
+                            f"Mismatch at batch {i}, position {k} in {j}th sequence"
+                        )
+                        break
+                    matched_tokens += 1
+                else:
+                    # print(f"Batch {i} sequence {j} check passed")
+                    matched_seqs += 1
+            print(
+                f"Batch {i} matched {matched_seqs}/{bs} sequences and {matched_tokens}/{bs*gen_len} tokens"
+            )

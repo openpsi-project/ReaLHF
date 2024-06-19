@@ -6,7 +6,6 @@ import transformers
 from realhf.api.core.model_api import (
     ReaLModelConfig,
     register_hf_family,
-    register_hf_path,
 )
 from realhf.base.constants import use_te_impl
 

@@ -457,9 +457,8 @@ else:
     LlamaRMSNorm = _LlamaRMSNorm
 
 if constants.use_te_impl():
-    from transformer_engine.pytorch.module.layernorm_mlp import (
-        LayerNormMLP as _TELayerNormMLP,
-    )
+    from transformer_engine.pytorch.module.layernorm_mlp import \
+        LayerNormMLP as _TELayerNormMLP
 
     # The same signature as LlamaLayerNormMLP
     def LlamaLayerNormMLP(
