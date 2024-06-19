@@ -691,7 +691,9 @@ def available_hostnames(
 
     return list(
         filter(
-            lambda x: realrlhf.base.cluster.node_name_is_node_type(x, node_type),
+            lambda x: realrlhf.base.cluster.node_name_is_node_type(
+                x, node_type
+            ),
             valid_hostnames,
         )
     )

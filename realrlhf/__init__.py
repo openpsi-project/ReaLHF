@@ -1,7 +1,8 @@
 # Re-import these classes for clear documentation,
 # otherwise the name will have a long prefix like
 # realrlhf.api.quickstart.model.ModelTrainEvalConfig.
-from .api.core.model_api import ReaLModelConfig
+from .api.core.dfg import MFCDef
+from .api.core.model_api import ModelInterface, ReaLModelConfig
 from .api.quickstart.dataset import (
     PairedComparisonDatasetConfig,
     PromptAnswerDatasetConfig,

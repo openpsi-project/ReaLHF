@@ -1,10 +1,10 @@
 import torch
 
 from realrlhf.api.core.dfg import (
+    MFCDef,
     ModelFamily,
     ModelInterface,
     ModelInterfaceType,
-    ModelRPC,
 )
 from realrlhf.api.core.system_api import *
 from realrlhf.api.quickstart.dataset import PromptOnlyDatasetConfig
@@ -347,7 +347,7 @@ class PPOConfig(CommonExperimentConfig):
                 output_bias=self.ppo.reward_output_bias,
             ),
         )
-        rollout = ModelRPC(
+        rollout = MFCDef(
             model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
@@ -367,7 +367,7 @@ class PPOConfig(CommonExperimentConfig):
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
-        inf_reward = ModelRPC(
+        inf_reward = MFCDef(
             model_name=ModelName("reward", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
@@ -386,7 +386,7 @@ class PPOConfig(CommonExperimentConfig):
             inf_ref_inputs.append(
                 "packed_logits_mask",
             )
-        inf_ref_logits = ModelRPC(
+        inf_ref_logits = MFCDef(
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
@@ -399,7 +399,7 @@ class PPOConfig(CommonExperimentConfig):
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
-        inf_values = ModelRPC(
+        inf_values = MFCDef(
             model_name=ModelName("critic", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
@@ -425,7 +425,7 @@ class PPOConfig(CommonExperimentConfig):
         ]
         if self.ppo.force_no_logits_mask:
             train_actor_inputs.remove("packed_logits_mask")
-        train_actor = ModelRPC(
+        train_actor = MFCDef(
             model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
@@ -439,7 +439,7 @@ class PPOConfig(CommonExperimentConfig):
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
-        train_critic = ModelRPC(
+        train_critic = MFCDef(
             model_name=ModelName("critic", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,

@@ -12,7 +12,10 @@ from realrlhf.base.cluster import spec as cluster_spec
 if TYPE_CHECKING:
     from realrlhf.api.core.config import ModelName
     from realrlhf.api.core.system_api import ModelShardID
-    from realrlhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
+    from realrlhf.base.topology import (
+        ParallelGrid,
+        PipeModelDataParallelTopology,
+    )
 
 
 class GlobalMemoryBuffer:

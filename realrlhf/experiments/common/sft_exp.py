@@ -3,10 +3,10 @@ import dataclasses
 from omegaconf import MISSING
 
 from realrlhf.api.core.dfg import (
+    MFCDef,
     ModelFamily,
     ModelInterface,
     ModelInterfaceType,
-    ModelRPC,
 )
 from realrlhf.api.core.system_api import *
 from realrlhf.api.quickstart.dataset import PromptAnswerDatasetConfig
@@ -69,7 +69,7 @@ class SFTConfig(CommonExperimentConfig):
     @property
     def rpcs(self):
         interface = ModelInterface("sft")
-        rpc = ModelRPC(
+        rpc = MFCDef(
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,

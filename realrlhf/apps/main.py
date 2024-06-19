@@ -388,7 +388,7 @@ def _main_profile_layers(model_family, model_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="distributed_llm")
+    parser = argparse.ArgumentParser(prog="ReaLRLHF")
     subparsers = parser.add_subparsers(dest="cmd", help="sub-command help")
     subparsers.required = True
 

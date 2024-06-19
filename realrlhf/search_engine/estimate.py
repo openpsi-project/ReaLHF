@@ -11,10 +11,12 @@ import pickle
 import numpy as np
 import pandas as pd
 
-from realrlhf.api.core.dfg import ModelFamily, ModelInterfaceType, ModelRPC
+from realrlhf.api.core.dfg import MFCDef, ModelFamily, ModelInterfaceType
 from realrlhf.api.core.model_api import ReaLModelConfig
 from realrlhf.api.quickstart.model import ParallelismConfig
-from realrlhf.search_engine.param_realloc import estimate_param_realloc_time_cost
+from realrlhf.search_engine.param_realloc import (
+    estimate_param_realloc_time_cost,
+)
 from realrlhf.search_engine.utils import load_model_config
 import realrlhf.base.cluster
 import realrlhf.base.constants as constants
@@ -325,7 +327,7 @@ def _estimate_rpc_time_cost(
 
 
 def estimate_rpc_time_cost(
-    rpc: ModelRPC,
+    rpc: MFCDef,
     parallel_strategy: ParallelismConfig,
     bs: int,
     seq_len: int,
@@ -389,7 +391,7 @@ def estimate_model_size(model_config: ReaLModelConfig):
 
 
 def estimate_rpc_memory_cost(
-    rpc: ModelRPC,
+    rpc: MFCDef,
     parallel_strategy: ParallelismConfig,
     batch_size: int,
     seq_len: int,

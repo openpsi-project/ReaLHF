@@ -162,7 +162,7 @@ class AsyncIOSequenceBuffer:
 
     def __init__(
         self,
-        rpcs: List[dfg.ModelRPC],
+        rpcs: List[dfg.MFCDef],
         max_size: int,
         fetch_ctl: asyncio.Queue,
         fetch_master_ctl: asyncio.Queue,
@@ -320,7 +320,7 @@ class AsyncIOSequenceBuffer:
                 pass
             self._load_data_requested = True
 
-    async def get_batch_for_rpc(self, rpc: dfg.ModelRPC) -> SequenceSample:
+    async def get_batch_for_rpc(self, rpc: dfg.MFCDef) -> SequenceSample:
         rpc_idx = self._rpc_names.index(rpc.name)
 
         def _can_do_rpc() -> bool:

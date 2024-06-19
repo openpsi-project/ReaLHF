@@ -1,3 +1,4 @@
+# Copied from https://github.com/microsoft/DeepSpeed 
 from collections import defaultdict
 from typing import Any, List, Optional, Tuple
 

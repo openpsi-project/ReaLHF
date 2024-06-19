@@ -1,12 +1,12 @@
 from typing import List
 
 from realrlhf.api.core.dfg import build_graph as build_dfg
-from realrlhf.api.core.dfg import ModelInterfaceType, ModelRPC
+from realrlhf.api.core.dfg import MFCDef, ModelInterfaceType
 from realrlhf.api.quickstart.device_mesh import (
     DeviceMesh,
     find_parallel_strategies,
 )
-from realrlhf.api.quickstart.search import ModelRPC, RPCExecution, RPCInstance
+from realrlhf.api.quickstart.search import MFCDef, RPCExecution, RPCInstance
 from realrlhf.search_engine.estimate import (
     estimate_rpc_memory_cost,
     estimate_rpc_time_cost,
@@ -16,7 +16,7 @@ MEM_INDEX = 1.0  # heuristic value to scale estimated memory
 
 
 def enumerate_rpc_executions(
-    rpc: ModelRPC,
+    rpc: MFCDef,
     device_mesh: DeviceMesh,
     seq_len: int,
     num_gen_tokens: int,
@@ -91,7 +91,7 @@ def enumerate_rpc_executions(
 
 
 def build_graph(
-    rpcs: List[ModelRPC],
+    rpcs: List[MFCDef],
     num_epoch: int = 5,
     epoch_dependency_interval: int = 1,
     if_print=False,

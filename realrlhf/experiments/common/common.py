@@ -9,8 +9,8 @@ import numpy as np
 
 from realrlhf.api.core.config import Dataset
 from realrlhf.api.core.dfg import (
+    MFCDef,
     ModelInterfaceType,
-    ModelRPC,
     OffloadHook,
     SyncParamHook,
 )
@@ -135,7 +135,7 @@ class CommonExperimentConfig(Experiment):
         )
 
     @property
-    def rpcs(self) -> Dict[str, ModelRPC]:
+    def rpcs(self) -> Dict[str, MFCDef]:
         raise NotImplementedError(
             f"rpcs is not implemented in {self.__class__}"
         )
@@ -306,7 +306,7 @@ class CommonExperimentConfig(Experiment):
         shard_counter = defaultdict(lambda: 0)
         resolve_rpc_hooks(
             rpc_allocs
-        )  # inplace modify ModelRPCs in rpc allocations
+        )  # inplace modify MFCDefs in rpc allocations
         import pprint
 
         pprint.pprint(rpc_allocs)

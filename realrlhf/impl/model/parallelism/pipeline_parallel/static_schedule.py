@@ -1,8 +1,4 @@
-# static pipeline schedule from deepspeed engine
 from abc import ABC, abstractmethod
-
-from deepspeed.runtime.utils import call_to_str
-import torch
 
 from realrlhf.impl.model.parallelism.pipeline_parallel.instruction import *
 

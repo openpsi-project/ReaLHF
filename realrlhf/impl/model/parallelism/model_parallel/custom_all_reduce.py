@@ -1,3 +1,4 @@
+# Copied from the vLLM project: https://github.com/vllm-project/vllm
 from contextlib import contextmanager
 from typing import Optional
 

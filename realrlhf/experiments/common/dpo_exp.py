@@ -1,9 +1,9 @@
 import dataclasses
 
 from realrlhf.api.core.dfg import (
+    MFCDef,
     ModelInterface,
     ModelInterfaceType,
-    ModelRPC,
     OffloadHook,
 )
 from realrlhf.api.core.system_api import *
@@ -113,7 +113,7 @@ class DPOConfig(CommonExperimentConfig):
         ref_interface = ModelInterface(
             "dpo", args=dict(beta=self.beta, enable_save=False)
         )
-        ref_inf = ModelRPC(
+        ref_inf = MFCDef(
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
@@ -128,7 +128,7 @@ class DPOConfig(CommonExperimentConfig):
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
-        dpo = ModelRPC(
+        dpo = MFCDef(
             model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,

@@ -1,3 +1,4 @@
+/* Copied from the vLLM project: https://github.com/vllm-project/vllm */
 /**
  * This is a standalone test for custom allreduce.
  * To compile, make sure you have MPI and NCCL installed in your system.

@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 
-from realrlhf.api.core.dfg import ModelRPC
+from realrlhf.api.core.dfg import MFCDef
 from realrlhf.api.quickstart.model import ParallelismConfig
 from realrlhf.base.cluster import spec as cluster_spec
 from realrlhf.base.slurm_utils import (
@@ -264,7 +264,7 @@ def find_parallel_strategies(
 
 @dataclasses.dataclass
 class RPCAllocation:
-    rpc: Union[ModelRPC, str]
+    rpc: Union[MFCDef, str]
     device_mesh: DeviceMesh
     parallel: ParallelismConfig
 

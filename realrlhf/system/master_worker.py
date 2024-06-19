@@ -301,7 +301,7 @@ class RPCCorountineControl:
 
 
 def _attach_payloads_with_hooks(
-    rpc: dfg.ModelRPC,
+    rpc: dfg.MFCDef,
     payloads: Dict[config_api.ModelShardID, request_reply_stream.Payload],
     mwids: List[int],
     msid2mwid: Dict[config_pkg.ModelShardID, int],
@@ -385,7 +385,7 @@ def _attach_payloads_with_hooks(
 
 
 async def scatter_tensor_to_mws(
-    rpc: dfg.ModelRPC,
+    rpc: dfg.MFCDef,
     stream: request_reply_stream.NameResolvingRequstClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
@@ -480,7 +480,7 @@ async def scatter_tensor_to_mws(
 
 
 async def model_rpc_request_func(
-    rpc: dfg.ModelRPC,
+    rpc: dfg.MFCDef,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     src_rpc_model_name: ModelName,
     stream: request_reply_stream.NameResolvingRequstClient,
@@ -629,7 +629,7 @@ async def model_rpc_request_func(
 
 async def model_rpc_reply_func(
     corountine_idx: int,
-    rpc: dfg.ModelRPC,
+    rpc: dfg.MFCDef,
     stream: request_reply_stream.NameResolvingRequstClient,
     buffer: AsyncIOSequenceBuffer,
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
@@ -717,7 +717,7 @@ async def model_rpc_reply_func(
 
 
 async def load_data_func(
-    src_rpc: dfg.ModelRPC,
+    src_rpc: dfg.MFCDef,
     src_rpc_dp_size: int,
     src_rpc_model_name: str,
     buffer: AsyncIOSequenceBuffer,

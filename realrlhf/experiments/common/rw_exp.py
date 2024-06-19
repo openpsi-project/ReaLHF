@@ -1,7 +1,7 @@
 from typing import List
 import dataclasses
 
-from realrlhf.api.core.dfg import ModelInterface, ModelInterfaceType, ModelRPC
+from realrlhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
 from realrlhf.api.core.system_api import *
 from realrlhf.api.quickstart.dataset import PairedComparisonDatasetConfig
 from realrlhf.api.quickstart.device_mesh import AllocationConfig
@@ -80,7 +80,7 @@ class RWConfig(CommonExperimentConfig):
     @property
     def rpcs(self):
         interface = ModelInterface("paired_rw")
-        rpc = ModelRPC(
+        rpc = MFCDef(
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
