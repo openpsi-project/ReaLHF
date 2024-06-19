@@ -4,8 +4,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/openpsi-project/ReaLHF/docs/docs/source/images/real_logo_dark.svg">
-    <img alt="ReaL" src="https://raw.githubusercontent.com/openpsi-project/ReaLHF/docs/docs/source/images/real_logo.svg" width=55%>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/source/images/real_logo_dark.svg">
+    <img alt="ReaL" src="docs/source/images/real_logo.svg" width=55%>
   </picture>
 </p>
 
