@@ -1,19 +1,21 @@
-# ***ReaL***: Efficient RLHF Training for LLMs with Parameter Reallocation
+<center> <h1>***ReaL***: Efficient RLHF Training for LLMs with Parameter Reallocation</h1> </center>
 
 ## Introduction
 
 ***ReaL*** (the abbreviation for *<ins>ReaL</ins>location*)
 is a distributed system for efficient RLHF training with LLMs.
 ReaL introduces a novel technique called *parameter reallocation*,
-which dynamically moves model parameters and changes the parallel strategies of models
+which dynamically moves model parameters among GPUs
+and changes the parallel strategies of models
 during training.
 By tailoring optimized allocations and parallelism degrees for each computation workload,
 ReaL can largely reduce the communication overhead caused by parallelization,
-while minimizing the GPU idle time.
-This can be done automatically by ReaL's customized search engine.
+meanwhile minimizing the GPU idle time.
+This is done automatically by ReaL's customized search engine.
 
 ReaL can achieve substantially higher PPO training throughput than the state-of-the-art
-open-source systems:
+open-source systems. With the increased number of GPUs, we increase the model size from
+LLaMA 7B, LLaMA 13B, CodeLLaMA 34B, to the largest LLaMA 70B.
 
 ![Throughput Comparison](docs/source/images/vws.svg)
 
