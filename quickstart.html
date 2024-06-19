@@ -1,0 +1,594 @@
+
+
+<!DOCTYPE html>
+<html class="no-js" lang="en">
+  <head>
+    <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="docsearch:name" content="ReaL" />
+    <meta name="docsearch:package_type" content="" />
+    <meta name="docsearch:release" content="0.1.0" />
+    <meta name="docsearch:version" content="" />
+    
+      <title>Quickstart &mdash; ReaL 0.1.0 documentation</title>
+    
+    <link rel="stylesheet" href="_static/bootstrap-icons.css" type="text/css" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments.css', priority=200, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=83e35b93" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/custom.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/custom.css?v=97da1bf0" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments_dark.css', priority=500, rel='stylesheet', type='text/css', media='(prefers-color-scheme: dark)', id='pygments_dark_css')" -->
+          <link id="pygments_dark_css" media="(prefers-color-scheme: dark)" rel="stylesheet" type="text/css" href="_static/pygments_dark.css?v=b20cc3f5" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/colorsets/sphinx-nefertiti-default-0.3.2.min.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/colorsets/sphinx-nefertiti-default-0.3.2.min.css" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/fonts/nunito/stylesheet.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/fonts/nunito/stylesheet.css" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/fonts/red-hat-mono/stylesheet.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/fonts/red-hat-mono/stylesheet.css" />
+        <link rel="index" title="Index" href="genindex.html" />
+        <link rel="search" title="Search" href="search.html" />
+        <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
+        <link rel="next" title="Configurations" href="expconfig.html" />
+        <link rel="prev" title="Installation" href="install.html" />
+    <style>
+      :root {
+        --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
+        --nftt-font-monospace: "Red Hat Mono", var(--nftt-font-family-monospace) !important;
+        --nftt-project-name-font: var(--nftt-body-font-family);
+        --nftt-documentation-font: var(--nftt-body-font-family);
+        --nftt-doc-headers-font: "Georgia", var(--nftt-documentation-font);}
+      h1 *, h2 *, h3 *, h4 *, h5 *, h6 * { font-size: inherit; }
+    </style>
+  </head>
+  <body>
+    <header class="navbar navbar-expand-xl navbar-dark nftt-navbar flex-column fixed-top">
+      <div class="skip-links container-fluid visually-hidden-focusable overflow-hidden justify-content-start flex-grow-1">
+        <div class="border-bottom mb-2 pb-2 w-100">
+          <a class="d-none d-md-inline-flex p-2 m-1" href="#sidebar-filter">Skip to docs navigation</a>
+          <a class="d-inline-flex p-2 m-1" href="#content">Skip to main content</a>
+        </div>
+      </div>
+      <nav class="container-xxl nftt-gutter flex-wrap flex-xl-nowrap" aria-label="Main navigation">
+        <div class="nftt-navbar-toggler">
+          <button class="navbar-toggler p-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar" aria-label="Toggle documentation navigation">
+            <i class="bi bi-list"></i>
+          </button>
+        </div>
+          <a href="index.html"
+              
+              class="navbar-brand p-0 me-0 md-lg-2"
+          ><span class="brand-text">ReaL</span></a>
+        
+        <div class="d-flex d-xl-none">
+          <button class="navbar-toggler p-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#nfttSearch" aria-controls="nfttSearch" aria-label="Search">
+            <i class="bi bi-search"></i>
+          </button>
+          <button class="navbar-toggler p-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#nfttNavbar" aria-controls="nfttNavbar" aria-label="Toggle navigation">
+            <i class="bi bi-three-dots"></i>
+          </button>
+        </div>
+        
+<div class="offcanvas-xl offcanvas-end flex-grow-1" tabindex="-1" id="nfttSearch" aria-labelledby="nfttSearchOffcanvasLabel" data-bs-scroll="true">
+  <div class="offcanvas-header px-4 pb-0">
+    <h5 class="offcanvas-title fw-bold" id="nfttSearchOffcanvasLabel">Search the documentation</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close" data-bs-target="#nfttSearch"></button>
+  </div>
+  <div class="offcanvas-body p-4 pt-0 p-xl-0 px-xl-3">
+    <hr class="d-xl-none text-white-50">
+    <ul class="navbar-nav flex-row align-items-center flex-wrap ms-md-auto">
+      <li class="nav-item col-12 col-xl-auto">
+        <form id="nftt-search-form" action="search.html" method="get">
+          <div class="input-group">
+            <input type="text" name="q" class="form-control" placeholder="Search docs" aria-label="Search" aria-describedby="button-search">
+            <input type="hidden" name="check_keywords" value="yes" />
+            <input type="hidden" name="area" value="default" />
+            <button class="btn btn-primary" type="submit" id="button-search" aria-label="Search"><i class="bi bi-search"></i></button>
+          </div>
+        </form>
+      </li>
+    </ul>
+  </div>
+</div>
+
+        <div class="offcanvas-xl offcanvas-end" tabindex="-1" id="nfttNavbar" aria-labelledby="nfttNavbarOffcanvasLabel" data-bs-scroll="true">
+          <div class="offcanvas-header px-4 pb-0">
+            <div class="offcanvas-title navbar-brand" id="nfttNavbarOffcanvasLabel"><span class="brand-text">Nefertiti for Sphinx</span></div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close" data-bs-target="#nfttNavbar"></button>
+          </div>
+          <div class="offcanvas-body p-4 pt-0 p-xl-0 px-xl-3">
+            <hr class="d-xl-none text-white-50">
+            <ul class="navbar-nav flex-row align-items-center flex-wrap ms-lg-auto">
+              
+              <!-- version_dropdown.html -->
+
+              
+              <!-- colorscheme_dropdown.html -->
+<li class="nav-item dropdown">
+  <a class="nav-link d-flex py-2 px-0 px-xl-2 dropdown-toggle align-items-center" id="snftt-luz" href="#" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false" aria-label="Toggle light/dark">
+    <i class="bi bi-circle-half" data-snftt-luz-icon-active></i>
+    <span id="snftt-luz-text" class="d-xl-none small ms-2">Toggle light/dark</span>
+  </a>
+  <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="snftt-luz-text">
+    <li>
+      <h6 class="dropdown-header">Light/dark</h6>
+    </li>
+    <li>
+      <a class="dropdown-item d-flex align-items-center" data-snftt-luz="light" href="#" aria-pressed="false">
+        <span class="small">
+          <i class="bi bi-sun" data-snftt-luz-icon="light"></i>
+        </span>
+        <span class="small ms-3">Light</span>
+        <i class="bi bi-check ms-auto"></i>
+      </a>
+    </li>
+    <li>
+      <a class="dropdown-item d-flex align-items-center" data-snftt-luz="dark" href="#" aria-pressed="false">
+        <span class="small">
+          <i class="bi bi-moon-stars" data-snftt-luz-icon="dark"></i>
+        </span>
+        <span class="small ms-3">Dark</span>
+        <i class="bi bi-check ms-auto"></i>
+      </a>
+    </li>
+    <li>
+      <a class="dropdown-item current d-flex align-items-center" data-snftt-luz="default" href="#" aria-pressed="false">
+        <span class="small">
+          <i class="bi bi-circle-half" data-snftt-luz-icon="default"></i>
+        </span>
+        <span class="small ms-3">Default</span>
+        <i class="bi bi-check ms-auto"></i>
+      </a>
+    </li>
+  </ul>
+</li>
+            </ul>
+          </div>
+        </div>
+      </nav>
+    </header>
+
+    <div class="container-fluid flex-grow-1">
+      <div class="nftt-gutter nftt-page">
+        <aside class="nftt-sidebar ">
+          <div class="nftt-sidebar-content">
+            
+            <div class="title d-none d-xl-block">
+              <i class="bi bi-book"></i>&nbsp;&nbsp;<span>Index</span>
+            </div>
+            <div id="sidebar" tabindex="-1" class="offcanvas-xl offcanvas-start" aria-labelledby="nfttSidebarOffcanvasLabel">
+                <!-- danirus sidebartemplate: "globaltoc.html" --><div class="offcanvas-header border-bottom">
+  <h5 class="offcanvas-title fw-bold" id="nfttSidebarOffcanvasLabel">
+    Table of contents
+  </h5>
+  <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close" data-bs-target="#sidebar"></button>
+</div>
+
+<div class="offcanvas-body">
+  <nav class="toc" aria-label="Main menu">
+    <div class="mb-3 p-1 pt-3 pb-4 border-bottom">
+      <input id="sidebar-filter" type="text" name="filter" class="form-control form-control-sm" placeholder="filter" aria-label="filter">
+    </div>
+    <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="intro.html">Introduction</a></li>
+<li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
+</ul>
+
+  </nav>
+  <template data-toggle-item-template>
+    <button class="btn btn-sm btn-link toctree-expand" type="button">
+      <i class="bi bi-caret-right"></i>
+      <span class="visually-hidden">Toggle menu contents</span>
+    </button>
+  </template>
+</div>
+            </div>
+            
+          </div>
+        </aside>
+        <article id="content" class="nftt-content" role="main">
+    <section id="quickstart">
+<h1>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">¶</a></h1>
+<section id="installation">
+<h2>Installation<a class="headerlink" href="#installation" title="Link to this heading">¶</a></h2>
+<p>First, clone the ReaL repository from GitHub:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLRLHF
+$<span class="w"> </span><span class="nb">cd</span><span class="w"> </span>ReaLRLHF
+</pre></div>
+</div>
+</section>
+<section id="rlhf-with-4x-llama-7b-in-30min">
+<h2>RLHF with 4x LLaMA-7B in 30min<a class="headerlink" href="#rlhf-with-4x-llama-7b-in-30min" title="Link to this heading">¶</a></h2>
+<p>If you are not familiar with the procedure of RLHF,
+please refer to the <a class="reference external" href="https://arxiv.org/abs/2203.02155">InstrctGPT paper</a>.
+This tutorial will cover the main stages of RLHF,
+including SFT, reward modeling, and PPO.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If you have not prepared a dataset for your application, you can download our
+<a class="reference external" href="https://drive.google.com/drive/folders/1xWIJ9DRLNQZxDrkCfAPE12euLLuWQGE-?usp=sharing">sample dataset</a>
+to follow this tutorial.
+The sample dataset is used for controlled sentiment generation,
+where the LLM learns to generate positive movie comments given a context.</p>
+</div>
+<section id="stage-1-supervised-fine-tuning">
+<h3>Stage 1: Supervised Fine-Tuning<a class="headerlink" href="#stage-1-supervised-fine-tuning" title="Link to this heading">¶</a></h3>
+<p>Prepare your customized dataset in a JSON or JSONL format,
+where each entry is a dictionary with two keys: “prompt” and “answer”.
+For example:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="nt">&quot;prompt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;What is the capital of France?&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;answer&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The capital of France is ...&quot;</span><span class="p">}</span>
+<span class="p">{</span><span class="nt">&quot;prompt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Please make a travel plan for visiting Berlin?&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;answer&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">}</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In our provided sample,
+<code class="docutils literal notranslate"><span class="pre">sft_pos-train.jsonl</span></code> and <code class="docutils literal notranslate"><span class="pre">sft_pos-valid.jsonl</span></code> are the training and validation sets for SFT, respectively.</p>
+</div>
+<p>Run the following command to fine-tune the model on your dataset:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realrlhf.apps.quickstart<span class="w"> </span>sft<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-sft<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>manual<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">n_nodes</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">save_freq_steps</span><span class="o">=</span><span class="m">50</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">eval_freq_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.path<span class="o">=</span>/path/or/HF-identifier/of/llama-7b<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.gradient_checkpointing<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.optimizer.type<span class="o">=</span>adam<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.train_path<span class="o">=</span>/path/to/train/dataset.jsonl<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.valid_path<span class="o">=</span>/path/to/valid/dataset.jsonl<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.max_seqlen<span class="o">=</span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>allocation.parallel.pipeline_parallel_size<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>allocation.parallel.model_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>allocation.parallel.data_parallel_size<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>allocation.parallel.use_sequence_parallel<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.train_bs_n_seqs<span class="o">=</span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.valid_bs_n_seqs<span class="o">=</span><span class="m">512</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>ReaL adopts <a class="reference external" href="https://hydra.cc/docs/tutorials/structured_config/intro/">structured configurations</a>
+in <a class="reference external" href="https://hydra.cc/">Hydra</a> to manage command line options.
+The options in the above command correspond to a Python
+dataclass object: <code class="xref py py-class docutils literal notranslate"><span class="pre">realrlhf.SFTConfig</span></code>.
+The attributes, including the model type, learning rate, and parallel strategy,
+can be recursively overwritten via command line options.
+Please check <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a> for more details.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>As a reminder, the value <cite>null</cite> should represent <cite>None</cite> in Python.</p>
+</div>
+<p>The user can specify the number of nodes and the parallel strategy to use with
+the above command, in addition to paths and hyperparameters.
+In the given example, the experiment will use 1 node (assuming each node has 8 GPUs),
+with a parallel strategy (pipe=1, tensor=2, data=4) and a batch size of 512.</p>
+<p>After the experiment has been successfully launched,
+you will see the training logs in the console like this:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">20240618-03:10:56.216 quickstart INFO: Running sft experiment.</span>
+<span class="go">20240618-03:10:56.216 quickstart INFO: Logs will be dumped to /lustre/aigc/llm/logs/fw/quickstart-sft/release</span>
+<span class="go">20240618-03:10:56.216 quickstart INFO: Model checkpoints will be saved to /lustre/aigc/llm/checkpoints/fw/quickstart-sft/release</span>
+<span class="go">...</span>
+</pre></div>
+</div>
+<p>The above output shows the log and checkpoint paths of this experiment,
+according to the given <code class="docutils literal notranslate"><span class="pre">experiment_name</span></code> and <code class="docutils literal notranslate"><span class="pre">trial_name</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>ReaL directly loads from HuggingFace models and also saves checkpoints
+as HuggingFace models, making it convenient to use pre-trained checkpoints
+and to deploy trained models with inference frameworks like vLLM.</p>
+</div>
+<img alt="_images/sft_loss.svg" class="align-center" src="_images/sft_loss.svg" /><div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">0: 20240618-13:32:19.081 master worker INFO: Execution finished!</span>
+<span class="go">0: 20240618-13:32:19.083 master worker INFO: Epoch 8/8 step 7/7 ... Total time consumption: 628.051s. ...</span>
+<span class="go">...</span>
+<span class="go">0: 20240618-13:32:34.906 master worker INFO: Execution finished!</span>
+<span class="go">0: 20240618-13:32:34.906 master worker INFO: Training complete! Yeah!!!</span>
+</pre></div>
+</div>
+<p>The SFT experiment will take about 10 minutes to finish
+using our provided dataset and configuration.
+Let’s move on to the next stage.</p>
+</section>
+<section id="stage-2-1-reward-modeling-rm">
+<h3>Stage 2.1: Reward Modeling (RM)<a class="headerlink" href="#stage-2-1-reward-modeling-rm" title="Link to this heading">¶</a></h3>
+<p>Prepare your customized dataset in a JSON or JSONL format,
+where each entry is a dictionary with three keys:
+“prompt”, “pos_answer”, and “neg_answers”.</p>
+<p>“prompt” should be a string, while “pos_answer” and “neg_answers”
+should be lists of strings of the same size, forming pairwise comparisons.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In our provided sample,
+<code class="docutils literal notranslate"><span class="pre">rm_paired-train.jsonl</span></code> and <code class="docutils literal notranslate"><span class="pre">rm_paired-valid.jsonl</span></code> are the
+training and validation sets for reward modeling, respectively.</p>
+</div>
+<p>Run the following command to train the reward model:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realrlhf.apps.quickstart<span class="w"> </span>rw<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-rw<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>manual<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">save_freq_steps</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">eval_freq_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.type.is_critic<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>allocation.parallel.pipeline_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>allocation.parallel.model_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>allocation.parallel.data_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>allocation.parallel.use_sequence_parallel<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.gradient_checkpointing<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.train_path<span class="o">=</span>/path/to/train/dataset.jsonl<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.valid_path<span class="o">=</span>/path/to/valid/dataset.jsonl<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.max_pairs_per_prompt<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.max_seqlen<span class="o">=</span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.train_bs_n_seqs<span class="o">=</span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.valid_bs_n_seqs<span class="o">=</span><span class="m">512</span>
+</pre></div>
+</div>
+<p>It’s common practice to use the SFT model to initialize the reward model.
+Therefore, we can pass the path of the saved SFT model as the <code class="docutils literal notranslate"><span class="pre">model.path</span></code> option.
+Using the pre-trained LLaMA checkpoint is also feasible, but it may not perform as well.</p>
+<p>In reward modeling, the batch size is the number of paired comparisons.
+With a batch size of 512, there will be 512 positive samples and 512 negative samples in each batch.</p>
+<img alt="_images/rw_loss.svg" class="align-center" src="_images/rw_loss.svg" /><p>Training the reward model to convergence can be very fast.
+In the given example, we can stop the training after 15 steps,
+which takes approximately 5 minutes.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">0: 20240618-13:53:00.094 master worker INFO: Epoch 1/1 step 15/26 (global step 15) finishes. ... Total time consumption: 294.393s.</span>
+</pre></div>
+</div>
+</section>
+<section id="stage-2-2-direct-preference-optimization-dpo">
+<h3>Stage 2.2: Direct Preference Optimization (DPO)<a class="headerlink" href="#stage-2-2-direct-preference-optimization-dpo" title="Link to this heading">¶</a></h3>
+<p>Besides the ordinary RLHF procedure with PPO,
+ReaL also supports the <a class="reference external" href="https://arxiv.org/abs/2305.18290">DPO algorithm</a>,
+which avoids reward modeling.</p>
+<p>The dataset for DPO is exactly the same as for reward modeling.</p>
+<p>Run the following command to train using DPO:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realrlhf.apps.quickstart<span class="w"> </span>dpo<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-dpo<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>manual<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">save_freq_steps</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor_train.parallel.pipeline_parallel_size<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor_train.parallel.model_parallel_size<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor_train.parallel.data_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor_train.parallel.use_sequence_parallel<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref_inf.parallel.pipeline_parallel_size<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref_inf.parallel.model_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref_inf.parallel.data_parallel_size<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref_inf.parallel.use_sequence_parallel<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.train_path<span class="o">=</span>/path/to/train/dataset.jsonl<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.max_pairs_per_prompt<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.max_seqlen<span class="o">=</span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.train_bs_n_seqs<span class="o">=</span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.valid_bs_n_seqs<span class="o">=</span><span class="m">512</span>
+</pre></div>
+</div>
+<p>Note that there’s a major difference between DPO and SFT/RM.
+DPO involves two different models, the <em>actor</em> and the <em>reference</em>.
+The former is the primary LLM to be trained and the latter is the frozen SFT
+model to provide KL regularizations.</p>
+<p>A training iteration of DPO is composed of two steps:</p>
+<ul class="simple">
+<li><p><em>RefInf</em>: The reference model performs a forward step to compute the log probabilities of positive and negative answers.</p></li>
+<li><p><em>ActorTrain</em>: Given the reference log probabilities, the actor model computes the DPO loss, runs the backward pass, and updates the parameters.</p></li>
+</ul>
+<p>In ReaL, these two steps can run with different parallel strategies, maximizing the efficiency of the individual workloads.
+These parallel strategies can be specified in the <code class="docutils literal notranslate"><span class="pre">ref_inf</span></code> and <code class="docutils literal notranslate"><span class="pre">actor_train</span></code> fields.
+Specifically, pipelined inference can be faster than tensor-paralleled inference due to
+the reduced communication overhead, so assigning a relatively large <code class="docutils literal notranslate"><span class="pre">pipeline_parallel_size</span></code>
+for <code class="docutils literal notranslate"><span class="pre">ref_inf</span></code> can be favorable.</p>
+<p>Moreover, ReaL can automatically <em>offload</em> the parameters of the reference model once <em>RefInf</em> is done.
+This offloading fully supports 3D parallelism and does not require DeepSpeed ZeRO-3 or any additional configurations.
+Consequently, <strong>ReaL’s DPO is as memory-efficient as training a single model like SFT!</strong></p>
+</section>
+<section id="stage-3-ppo">
+<h3>Stage 3: PPO<a class="headerlink" href="#stage-3-ppo" title="Link to this heading">¶</a></h3>
+<p>After the SFT and RM stages, we can proceed to the PPO stage.
+The dataset for PPO should be a JSON or JSONL file with each entry being a dictionary with a single key “prompt”.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In our provided sample,
+<code class="docutils literal notranslate"><span class="pre">ppo_prompt.jsonl</span></code> is the training set for PPO.</p>
+</div>
+<p>Run the following command to train using PPO:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realrlhf.apps.quickstart<span class="w"> </span>ppo<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-ppo<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>heuristic<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="nv">save_freq_steps</span><span class="o">=</span>null<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>actor.gradient_checkpointing<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>critic.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>critic.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>critic.type.is_critic<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>critic.path<span class="o">=</span>/saved/rw/model/path<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>critic.gradient_checkpointing<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ref.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rew.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rew.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rew.type.is_critic<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>rew.path<span class="o">=</span>/saved/rw/model/path<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.path<span class="o">=</span>/path/to/prompt/dataset.jsonl<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.max_prompt_len<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>dataset.train_bs_n_seqs<span class="o">=</span><span class="m">128</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.max_new_tokens<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.min_new_tokens<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.ppo_n_minibatches<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.kl_ctl<span class="o">=</span><span class="m">0</span>.1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.force_no_logits_mask<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.value_eps_clip<span class="o">=</span><span class="m">0</span>.2<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.reward_output_scaling<span class="o">=</span><span class="m">10</span>.0<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.adv_norm<span class="o">=</span>True<span class="w"> </span>ppo.value_norm<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.top_p<span class="o">=</span><span class="m">0</span>.9<span class="w"> </span>ppo.top_k<span class="o">=</span><span class="m">1000</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>You can also pass in the trained DPO checkpoint to initialize the PPO policy.</p>
+</div>
+<p>The configuration options of PPO are the most complex among the three stages.
+PPO involves four different models: <em>Actor</em>, <em>Critic</em>, <em>Reference</em>, and <em>Reward</em>.
+Each model can have different functionalities across a training iteration.
+For example, the <em>Actor</em> should first <em>generate</em> responses given prompts and then
+be <em>trained</em> given rewards, values, and KL regularizations.</p>
+<p>Training iterations of PPO can be illustrated as follows:</p>
+<img alt="Dataflow graph of RLHF." class="align-center" src="_images/rlhf_dfg.svg" /><p>We can see that there are six distinct <em>function calls</em> on these four models.
+In ReaL, these function calls can have independent <em>allocations</em> and <em>parallel strategies</em>.
+Each GPU can accommodate parameter shards of multiple models (e.g., both the Actor and the Reward).
+Between two function calls upon the same model, ReaL will automatically re-allocate
+model parameters between source and destination locations and properly remap
+parallel strategies.
+.. The reallocation also includes GPU-to-CPU reallocation, referred to as <em>offloading</em>.
+This technique can substantially reduce communication overhead caused by parallelization
+and improve GPU utilization.
+Please check <a class="reference internal" href="intro.html"><span class="doc">Introduction</span></a> for more details.</p>
+<p>In the above command, fields <code class="docutils literal notranslate"><span class="pre">actor</span></code>, <code class="docutils literal notranslate"><span class="pre">critic</span></code>, <code class="docutils literal notranslate"><span class="pre">ref</span></code>, and <code class="docutils literal notranslate"><span class="pre">rew</span></code>
+specify the configurations of the four models.
+The allocations and parallel strategies for function calls are automatically
+handled by the <code class="docutils literal notranslate"><span class="pre">heuristic</span></code> allocation mode.
+This is a near-optimal execution strategy found by the search engine in ReaL.</p>
+<p>For the details of PPO hyperparameters in the <code class="docutils literal notranslate"><span class="pre">ppo</span></code> field, please check
+<code class="xref py py-class docutils literal notranslate"><span class="pre">realrlhf.PPOHyperparameters</span></code> for a detailed explanation.</p>
+<img alt="_images/ppo_rwd.svg" class="align-center" src="_images/ppo_rwd.svg" /><div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">0: 20240618-14:46:38.007 master worker INFO: Epoch 1/1 step 39/39 (global step 39) finishes. ... Total time consumption: 574.312s. ...</span>
+<span class="go">...</span>
+<span class="go">0: 20240618-14:46:54.387 master worker INFO: Execution finished!</span>
+<span class="go">0: 20240618-14:46:54.387 master worker INFO: Training complete! Yeah!!!</span>
+</pre></div>
+</div>
+<p>We train PPO on 5000 prompts over 1 epoch, which consumes about 10 minutes.
+Summing up the time of the three stages, we can finish the RLHF process <strong>within half an hour!</strong>
+This efficiency can largely help algorithm developers to search for the best hyperparameters
+and iterate on the algorithm design.</p>
+</section>
+</section>
+</section>
+
+</article>
+        <aside class="nftt-toc">
+          
+          <div class="mt-3 mb-1 my-lg-0 ps-xl-3 text-muted">
+            <button class="btn btn-link link-dark p-lg-0 mb-2 mb-lg-0 text-decoration-none nftt-toc-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#tocContents" aria-expanded="false" aria-controls="tocContents"
+            >On this page <i class="ms-2 bi bi-chevron-expand"></i></button>
+            <div class="title d-none d-lg-block">
+              <i class="bi bi-file-earmark-text"></i>&nbsp;&nbsp;<span class="small">On this page</span>
+            </div>
+            <div class="collapse nftt-toc-collapse" id="tocContents">
+              <nav id="TableOfContents">
+                <ul>
+<li><a class="reference internal" href="#">Quickstart</a><ul>
+<li><a class="reference internal" href="#installation">Installation</a></li>
+<li><a class="reference internal" href="#rlhf-with-4x-llama-7b-in-30min">RLHF with 4x LLaMA-7B in 30min</a><ul>
+<li><a class="reference internal" href="#stage-1-supervised-fine-tuning">Stage 1: Supervised Fine-Tuning</a></li>
+<li><a class="reference internal" href="#stage-2-1-reward-modeling-rm">Stage 2.1: Reward Modeling (RM)</a></li>
+<li><a class="reference internal" href="#stage-2-2-direct-preference-optimization-dpo">Stage 2.2: Direct Preference Optimization (DPO)</a></li>
+<li><a class="reference internal" href="#stage-3-ppo">Stage 3: PPO</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+              </nav>
+            </div>
+          </div>
+          
+        </aside>
+      </div>
+    </div>
+
+    <footer class="nftt-footer">
+      <nav id="paginator" class="py-4" aria-label="Documentation navigation">
+    <div class="container">
+      <ul class="pagination justify-content-between mb-0"><li class="page-item">
+            <a href="install.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Installation">
+              <span class="prev-page"><i class="bi bi-caret-left"></i></span>
+              <div class="d-flex flex-column">
+                <span class="text-small text-start text-muted">Previous</span>
+                <span class="underline">Installation</span>
+              </div>
+            </a>
+          </li>
+        <li class="page-item ms-auto">
+            <a href="expconfig.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Configurations">
+              <div class="d-flex flex-column">
+                <span class="text-small text-end text-start text-muted">Next</span>
+                <span class="underline">Configurations</span>
+              </div>
+              <span class="next-page"><i class="bi bi-caret-right"></i></span>
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </nav>
+
+      <div class="py-5 px-4 px-md-3">
+  <div class="container">
+    
+
+    <div class="row">
+      <div class="col-lg-12 text-center">
+        <a class="brand-text d-inline-flex align-items-center mb-2 text-decoration-none" href="/" aria-label="Nefertiti-for-Sphinx">
+          <span class="fs-6 fw-bold">ReaL</span>
+        </a>
+        
+          <ul class="list-unstyled small text-muted">
+            <li>2024, Wei Fu & Zhiyu Mei</li>
+          </ul>
+        
+        
+        <div class="built-with pt-2">
+          Built with <a href="http://sphinx-doc.org">Sphinx 7.3.7</a> and <a href="https://github.com/danirus/sphinx-nefertiti">Nefertiti 0.3.2</a>
+        </div>
+        
+      </div>
+    </div>
+  </div>
+</div>
+    </footer>
+    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+
+    <script type="text/javascript" src="_static/sphinx-nefertiti-0.3.2.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap.bundle-0.3.2.min.js"></script>
+    
+    <script type="text/javascript" src="_static/doc_versions.js"></script>
+  </body>
+</html>

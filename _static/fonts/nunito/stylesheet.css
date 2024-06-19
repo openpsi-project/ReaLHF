@@ -1,0 +1,28 @@
+/* Variable font: Nunito.
+ * Fallback to static font files in case the
+ * browser doesn't support variable fonts.
+ */
+
+ @supports (font-variation-settings: normal) {
+  @font-face {
+    font-family: 'Nunito';
+    src: url('Nunito-VariableFont_wght.ttf') format("woff2-variations"),
+         url('Nunito-VariableFont_wght.ttf') format("woff2");
+    font-weight: 400 700;
+  }
+}
+
+@supports not (font-variation-settings: normal) {
+  @font-face {
+    font-family: 'Nunito';
+    src: url('Nunito-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: 'Nunito';
+    src: url('Nunito-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+  }
+}
