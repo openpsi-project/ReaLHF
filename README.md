@@ -1,4 +1,4 @@
-<center> <h1>***ReaL***: Efficient RLHF Training for LLMs with Parameter Reallocation</h1> </center>
+***ReaL***: Efficient RLHF Training for LLMs with Parameter Reallocation
 
 ## Introduction
 
