@@ -1,4 +1,20 @@
-***ReaL***: Efficient RLHF Training for LLMs with Parameter Reallocation
+<h1 align="center">
+<em>ReaL</em>: Efficient RLHF Training for LLMs <br>with Parameter Reallocation
+</h1>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/openpsi-project/ReaLHF/docs/docs/source/images/real_logo_dark.svg">
+    <img alt="ReaL" src="https://raw.githubusercontent.com/openpsi-project/ReaLHF/docs/docs/source/images/real_logo.svg" width=55%>
+  </picture>
+</p>
+
+<p align="center">
+| <a href="https://openpsi-project.github.io/ReaLRLHF/"><b>Documentation</b></a> | <a href="https://openpsi-project.github.io/ReaLRLHF/"><b>Paper</b></a> |
+
+</p>
+
+---
 
 ## Introduction
 
@@ -14,8 +30,11 @@ meanwhile minimizing the GPU idle time.
 This is done automatically by ReaL's customized search engine.
 
 ReaL can achieve substantially higher PPO training throughput than the state-of-the-art
-open-source systems. With the increased number of GPUs, we increase the model size from
-LLaMA 7B, LLaMA 13B, CodeLLaMA 34B, to the largest LLaMA 70B.
+open-source systems.
+
+(In the following figure, with the increased number of GPUs,
+we increase the model size from
+LLaMA 7B, LLaMA 13B, CodeLLaMA 34B, to the largest LLaMA 70B.)
 
 ![Throughput Comparison](docs/source/images/vws.svg)
 
@@ -29,8 +48,14 @@ Please check our documentation site.
 
 [Documentation](https://openpsi-project.github.io/ReaLRLHF/)
 
-
 ## Acknowledgement
+
+Apart from the authors of our paper,
+we thank Shusheng Xu and Jiaxuan Gao from Tsinghua University,
+Weilin Liu, Wenjie Ye, and Chuyi He from OpenPsi Inc
+for thoroughly testing and using ReaL in their research, 
+and for providing valuable suggestions 
+that have greatly improved the system during this process.
 
 ## Citation
 
