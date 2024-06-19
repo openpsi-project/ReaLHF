@@ -20,7 +20,6 @@ einops
 hydra-core
 matplotlib
 numba
-numpy
 omegaconf
 packaging
 pandas
