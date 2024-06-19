@@ -6,14 +6,14 @@ import colorama
 import torch
 import transformers
 
-from realrlhf.api.core import config as config_api
-from realrlhf.api.core import dfg, model_api, system_api
-from realrlhf.api.core.system_api import ExperimentConfig
-from realrlhf.api.quickstart.entrypoint import register_quickstart_exp
-from realrlhf.apps.quickstart import main
-from realrlhf.base import logging
-from realrlhf.base.namedarray import NamedArray
-from realrlhf.experiments.common.ppo_exp import PPOConfig
+from realhf.api.core import config as config_api
+from realhf.api.core import dfg, model_api, system_api
+from realhf.api.core.system_api import ExperimentConfig
+from realhf.api.quickstart.entrypoint import register_quickstart_exp
+from realhf.apps.quickstart import main
+from realhf.base import logging
+from realhf.base.namedarray import NamedArray
+from realhf.experiments.common.ppo_exp import PPOConfig
 
 logger = logging.getLogger("Sentiment PPO example")
 

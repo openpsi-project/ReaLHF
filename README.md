@@ -1,83 +1,75 @@
-# A Distributed System for LLM RLHF
 
-## Installation
 
-Under the git repository, run:
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/source/images/real_logo_dark.svg">
+    <img alt="ReaL" src="docs/source/images/real_logo.svg" width="55%">
+  </picture>
+</p>
+
+<p align="center">
+| <a href="https://openpsi-project.github.io/ReaLHF/"><b>Documentation</b></a> | <a href="https://openpsi-project.github.io/ReaLHF/"><b>Paper</b></a> |
+</p>
+
+<h1 align="center">
+<em>ReaL</em>: Efficient RLHF Training for LLMs <br>with Parameter Reallocation
+</h1>
+
+***ReaL*** (short for *<ins>ReaL</ins>location*) is a distributed system designed for efficient RLHF training with LLMs.
+
+ReaL introduces a novel approach called *parameter reallocation*, which dynamically redistributes LLM parameters across the cluster and adapts parallelization strategies during training. By optimizing allocations and parallelism for each computation workload, ReaL minimizes redundant communication while maximizing GPU utilization.
+
+ReaL achieves significantly higher PPO training throughput compared to state-of-the-art open-source systems.
+
+(In the following figure, as the number of GPUs increases, the model size scales up from LLaMA 7B, LLaMA 13B, and CodeLLaMA 34B, to the largest LLaMA 70B.)
+
+![Throughput Comparison](docs/source/images/vws.svg)
+
+## Highlights
+
+### Efficiency
+
+- Achieves state-of-the-art training throughput for RLHF using **parameter reallocation**.
+- Supports large-scale training with 3D parallelism, ZeRO optimization, and sequence parallelism.
+- Enables memory-efficient training with parameter and optimizer offloading.
+
+### Ease of Use
+
+- Seamlessly integrates with HuggingFace checkpoints and inference frameworks like vLLM.
+- Allows launching local or distributed experiments with a single command.
+
+Check out our [tutorial](https://openpsi-project.github.io/ReaLHF/quickstart.html) to reproduce the full RLHF procedure (SFT/RW/PPO) with 4×LLaMA-7B in just **30 minutes**.
+
+### Flexibility
+
+- Offers versatile configuration customization with Hydra structured config.
+- Supports many commonly used RLHF algorithms, including DPO, PPO, RAFT, and more.
+- Allows the addition of custom algorithms with fewer than 100 lines of code.
+
+Refer to our [customization guide](https://openpsi-project.github.io/ReaLHF/customization.html) for hands-on examples.
+
+## Getting Started
+
+We provide pre-built [Docker images](https://openpsi-project.github.io/ReaLHF/install.html#docker-images) and [PyPI packages](https://openpsi-project.github.io/ReaLHF/install.html#install-from-pypi-or-source).
 
 ```bash
-python3 -m build -n
+pip3 install realhf --no-build-isolation
 ```
 
-## Quickstart
+For detailed information, please visit our [documentation site](https://openpsi-project.github.io/ReaLHF/).\
 
-The following command is used to run an SFT experiment:
+- [Quickstart](https://openpsi-project.github.io/ReaLHF/quickstart.html)
 
-```python
-python3 -m apps.quickstart sft experiment_name=my-cool-experiment trial_name=dp-pp-20231207 \
-    model.type=llama \
-    model.path=/lustre/public/pretrained_model_weights/testOnly/llama-2-4l_4pp_3s/ \
-    model.parallel.pipeline_parallel_size=4 \
-    model.parallel.data_parallel_size=2 \
-    model.gradient_checkpointing=False \
-    save_freq=10 \
-    eval_freq=1 \
-    optimizer.lr=2e-5 \
-    dataset.max_seqlen=2048 \
-    dataset.train_tokens_per_batch=65536 \
-    dataset.valid_tokens_per_batch=65536
-```
+- [Experiment Configurations](https://openpsi-project.github.io/ReaLHF/expconfig.html)
 
-We use [hydra](https://hydra.cc/) for CLI hyper-parameter configuration. Please check, e.g., the `SFTConfig` class for available CLI configurations.
-Note that the configuration is [structured](https://hydra.cc/docs/tutorials/structured_config/intro/) and nested options can be configured with recursive dot-field access, as shown in the above example.
-As a kind reminder, the passed-in value can be `null` to represent `None` in python.
+- [Code Architecture](https://openpsi-project.github.io/ReaLHF/arch.html)
 
-Supported experiment types of quickstart include `sft` (Supervised Fine-tuning), `rw` (Reward Modeling), `ppo` (Proximal Policy Optimization), and `dpo` (Direct Preference Optimization).
-They have separate CLI configurations. Please check `apps/quickstart.py` for detailed information.
+- [Contributing](https://openpsi-project.github.io/ReaLHF/contributing.html)
 
-To enable pipeline parallelism, you need to first partition weights of the (HuggingFace) base model with `scripts/transform_to_pipe_ckpt.py`:
+## Acknowledgement
 
-```python
-python3 -m scripts.transform_to_pipe_ckpt --model_dir /lustre/public/pretrained_model_weights/Llama-2-13b-hf/ \
-                                          --model_type llama --num_stages 4 \
-                                          --output_dir /lustre/public/pretrained_model_weights/Llama-2-13b-hf_pp4/
-```
+We would like to thank the authors of our paper and the following individuals for their contributions: Shusheng Xu and Jiaxuan Gao from Tsinghua University, and Weilin Liu, Wenjie Ye, and Chuyi He from OpenPsi Inc, for thoroughly testing and using ReaL in their research, and for providing valuable suggestions that greatly improved the system.
 
-Then, pass the `output_dir` to `model.path` in quickstart command and set `model.parallel.pipeline_parallel_size` to be the number of stages you partitioned.
-Run the command and take off!
+## Citation
 
-Quickstart realrlhf.experiments will run slurm jobs by default. When slurm is not available, it will launch subprocesses locally (e.g. in a `srun` bash container).
-
-The scheduling configuration is not changable in quickstart realrlhf.experiments. Users cannot specify nodelist/exclude and the number of GPUs used by each model.
-Please consider launching customized realrlhf.experiments if you must do so.
-
-## Launch Customized Experiments
-
-We provide another way to launch customized realrlhf.experiments via `python3 -m apps.main start` for advanced users and developers.
-An example is the system benchmark [here](https://github.com/garrett4wade/distributed_llm/blob/main/experiments/benchmark/system/rlhf_benchmark.py#L182), which can be launched via
-
-```python
-python3 -m apps.main start -e sysb-llama-7b -f test20231207 --mode slurm
-```
-
-where `-f` specifies a trial name to distinguish different runs of the same experiment name.
-
-Experiments are basically the composition of model, dataset, parallelism, and scheduling configurations. We implement each experiment configuration as a `Experiment` class.
-These classes are registered via `register_experiment` and registered ones can be launched by `python3 -m apps.main start -e ${registered_exp_name}`.
-Quickstart also internally launches registered realrlhf.experiments, but these realrlhf.experiments are dynamically registered and configurable via the command line.
-
-`experiment_name` and the registered class have static one-to-one relationship. In other words,
-it sets an alias for a special combination of dataset, model, and hyper-parameters, which is especially useful when we need to freeze hyper-parameters for the sake of reproducibility,
-e.g. algorithm and system benchmarks.
-
-## Contributing
-
-Before reading the code, keep in mind that:
-1. Everything in [api/config.py](api/config.py) are configurations. They are used to configurate the `Experiment` class.
-2. Other classes in [api directory](api/) are abstract methods. They represent necessary components for the system to run.
-3. Classes in [api/config.py](api/config.py) and other scripts in [api directory](api/) may have same class names. 
-
-To run the code, see `docs/user_guide/00_quickstart.md`.
-
-To understand difference between `model`, `model backend` and `model interface`, read [this doc](docs/user_guide/02_model.md).
-
-If you want to contribute to the codebase (e.g., new datasets/models/algorithms), please open an MR and @fuwei for code review.
+If you find our system useful for your research or production, please cite our paper.
