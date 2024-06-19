@@ -2,7 +2,7 @@
 
 ## Introduction
 
-***ReaL*** (the abbreviation for *<u>ReaL</u>location*)
+***ReaL*** (the abbreviation for *<ins>ReaL</ins>location*)
 is a distributed system for efficient RLHF training with LLMs.
 ReaL introduces a novel technique called *parameter reallocation*,
 which dynamically moves model parameters and changes the parallel strategies of models
