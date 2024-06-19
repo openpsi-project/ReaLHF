@@ -6,14 +6,10 @@
 Welcome to ReaL's documentation!
 ====================================
 
-   **ReaL is a highly efficient system
-   for LLM RLHF training.**
-
-
-Highlights
+Highlights of ReaL
 -----------
 
-**Efficient at all scales**
+**Super-Efficient**
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ReaL introduces a novel *parameter reallocation* technique. It dynamically shifts parameters and 
