@@ -1,5 +1,5 @@
 LLAMA_PATH=/lustre/public/pretrained_model_weights/Llama-2-7b-hf
-CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realrlhf.apps.quickstart sft \
+CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quickstart sft \
     experiment_name=quickstart-sft trial_name=release \
     allocation_mode=manual \
     total_train_epochs=8 \
