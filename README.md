@@ -14,9 +14,9 @@
 
 ---
 
-<h3 align="center">
+<h2 align="center">
 <em>ReaL</em>: Efficient RLHF Training for LLMs <br>with Parameter Reallocation
-</h3>
+</h2>
 
 ***ReaL*** (the abbreviation for *<ins>ReaL</ins>location*)
 is a distributed system for efficient RLHF training with LLMs.
