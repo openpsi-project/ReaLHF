@@ -9,6 +9,8 @@ jobs:
       contents: write
     steps:
     - uses: actions/checkout@v4
+    - name: Update PyPI
+      run: pip install -U pip
     - name: Build HTML
       uses: ammaraskar/sphinx-action@master
     - name: Upload artifacts
