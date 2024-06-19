@@ -25,7 +25,7 @@ inside the used docker images and when launching the experiment. For example,
 
 .. code-block:: console
 
-    CLUSTER_SPEC_PATH=/tmp/my-cluster.json python3 -m realrlhf.apps.quickstart ppo ...
+    CLUSTER_SPEC_PATH=/tmp/my-cluster.json python3 -m realhf.apps.quickstart ppo ...
 
 You also need to add an additional layer in the docker images like the following:
 

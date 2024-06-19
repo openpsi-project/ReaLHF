@@ -1,6 +1,6 @@
 SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep15globalstep15/
-CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realrlhf.apps.quickstart ppo \
+CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quickstart ppo \
     experiment_name=quickstart-ppo trial_name=release \
     n_nodes=1 \
     total_train_epochs=1 \

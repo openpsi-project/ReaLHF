@@ -19,9 +19,9 @@ To pull the images, run:
 .. warning::
 
    when using these docker images locally, the user should mount the user code directory
-   to path ``/realrlhf`` in the container. This is because the image shifts an editable
-   installation at ``/realrlhf``. When the user code overwrites this path, the change of user
-   code will take effect without re-installing this ``realrlhf`` PyPI package.
+   to path ``/realhf`` in the container. This is because the image shifts an editable
+   installation at ``/realhf``. When the user code overwrites this path, the change of user
+   code will take effect without re-installing this ``realhf`` PyPI package.
 
    It's also okay to mount to another location and re-install the package in the container.
 
@@ -42,7 +42,7 @@ Install from PyPI:
 
 .. code-block:: console
 
-   $ pip install realrlhf --no-build-isolation
+   $ pip install realhf --no-build-isolation
 
 .. note::
 
@@ -53,8 +53,8 @@ Install from source:
 
 .. code-block:: console
 
-   $ $ git clone https://github.com/openpsi-project/ReaLRLHF
-   $ cd ReaLRLHF
+   $ $ git clone https://github.com/openpsi-project/ReaLHF
+   $ cd ReaLHF
    $ pip install -e . --no-build-isolation
 
 .. note::
