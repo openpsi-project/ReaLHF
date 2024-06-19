@@ -8,8 +8,8 @@ First, clone the ReaL repository from GitHub:
 
 .. code-block:: shell
 
-    $ git clone https://github.com/openpsi-project/ReaLRLHF
-    $ cd ReaLRLHF
+    $ git clone https://github.com/openpsi-project/ReaLHF
+    $ cd ReaLHF
 
 RLHF with 4x LLaMA-7B in 30min
 ------------------------------------------------
@@ -48,7 +48,7 @@ Run the following command to fine-tune the model on your dataset:
 
 .. code-block:: shell
 
-    $ python3 -m realrlhf.apps.quickstart sft \
+    $ python3 -m realhf.apps.quickstart sft \
         experiment_name=quickstart-sft \
         trial_name=release \
         allocation_mode=manual \
@@ -78,7 +78,7 @@ Run the following command to fine-tune the model on your dataset:
     ReaL adopts `structured configurations <https://hydra.cc/docs/tutorials/structured_config/intro/>`_
     in `Hydra <https://hydra.cc/>`_ to manage command line options.
     The options in the above command correspond to a Python
-    dataclass object: :class:`realrlhf.SFTConfig`.
+    dataclass object: :class:`realhf.SFTConfig`.
     The attributes, including the model type, learning rate, and parallel strategy,
     can be recursively overwritten via command line options.
     Please check :doc:`expconfig` for more details.
@@ -146,7 +146,7 @@ Run the following command to train the reward model:
 
 .. code-block:: shell
 
-    $ python3 -m realrlhf.apps.quickstart rw \
+    $ python3 -m realhf.apps.quickstart rw \
         experiment_name=quickstart-rw \
         trial_name=release \
         mode=local \
@@ -201,7 +201,7 @@ Run the following command to train using DPO:
 
 .. code-block:: shell
 
-    $ python3 -m realrlhf.apps.quickstart dpo \
+    $ python3 -m realhf.apps.quickstart dpo \
         experiment_name=quickstart-dpo \
         trial_name=release \
         allocation_mode=manual \
@@ -266,7 +266,7 @@ Run the following command to train using PPO:
 
 .. code-block:: shell
 
-    $ python3 -m realrlhf.apps.quickstart ppo \
+    $ python3 -m realhf.apps.quickstart ppo \
         experiment_name=quickstart-ppo \
         trial_name=release \
         total_train_epochs=1 \
@@ -337,7 +337,7 @@ handled by the ``heuristic`` allocation mode.
 This is a near-optimal execution strategy found by the search engine in ReaL.
 
 For the details of PPO hyperparameters in the ``ppo`` field, please check
-:class:`realrlhf.PPOHyperparameters` for a detailed explanation.
+:class:`realhf.PPOHyperparameters` for a detailed explanation.
 
 .. image:: images/ppo_rwd.svg
     :align: center

@@ -210,9 +210,9 @@ The Dockerfile has been provided in the repository as well.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>when using these docker images locally, the user should mount the user code directory
-to path <code class="docutils literal notranslate"><span class="pre">/realrlhf</span></code> in the container. This is because the image shifts an editable
-installation at <code class="docutils literal notranslate"><span class="pre">/realrlhf</span></code>. When the user code overwrites this path, the change of user
-code will take effect without re-installing this <code class="docutils literal notranslate"><span class="pre">realrlhf</span></code> PyPI package.</p>
+to path <code class="docutils literal notranslate"><span class="pre">/realhf</span></code> in the container. This is because the image shifts an editable
+installation at <code class="docutils literal notranslate"><span class="pre">/realhf</span></code>. When the user code overwrites this path, the change of user
+code will take effect without re-installing this <code class="docutils literal notranslate"><span class="pre">realhf</span></code> PyPI package.</p>
 <p>It’s also okay to mount to another location and re-install the package in the container.</p>
 </div>
 <p>To build the images from scratch, run:</p>
@@ -226,7 +226,7 @@ code will take effect without re-installing this <code class="docutils literal n
 <p>If you don’t want to use docker, you can also install ReaL from PyPI
 or from source.</p>
 <p>Install from PyPI:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>realrlhf<span class="w"> </span>--no-build-isolation
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>realhf<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
 <div class="admonition note">
@@ -235,8 +235,8 @@ or from source.</p>
 source code to launch experiments.</p>
 </div>
 <p>Install from source:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLRLHF
-<span class="gp">$ </span><span class="nb">cd</span><span class="w"> </span>ReaLRLHF
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
+<span class="gp">$ </span><span class="nb">cd</span><span class="w"> </span>ReaLHF
 <span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>

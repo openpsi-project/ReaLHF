@@ -199,8 +199,8 @@
 <section id="installation">
 <h2>Installation<a class="headerlink" href="#installation" title="Link to this heading">¶</a></h2>
 <p>First, clone the ReaL repository from GitHub:</p>
-<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLRLHF
-$<span class="w"> </span><span class="nb">cd</span><span class="w"> </span>ReaLRLHF
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
+$<span class="w"> </span><span class="nb">cd</span><span class="w"> </span>ReaLHF
 </pre></div>
 </div>
 </section>
@@ -233,7 +233,7 @@ For example:</p>
 <code class="docutils literal notranslate"><span class="pre">sft_pos-train.jsonl</span></code> and <code class="docutils literal notranslate"><span class="pre">sft_pos-valid.jsonl</span></code> are the training and validation sets for SFT, respectively.</p>
 </div>
 <p>Run the following command to fine-tune the model on your dataset:</p>
-<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realrlhf.apps.quickstart<span class="w"> </span>sft<span class="w"> </span><span class="se">\</span>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>sft<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-sft<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>manual<span class="w"> </span><span class="se">\</span>
@@ -264,7 +264,7 @@ For example:</p>
 <p>ReaL adopts <a class="reference external" href="https://hydra.cc/docs/tutorials/structured_config/intro/">structured configurations</a>
 in <a class="reference external" href="https://hydra.cc/">Hydra</a> to manage command line options.
 The options in the above command correspond to a Python
-dataclass object: <code class="xref py py-class docutils literal notranslate"><span class="pre">realrlhf.SFTConfig</span></code>.
+dataclass object: <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code>.
 The attributes, including the model type, learning rate, and parallel strategy,
 can be recursively overwritten via command line options.
 Please check <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a> for more details.</p>
@@ -318,7 +318,7 @@ should be lists of strings of the same size, forming pairwise comparisons.</p>
 training and validation sets for reward modeling, respectively.</p>
 </div>
 <p>Run the following command to train the reward model:</p>
-<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realrlhf.apps.quickstart<span class="w"> </span>rw<span class="w"> </span><span class="se">\</span>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>rw<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-rw<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
@@ -362,7 +362,7 @@ ReaL also supports the <a class="reference external" href="https://arxiv.org/abs
 which avoids reward modeling.</p>
 <p>The dataset for DPO is exactly the same as for reward modeling.</p>
 <p>Run the following command to train using DPO:</p>
-<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realrlhf.apps.quickstart<span class="w"> </span>dpo<span class="w"> </span><span class="se">\</span>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>dpo<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-dpo<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>manual<span class="w"> </span><span class="se">\</span>
@@ -420,7 +420,7 @@ The dataset for PPO should be a JSON or JSONL file with each entry being a dicti
 <code class="docutils literal notranslate"><span class="pre">ppo_prompt.jsonl</span></code> is the training set for PPO.</p>
 </div>
 <p>Run the following command to train using PPO:</p>
-<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realrlhf.apps.quickstart<span class="w"> </span>ppo<span class="w"> </span><span class="se">\</span>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>ppo<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-ppo<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
@@ -484,7 +484,7 @@ The allocations and parallel strategies for function calls are automatically
 handled by the <code class="docutils literal notranslate"><span class="pre">heuristic</span></code> allocation mode.
 This is a near-optimal execution strategy found by the search engine in ReaL.</p>
 <p>For the details of PPO hyperparameters in the <code class="docutils literal notranslate"><span class="pre">ppo</span></code> field, please check
-<code class="xref py py-class docutils literal notranslate"><span class="pre">realrlhf.PPOHyperparameters</span></code> for a detailed explanation.</p>
+<code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PPOHyperparameters</span></code> for a detailed explanation.</p>
 <img alt="_images/ppo_rwd.svg" class="align-center" src="_images/ppo_rwd.svg" /><div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">0: 20240618-14:46:38.007 master worker INFO: Epoch 1/1 step 39/39 (global step 39) finishes. ... Total time consumption: 574.312s. ...</span>
 <span class="go">...</span>
 <span class="go">0: 20240618-14:46:54.387 master worker INFO: Execution finished!</span>
