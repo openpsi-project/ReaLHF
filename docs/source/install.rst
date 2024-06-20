@@ -46,16 +46,17 @@ First, clone the repository and install all dependencies:
 
 .. code-block:: console
 
+   $ pip install -U pip
    $ git clone https://github.com/openpsi-project/ReaLHF
    $ cd ReaLHF
    $ python3 -m pip install -r requirements.txt
 
-On a GPU machine, also install the requirement CUDA runtime packages:
+On a GPU machine, also install the required runtime packages:
 
 .. code-block:: console
 
-   $ python3 -m pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.7 --no-deps
-   $ python3 -m pip install flash_attn --no-build-isolation
+   $ MAX_JOBS=8 python3 -m pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.4 --no-deps --no-build-isolation
+   $ MAX_JOBS=8 python3 -m pip install flash_attn==2.4.2 --no-build-isolation
 
 Install ReaLHF from PyPI:
 
