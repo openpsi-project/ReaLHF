@@ -1,6 +1,9 @@
 sphinx-nefertiti
 sphinx
 build>=1.2.1
+wheel>=0.43.0
+distro-info>=1.0
+python-debian>=0.1.49
 huggingface_hub
 datasets
 accelerate
