@@ -30,7 +30,12 @@ remember to rerun the editable installation command after mounting:
 
 .. code-block:: console
 
-   $ pip install -e /your/mounted/code/path --no-build-isolation
+   $ REAL_CUDA=1 pip install -e /your/mounted/code/path --no-build-isolation
+
+
+.. note::
+
+   The ``REAL_CUDA`` environment variable is used to install the CUDA extension.
 
 
 Install From PyPI or Source
@@ -40,7 +45,11 @@ If you prefer not to use Docker, you can also install ReaL from PyPI or from the
 
 .. note::
 
-   We don't upload a pre-built wheel to PyPI, so the installation will require compiling the C++ and CUDA extensions. If CUDA is not available on your machine, only the C++ extension will be installed.
+   We don't upload a pre-built wheel to PyPI, so the installation will require compiling the C++ and CUDA extensions.
+   Control whether to install the extentions with environment variables ``REAL_CUDA`` and ``REAL_NO_EXT``.
+
+   The CUDA extention will be installed only if ``REAL_CUDA`` is set to 1.
+   No extention will be installed if ``REAL_NO_EXT`` is set to 1.
 
 First, clone the repository and install all dependencies:
 
@@ -49,27 +58,28 @@ First, clone the repository and install all dependencies:
    $ pip install -U pip
    $ git clone https://github.com/openpsi-project/ReaLHF
    $ cd ReaLHF
-   $ python3 -m pip install -r requirements.txt
+   $ pip install -r requirements.txt
 
 On a GPU machine, also install the required runtime packages:
 
 .. code-block:: console
 
-   $ MAX_JOBS=8 python3 -m pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.4 --no-deps --no-build-isolation
-   $ MAX_JOBS=8 python3 -m pip install flash_attn==2.4.2 --no-build-isolation
+   $ MAX_JOBS=8 pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.4 --no-deps --no-build-isolation
+   $ MAX_JOBS=8 pip install flash_attn==2.4.2 --no-build-isolation
 
 Install ReaLHF from PyPI:
 
 .. code-block:: console
 
-   $ python3 -m pip install realhf --no-build-isolation
+   $ REAL_CUDA=1 pip install realhf --no-build-isolation
 
-The PyPI package allows you to launch existing experiments with the quickstart command. If you want to modify the code, you should clone the source code and install it from the source:
+The PyPI package allows you to launch existing experiments with the quickstart command.
+If you want to modify the code, you should clone the source code and install it from the source:
 
 .. code-block:: console
 
    $ git clone https://github.com/openpsi-project/ReaLHF
    $ cd ReaLHF
-   $ python3 -m pip install -e . --no-build-isolation
+   $ REAL_CUDA=1 pip install -e . --no-build-isolation
 
 Next, check :doc:`quickstart`` for instructions on running experiments.
