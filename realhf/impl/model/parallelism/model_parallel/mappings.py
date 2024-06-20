@@ -22,6 +22,8 @@ def _reduce(input_):
         out = custom_all_reduce.get_handle().custom_all_reduce(input_)
         if out is not None:
             return out
+        # else:
+        #     print("inside _reduce custom all reduce return None")
     torch.distributed.all_reduce(input_, group=constants.model_parallel_group())
     return input_
 

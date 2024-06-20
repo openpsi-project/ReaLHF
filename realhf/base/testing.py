@@ -64,6 +64,8 @@ class StandaloneTestingProcess(mp.Process):
 
     def run(self) -> None:
         assert not torch.cuda.is_initialized()
+
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["REAL_MODE"] = "LOCAL"
         os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
 

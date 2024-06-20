@@ -12,7 +12,6 @@ import realhf.base.logging as logging
 try:
     import pynvml
     from realhf._C.custom_all_reduce import custom_ar
-
     @contextmanager
     def _nvml():
         try:
@@ -38,6 +37,35 @@ logger = logging.getLogger(__name__)
 
 _CA_HANDLE = None
 _SUPPORTED_WORLD_SIZES = [2, 4, 6, 8]
+
+
+@dataclasses.dataclass
+class GraphCaptureContext:
+    stream: torch.cuda.Stream
+
+
+@contextmanager
+def graph_capture():
+    """
+    `graph_capture` is a context manager which should surround the code that
+    is capturing the CUDA graph. Its main purpose is to ensure that the
+    some operations will be run after the graph is captured, before the graph
+    is replayed. It returns a `GraphCaptureContext` object which contains the
+    necessary data for the graph capture. Currently, it only contains the
+    stream that the graph capture is running on. This stream is set to the
+    current CUDA stream when the context manager is entered and reset to the
+    default stream when the context manager is exited. This is to ensure that
+    the graph capture is running on a separate stream from the default stream,
+    in order to explicitly distinguish the kernels to capture
+    from other kernels possibly launched on background in the default stream.
+    """
+    stream = torch.cuda.Stream()
+    graph_capture_context = GraphCaptureContext(stream)
+    maybe_ca_context = (
+        nullcontext() if _CA_HANDLE is None else _CA_HANDLE.capture()
+    )
+    with torch.cuda.stream(stream), maybe_ca_context:
+        yield graph_capture_context
 
 
 @dataclasses.dataclass
@@ -274,23 +302,6 @@ class CustomAllreduce:
         should_custom_ar = custom_ar.should_custom_ar(
             inp, self.max_size, self.world_size, self.full_nvlink
         )
-        # if not should_custom_ar and constants.model_parallel_rank() == 0:
-        #     print(inp.shape, self.max_size, self.world_size, self.full_nvlink)
-
-        #     def is_weak_contiguous(t: torch.Tensor):
-        #         return t.is_contiguous() or (
-        #             t.storage().nbytes() - t.storage_offset() * t.element_size()
-        #             == t.numel() * t.element_size()
-        #         )
-
-        #     print("is weak contiguous", is_weak_contiguous(inp))
-        #     input_size = inp.numel() * inp.element_size()
-        #     print(
-        #         f"size {input_size} size%16 == 0 {input_size % 16 == 0} "
-        #         f"input_size<max_size {input_size<self.max_size}"
-        #     )
-        #     ws_nvlink = self.world_size == 2 or self.full_nvlink
-        #     print(f"world_size==2||full_nvlink {ws_nvlink}")
         return should_custom_ar
 
     # all reduce, assuming inp tensor is IPC registered with register_buffer,

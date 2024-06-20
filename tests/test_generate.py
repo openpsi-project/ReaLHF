@@ -34,6 +34,7 @@ PROMPT_DATASET_PATH = (
     "/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl"
 )
 TMP_SAVE_DIR = "profile_result/generate/"
+USE_CUDA_GRAPH = True
 
 
 @torch.no_grad()
@@ -315,6 +316,8 @@ def huggingface_model_generate_simple(
 
 if __name__ == "__main__":
     model_family = ModelFamily("llama", 7, is_critic=False)
+    # os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
+    os.environ["USE_CUDA_GRAPH"] = "1" if USE_CUDA_GRAPH else "0"
     real_test = testing.LocalMultiProcessTest(
         8,
         real_model_parallel_generate,
@@ -325,7 +328,7 @@ if __name__ == "__main__":
         128,
         128,
         False,
-        3,
+        10,
     )
     real_test.launch()
 

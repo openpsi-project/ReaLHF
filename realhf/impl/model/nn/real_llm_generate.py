@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
@@ -19,11 +17,14 @@ from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.utils.functional import mask_eos_token
 from realhf.impl.model.utils.logits_warper import top_k_top_p_logits
 from realhf.impl.model.utils.padding import index_first_axis, unpad_input
+from realrlhf.api.core import model_api
+import realhf.impl.model.utils.cuda_graph as cuda_graph
 
 if TYPE_CHECKING:
     from .real_llm_api import ReaLModel
 
 logger = logging.getLogger("ReaLModel Generation")
+CUDA_GRAPH_NAME = "decoding"
 
 
 @dataclasses.dataclass
@@ -152,93 +153,6 @@ def genstep(
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
-_USE_CUDA_GRAPH = True
-_DECODING_CUDA_GRAPH: torch.cuda.CUDAGraph = None
-_DECODING_CUDA_GRAPH_BS: int = None
-_DECODING_CUDA_GRAPH_SEQLEN: int = None
-_DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
-_DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
-
-
-@torch.no_grad()
-def get_decoding_cuda_graph(
-    model: "ReaLModel",
-    bs: int,
-    k_caches: List[torch.Tensor],
-    v_caches: List[torch.Tensor],
-    cache_seqlens: torch.Tensor,
-    force_recapture: bool = False,
-) -> Tuple[
-    torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]
-]:
-    global _DECODING_CUDA_GRAPH
-    global _DECODING_CUDA_GRAPH_BS
-    global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-    global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
-    global _DECODING_CUDA_GRAPH_SEQLEN
-    if k_caches[0] is None:
-        # In case the first layer is the embedding layer, which does not have kv cache.
-        seqlen = k_caches[1].shape[1]
-    else:
-        seqlen = k_caches[0].shape[1]
-    if not force_recapture and _DECODING_CUDA_GRAPH is not None:
-        assert _DECODING_CUDA_GRAPH_BS >= bs
-        assert _DECODING_CUDA_GRAPH_SEQLEN >= seqlen
-        return (
-            _DECODING_CUDA_GRAPH,
-            _DECODING_CUDA_GRAPH_INPUT_BUFFER,
-            _DECODING_CUDA_GRAPH_OUTPUT_BUFFER,
-        )
-
-    input_buffers = dict(
-        input_ids=torch.ones(bs, dtype=torch.long, device=model.device),
-        position_ids=cache_seqlens.clone()[:, None],
-        k_caches=k_caches,
-        v_caches=v_caches,
-        # NOTE: here cache_seqlens should be the real cache_seqlens,
-        # otherwise k/v cache will be changed in-place during capturing
-        cache_seqlens=cache_seqlens.clone(),
-        max_seqlen=None,
-        cu_seqlens=None,
-        hidden_states=None,
-    )
-    assert (
-        custom_all_reduce.is_initialized()
-        or constants.model_parallel_world_size() == 1
-    )
-    assert not constants.sequence_parallel()
-    with custom_all_reduce.get_handle().capture():
-        # torch.distributed.barrier()
-        # torch.cuda.synchronize()
-
-        # Build a CUDAGraph for decoding inference.
-        model._forward(**input_buffers)
-        torch.cuda.synchronize()
-
-        st = time.monotonic()
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            output = model._forward(**input_buffers)
-
-        # torch.distributed.barrier()
-        torch.cuda.synchronize()
-
-    print(
-        f"Capturing CUDA graph for decoding takes {time.monotonic() - st:.2f} seconds."
-    )
-
-    output_buffers = dict(logits=output)
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    _DECODING_CUDA_GRAPH = graph
-    _DECODING_CUDA_GRAPH_INPUT_BUFFER = input_buffers
-    _DECODING_CUDA_GRAPH_OUTPUT_BUFFER = output_buffers
-    _DECODING_CUDA_GRAPH_BS = bs
-    _DECODING_CUDA_GRAPH_SEQLEN = seqlen
-    return graph, input_buffers, output_buffers
-
-
 def init_kv_cache(
     module: "ReaLModel",
     gconfig: GenerationConfig,
@@ -354,25 +268,15 @@ def generate(
             mconfig.hidden_dim // mconfig.head_dim + 10,
         )
 
-        global _DECODING_CUDA_GRAPH
-        if _DECODING_CUDA_GRAPH is not None:
-            global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
-            global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-            if not (
-                _DECODING_CUDA_GRAPH_BS >= bs
-                and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen
-            ):
-                raise RuntimeError(
-                    f"CUDAGraph batch size {_DECODING_CUDA_GRAPH_BS} or seqlen {_DECODING_CUDA_GRAPH_SEQLEN} "
-                    f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
-                    "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?"
-                )
-            k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["k_caches"][
-                layer_idx + 1
-            ][:bs, :kvcache_seqlen]
-            v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["v_caches"][
-                layer_idx + 1
-            ][:bs, :kvcache_seqlen]
+        k_cache_handle = cuda_graph.input_buffer_handle(
+            CUDA_GRAPH_NAME, "k_caches"
+        )
+        v_cache_handle = cuda_graph.input_buffer_handle(
+            CUDA_GRAPH_NAME, "v_caches"
+        )
+        if k_cache_handle is not None and v_cache_handle is not None:
+            k_cache = k_cache_handle[layer_idx + 1][:bs, :kvcache_seqlen]
+            v_cache = v_cache_handle[layer_idx + 1][:bs, :kvcache_seqlen]
         else:
             k_cache = torch.zeros(
                 (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
@@ -407,22 +311,51 @@ def generate(
     gen_logits_mask_ph.append(logits_mask)
     generated_idx += 1
 
-    if _USE_CUDA_GRAPH:
-        if not custom_all_reduce.is_initialized():
-            custom_all_reduce.init_custom_ar()
-        graph, input_buffers, output_buffers = get_decoding_cuda_graph(
-            model,
-            bs,
-            [y.k_cache for y in ys],
-            [y.v_cache for y in ys],
-            cache_seqlens,
-            force_recapture=False,
-        )
+    # use cuda graph if env var USE_CUDA_GRAPH is set to 1,
+    # other `graph` should be None
+    input_buffers_meta = dict(
+        input_ids=cuda_graph.TensorMetadata(shape=(bs,), dtype=torch.long),
+        position_ids=cuda_graph.TensorMetadata(
+            shape=(bs, 1), dtype=cache_seqlens.dtype
+        ),
+        k_caches=[
+            (
+                cuda_graph.TensorMetadata(
+                    shape=y.k_cache.shape,
+                    dtype=y.k_cache.dtype,
+                )
+                if y.k_cache is not None
+                else cuda_graph.TensorMetadata()
+            )
+            for y in ys
+        ],
+        v_caches=[
+            (
+                cuda_graph.TensorMetadata(
+                    shape=y.v_cache.shape,
+                    dtype=y.v_cache.dtype,
+                )
+                if y.v_cache is not None
+                else cuda_graph.TensorMetadata()
+            )
+            for y in ys
+        ],
+        cache_seqlens=cuda_graph.TensorMetadata(shape=(bs,), dtype=torch.int32),
+        max_seqlen=cuda_graph.TensorMetadata(),
+        cu_seqlens=cuda_graph.TensorMetadata(),
+        hidden_states=cuda_graph.TensorMetadata(),
+    )
+    graph, input_buffers, output_buffers = cuda_graph.capture_func(
+        CUDA_GRAPH_NAME,
+        model._forward,
+        input_buffers_meta,
+        force_recapture=False,
+    )
 
     # The main loop.
     while not terminate:
         # the next round of inference
-        if _USE_CUDA_GRAPH:
+        if graph is not None:
             input_buffers["input_ids"][:bs].copy_(
                 next_tokens, non_blocking=True
             )
@@ -434,7 +367,7 @@ def generate(
             )
             # K/v cache will be changed in-place with flash attention.
             graph.replay()
-            logits = output_buffers["logits"][:bs].squeeze(1)
+            logits = output_buffers["output"][:bs].squeeze(1)
             cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
         else:
             ys[0].packed_input_ids = next_tokens
