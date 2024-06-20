@@ -201,9 +201,9 @@
 <h3>Overview<a class="headerlink" href="#overview" title="Link to this heading">¶</a></h3>
 <p>We provide three types of dataset implementations in <code class="docutils literal notranslate"><span class="pre">realhf/impl/dataset/</span></code> with the following configurations:</p>
 <ul class="simple">
-<li><p><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code></p></li>
-<li><p><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PairedComparisonDatasetConfig</span></code></p></li>
-<li><p><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptOnlyDatasetConfig</span></code></p></li>
+<li><p><a class="reference internal" href="expconfig.html#realhf.PromptAnswerDatasetConfig" title="realhf.PromptAnswerDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code></a></p></li>
+<li><p><a class="reference internal" href="expconfig.html#realhf.PairedComparisonDatasetConfig" title="realhf.PairedComparisonDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PairedComparisonDatasetConfig</span></code></a></p></li>
+<li><p><a class="reference internal" href="expconfig.html#realhf.PromptOnlyDatasetConfig" title="realhf.PromptOnlyDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptOnlyDatasetConfig</span></code></a></p></li>
 </ul>
 <p>Please refer to the respective configuration documentation for detailed instructions on how to use or modify these datasets.</p>
 <p>Datasets in ReaL are commonly used
@@ -215,9 +215,9 @@ The sequence length is necessary because ReaL uses variable-length inputs withou
 <section id="how-dataset-configuration-is-parsed">
 <h3>How Dataset Configuration is Parsed<a class="headerlink" href="#how-dataset-configuration-is-parsed" title="Link to this heading">¶</a></h3>
 <p>We will use the SFT experiment as an example.</p>
-<p>The <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code> object will be converted to a dataset configuration
+<p>The <a class="reference internal" href="expconfig.html#realhf.PromptAnswerDatasetConfig" title="realhf.PromptAnswerDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code></a> object will be converted to a dataset configuration
 under the system API, specifically <code class="docutils literal notranslate"><span class="pre">realhf.api.core.system_api.Dataset</span></code>.
-Refer to the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method of <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code> for more details.
+Refer to the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method of <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> for more details.
 This object includes a dataset name (in this case, “prompt_answer”) and corresponding arguments
 that are passed to the dataset class’s constructor:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@property</span>
@@ -259,7 +259,7 @@ method of the dataset class, except that ReaL reserves a <code class="docutils l
 <h3>Overview<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h3>
 <p>For efficiency reasons, ReaL does not support every transformer
 model from the HuggingFace model hub.
-In ReaL, we implement the <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.impl.model.nn.real_llm_api.ReaLModel</span></code>
+In ReaL, we implement the <a class="reference internal" href="expconfig.html#realhf.impl.model.nn.real_llm_api.ReaLModel" title="realhf.impl.model.nn.real_llm_api.ReaLModel"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.impl.model.nn.real_llm_api.ReaLModel</span></code></a>
 class that wraps the HuggingFace model and provides micro-batched pipelining,
 offload, and parameter reallocation functionalities.</p>
 <p>There are helper functions in the model API used to convert HuggingFace models back and forth,
@@ -268,7 +268,7 @@ These helper functions are generated automatically by registering conversion fun
 <p>For example, consider <code class="docutils literal notranslate"><span class="pre">api/from_hf/llama.py</span></code>.
 To register a convertible HuggingFace model, the user should implement:</p>
 <ul class="simple">
-<li><p>Two functions to convert model configs between HuggingFace and <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ReaLModelConfig</span></code>.</p></li>
+<li><p>Two functions to convert model configs between HuggingFace and <a class="reference internal" href="expconfig.html#realhf.ReaLModelConfig" title="realhf.ReaLModelConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ReaLModelConfig</span></code></a>.</p></li>
 <li><p>Two functions to convert model state dicts between HuggingFace and ReaL, primarily involving key remapping.</p></li>
 <li><p>Three functions specifying the names of parameters in the embedding layer, transformer blocks, and the output layer, respectively.</p></li>
 </ul>
@@ -302,17 +302,48 @@ specific model (e.g., Actor or Critic).
 The edges in the graph indicate data or
 parameter version dependencies between nodes.</p>
 <p>The following figure illustrates the dataflow graph of PPO:</p>
-<img alt="Dataflow graph of RLHF." class="align-center" src="_images/rlhf_dfg.svg" /><p>A node is represented by a <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code> object.
+<img alt="Dataflow graph of RLHF." class="align-center" src="_images/rlhf_dfg.svg" /><p>A node is represented by a <a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> object.
 Each node has a <code class="docutils literal notranslate"><span class="pre">model_name</span></code> field and an <code class="docutils literal notranslate"><span class="pre">interface_type</span></code>
 field, which specify what the node should conceptually do during execution.
 The <code class="docutils literal notranslate"><span class="pre">interface_impl</span></code> field specifies the actual implementation of the model interface.</p>
 <p>The interface class has the following signature:</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.ModelInterface">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">ModelInterface</span></span><a class="headerlink" href="#realhf.ModelInterface" title="Link to this definition">¶</a></dt>
+<dd><p>Interface for model training, evaluation, inference and generation.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.ModelInterface.evaluate">
+<span class="sig-name descname"><span class="pre">evaluate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eval_dataloader</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DataLoader</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span></span></span><a class="headerlink" href="#realhf.ModelInterface.evaluate" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.ModelInterface.generate">
+<span class="sig-name descname"><span class="pre">generate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.base.namedarray.NamedArray" title="realhf.base.namedarray.NamedArray"><span class="pre">NamedArray</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="expconfig.html#realhf.base.namedarray.NamedArray" title="realhf.base.namedarray.NamedArray"><span class="pre">NamedArray</span></a></span></span><a class="headerlink" href="#realhf.ModelInterface.generate" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.ModelInterface.inference">
+<span class="sig-name descname"><span class="pre">inference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.base.namedarray.NamedArray" title="realhf.base.namedarray.NamedArray"><span class="pre">NamedArray</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="expconfig.html#realhf.base.namedarray.NamedArray" title="realhf.base.namedarray.NamedArray"><span class="pre">NamedArray</span></a></span></span><a class="headerlink" href="#realhf.ModelInterface.inference" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.ModelInterface.save">
+<span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.ModelInterface.save" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.ModelInterface.train_step">
+<span class="sig-name descname"><span class="pre">train_step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.base.namedarray.NamedArray" title="realhf.base.namedarray.NamedArray"><span class="pre">NamedArray</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span></span></span><a class="headerlink" href="#realhf.ModelInterface.train_step" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
 <p>During the execution of an MFC node,
 the model identified by <code class="docutils literal notranslate"><span class="pre">model_name</span></code> is passed into this interface object,
 along with the data specified in the MFC node.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Similar to datasets, model interfaces are registered and constructed by the system API. Please check <code class="docutils literal notranslate"><span class="pre">impl/model/interface/sft_interface.py</span></code> for an example. The <code class="docutils literal notranslate"><span class="pre">SFTInterface</span></code> is registered at the end of this file and constructed by <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code> (see the <code class="docutils literal notranslate"><span class="pre">rpcs</span></code> method).</p>
+<p>Similar to datasets, model interfaces are registered and constructed by the system API. Please check <code class="docutils literal notranslate"><span class="pre">impl/model/interface/sft_interface.py</span></code> for an example. The <code class="docutils literal notranslate"><span class="pre">SFTInterface</span></code> is registered at the end of this file and constructed by <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> (see the <code class="docutils literal notranslate"><span class="pre">rpcs</span></code> method).</p>
 </div>
 <p>Running algorithms in ReaL involves executing a large dataflow
 graph that concatenates all the training iterations.
@@ -442,7 +473,17 @@ issues MFC requests to <em>ModelWorkers</em> once the dependencies are satisfied
 </ul>
 </li>
 <li><a class="reference internal" href="#customizing-algorithms">Customizing Algorithms</a><ul>
-<li><a class="reference internal" href="#id2">Overview</a></li>
+<li><a class="reference internal" href="#id2">Overview</a><ul>
+<li><a class="reference internal" href="#realhf.ModelInterface"><code class="docutils literal notranslate"><span class="pre">ModelInterface</span></code></a><ul>
+<li><a class="reference internal" href="#realhf.ModelInterface.evaluate"><code class="docutils literal notranslate"><span class="pre">ModelInterface.evaluate()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.ModelInterface.generate"><code class="docutils literal notranslate"><span class="pre">ModelInterface.generate()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.ModelInterface.inference"><code class="docutils literal notranslate"><span class="pre">ModelInterface.inference()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.ModelInterface.save"><code class="docutils literal notranslate"><span class="pre">ModelInterface.save()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.ModelInterface.train_step"><code class="docutils literal notranslate"><span class="pre">ModelInterface.train_step()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
 <li><a class="reference internal" href="#example-a-customized-reward-function-for-ppo">Example: A Customized Reward Function for PPO</a></li>
 </ul>
 </li>

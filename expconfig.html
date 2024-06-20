@@ -197,19 +197,647 @@
 <h1>Configurations<a class="headerlink" href="#configurations" title="Link to this heading">¶</a></h1>
 <p>We illustrate configurations for quickstart experiments in this page.
 Each type of experiment (e.g., SFT, PPO) corresponds to a specific
-configuration object (e.g., <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code> for SFT).</p>
+configuration object (e.g., <a class="reference internal" href="#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> for SFT).</p>
 <p>Since ReaL uses <a class="reference external" href="https://hydra.cc/">Hydra</a> for configuration management,
 users can override these options provided by the class recursively
 with command line arguments.
 Please check <a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a> for concrete examples.</p>
 <section id="experiment-configurations">
 <h2>Experiment Configurations<a class="headerlink" href="#experiment-configurations" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.CommonExperimentConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">CommonExperimentConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">experiment_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trial_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'slurm'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">partition</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'dev'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wandb_mode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_mode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_retries</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ignore_worker_error</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_mode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'pipe_model'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_use_cache</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_nodes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_gpus_per_node</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodelist</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.CommonExperimentConfig" title="Link to this definition">¶</a></dt>
+<dd><p>The common config for quickstart experiments.</p>
+<p>All members can be changed by the user in the command line,
+e.g.,</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>sft<span class="w"> </span><span class="nv">trial_name</span><span class="o">=</span>my_trial<span class="w"> </span><span class="nv">seed</span><span class="o">=</span><span class="m">42</span><span class="w"> </span>...
+</pre></div>
+</div>
+<p>Recover mode is one of the followings:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">auto</span></code>: automatically recover the last failed run.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">save</span></code>: save recover states if any error occurs.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">resume</span></code>: resume from saved recover states and save states if fail again.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">disabled</span></code>: do nothing but raise error when error occurs.</p></li>
+</ul>
+<p>Allocation mode is one of the followings:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">manual</span></code>: manually allocate resources with experiment configs.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">search</span></code>: allocate resources and configure parallel strategies with search.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">heuristic</span></code>: allocate resources and configure parallel strategies with heuristic strategy.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pipe_data</span></code>: allocate all models on all cluster nodes available and configure parallel strategies with pipe+data parallelism.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pipe_model</span></code>: allocate all models on all cluster nodes available and configure parallel strategies with pipe+model parallelism.</p></li>
+</ul>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>experiment_name</strong> (<em>str</em>) – Name of the experiment.</p></li>
+<li><p><strong>trial_name</strong> (<em>str</em>) – Name of the trial.</p></li>
+<li><p><strong>mode</strong> (<em>str</em>) – Experiment launching mode.
+Currently only “local” and “slurm” are supported.
+The “local” mode implies <code class="docutils literal notranslate"><span class="pre">n_nodes=1</span></code>.</p></li>
+<li><p><strong>debug</strong> (<em>bool</em>) – Whether to run in the debug mode.
+The non-debug mode will disable all assertions.</p></li>
+<li><p><strong>partition</strong> (<em>str</em>) – The slurm partition to run the experiment.</p></li>
+<li><p><strong>wandb_mode</strong> (<em>str</em>) – The mode of wandb. Currently the wandb logging is not supported.</p></li>
+<li><p><strong>image_name</strong> (<em>str</em><em> or </em><em>None</em>) – The name of the docker image used by the controller.
+Only used in the slurm mode.</p></li>
+<li><p><strong>recover_mode</strong> (<em>str</em>) – The recover mode.</p></li>
+<li><p><strong>recover_retries</strong> (<em>int</em>) – The number of retries for recovery.
+Only effective when recover_mode is “auto”.</p></li>
+<li><p><strong>ignore_worker_error</strong> (<em>bool</em>) – Whether to ignore errors raised by
+workers during runtime. Please do not set it to be True unless
+the user is sure that some error is ignorable.
+Only effective when recover_mode is “disabled”.</p></li>
+<li><p><strong>allocation_mode</strong> (<em>str</em>) – Mode of GPU parallel strategy allocation.</p></li>
+<li><p><strong>allocation_use_cache</strong> (<em>bool</em>) – Whether to use cache in allocation search.
+Only effective when allocation_mode==”search”
+and cache is available in the log dir of current experiment
+name and trial.</p></li>
+<li><p><strong>n_nodes</strong> (<em>int</em>) – Number of nodes to run the experiment.
+Only effective when mode==”slurm”.</p></li>
+<li><p><strong>n_gpus_per_node</strong> (<em>int</em>) – Number of GPUs per node.
+Only effective when mode==”slurm”.</p></li>
+<li><p><strong>nodelist</strong> (<em>str</em><em> or </em><em>None</em>) – Slurm nodelist.
+Only effective when mode==”slurm”.</p></li>
+<li><p><strong>seed</strong> (<em>int</em>) – Random seed.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.SFTConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">SFTConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">experiment_name:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trial_name:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'slurm'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">partition:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'dev'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wandb_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_name:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_retries:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ignore_worker_error:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'pipe_model'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_use_cache:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_nodes:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_gpus_per_node:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodelist:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">total_train_epochs:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_freq_steps:</span> <span class="pre">int</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">50</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eval_freq_epochs:</span> <span class="pre">int</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model:</span> <span class="pre">~realhf.api.quickstart.model.ModelTrainEvalConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset:</span> <span class="pre">~realhf.api.quickstart.dataset.PromptAnswerDatasetConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SFTConfig" title="Link to this definition">¶</a></dt>
+<dd><p>SFT experiment configuration.</p>
+<p>It is a subclass of <a class="reference internal" href="#realhf.CommonExperimentConfig" title="realhf.CommonExperimentConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">CommonExperimentConfig</span></code></a>,
+so all CLI options in the base class are available.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>total_train_epochs</strong> (<em>int</em>) – Total number of training epochs
+(i.e., the number of times the training dataset is iterated).</p></li>
+<li><p><strong>save_freq_steps</strong> (<em>Optional</em><em>[</em><em>int</em><em>]</em>) – Save the model every this number of steps.
+“step” is an optimizer step or a single update of model parameters.
+If None, the model will not be saved during training.
+The directory to save the model will be automatically resolved
+and prompted in the terminal when the experiment starts.</p></li>
+<li><p><strong>eval_freq_epochs</strong> (<em>Optional</em><em>[</em><em>int</em><em>]</em>) – Evaluate the model every this number of epochs.
+If None, the model will not be evaluated during training.</p></li>
+<li><p><strong>model</strong> (<a class="reference internal" href="#realhf.ModelTrainEvalConfig" title="realhf.ModelTrainEvalConfig"><em>ModelTrainEvalConfig</em></a>) – Model runtime configuration.</p></li>
+<li><p><strong>allocation</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – Device allocation and parallelism configuration.</p></li>
+<li><p><strong>dataset</strong> (<a class="reference internal" href="#realhf.PromptAnswerDatasetConfig" title="realhf.PromptAnswerDatasetConfig"><em>PromptAnswerDatasetConfig</em></a>) – Dataset configuration</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.RWConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">RWConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">experiment_name:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trial_name:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'slurm'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">partition:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'dev'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wandb_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_name:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_retries:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ignore_worker_error:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'pipe_model'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_use_cache:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_nodes:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_gpus_per_node:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodelist:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">total_train_epochs:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_freq_steps:</span> <span class="pre">int</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">20</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eval_freq_epochs:</span> <span class="pre">int</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_sft_lora:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sft_lora_path:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model:</span> <span class="pre">~realhf.api.quickstart.model.ModelTrainEvalConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset:</span> <span class="pre">~realhf.api.quickstart.dataset.PairedComparisonDatasetConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.RWConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Pairwise reward modeling experiment configuration.</p>
+<p>It is a subclass of <a class="reference internal" href="#realhf.CommonExperimentConfig" title="realhf.CommonExperimentConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">CommonExperimentConfig</span></code></a>,
+so all CLI options in the base class are available.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>total_train_epochs</strong> (<em>int</em>) – Total number of training epochs
+(i.e., the number of times the training dataset is iterated).</p></li>
+<li><p><strong>save_freq_steps</strong> (<em>Optional</em><em>[</em><em>int</em><em>]</em>) – Save the model every this number of steps.
+“step” is an optimizer step or a single update of model parameters.
+If None, the model will not be saved during training.
+The directory to save the model will be automatically resolved
+and prompted in the terminal when the experiment starts.</p></li>
+<li><p><strong>eval_freq_epochs</strong> (<em>Optional</em><em>[</em><em>int</em><em>]</em>) – Evaluate the model every this number of epochs.
+If None, the model will not be evaluated during training.</p></li>
+<li><p><strong>is_sft_lora</strong> (<em>bool</em>) – Whether LoRA was used for SFT.
+If so, the saved SFT model should only contain LoRA parameters.
+Since LoRA is currently not supported for SFT,
+this option is not used for now.</p></li>
+<li><p><strong>sft_lora_path</strong> – Path to the LoRA model for SFT.
+Since LoRA is currently not supported for SFT,
+this option is not used for now.</p></li>
+<li><p><strong>model</strong> (<a class="reference internal" href="#realhf.ModelTrainEvalConfig" title="realhf.ModelTrainEvalConfig"><em>ModelTrainEvalConfig</em></a>) – Model runtime configuration.</p></li>
+<li><p><strong>allocation</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – Device allocation and parallelism configuration.</p></li>
+<li><p><strong>dataset</strong> (<a class="reference internal" href="#realhf.PairedComparisonDatasetConfig" title="realhf.PairedComparisonDatasetConfig"><em>PairedComparisonDatasetConfig</em></a>) – Dataset configuration.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.DPOConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">DPOConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">experiment_name:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trial_name:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'slurm'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">partition:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'dev'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wandb_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_name:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_retries:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ignore_worker_error:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'pipe_model'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_use_cache:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_nodes:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_gpus_per_node:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodelist:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">total_train_epochs:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_freq_steps:</span> <span class="pre">int</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">20</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_sft_lora:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sft_lora_path:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">actor:</span> <span class="pre">~realhf.api.quickstart.model.ModelTrainEvalConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ref:</span> <span class="pre">~realhf.api.quickstart.model.ModelTrainEvalConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">actor_train:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ref_inf:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset:</span> <span class="pre">~realhf.api.quickstart.dataset.PairedComparisonDatasetConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">beta:</span> <span class="pre">float</span> <span class="pre">=</span> <span class="pre">0.1</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.DPOConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Direct Preference Optimization (DPO) experiment configuration.</p>
+<p>It is a subclass of <a class="reference internal" href="#realhf.CommonExperimentConfig" title="realhf.CommonExperimentConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">CommonExperimentConfig</span></code></a>,
+so all CLI options in the base class are available.</p>
+<p>We don’t implement runtime evaluation for DPO.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>total_train_epochs</strong> (<em>int</em>) – Total number of training epochs
+(i.e., the number of times the training dataset is iterated).</p></li>
+<li><p><strong>save_freq_steps</strong> (<em>Optional</em><em>[</em><em>int</em><em>]</em>) – Save the model every this number of steps.
+“step” is an optimizer step or a single update of model parameters.
+If None, the model will not be saved during training.
+The directory to save the model will be automatically resolved
+and prompted in the terminal when the experiment starts.</p></li>
+<li><p><strong>is_sft_lora</strong> (<em>bool</em>) – Whether LoRA was used for SFT.
+If so, the saved SFT model should only contain LoRA parameters.
+Since LoRA is currently not supported for SFT,
+this option is not used for now.</p></li>
+<li><p><strong>sft_lora_path</strong> – Path to the LoRA model for SFT.
+Since LoRA is currently not supported for SFT,
+this option is not used for now.</p></li>
+<li><p><strong>actor</strong> (<a class="reference internal" href="#realhf.ModelTrainEvalConfig" title="realhf.ModelTrainEvalConfig"><em>ModelTrainEvalConfig</em></a>) – Runtime configuration of the primary LLM.</p></li>
+<li><p><strong>ref</strong> (<a class="reference internal" href="#realhf.ModelTrainEvalConfig" title="realhf.ModelTrainEvalConfig"><em>ModelTrainEvalConfig</em></a>) – Runtime configuration of the reference LLM.
+This model is only used for inference to provide KL regularization.
+In ReaL, this model is automatically offloaded to CPU.
+As a result, training DPO is as efficient as training a single LLM.</p></li>
+<li><p><strong>actor_train</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – Device allocation and parallelism configuration for
+running training on the primary LLM.</p></li>
+<li><p><strong>ref_inf</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – Device allocation and parallelism configuration for
+running inference on the reference LLM.
+This can be different from the training allocation.
+A large data parallel degree with additional pipelining
+can be faster for inference.</p></li>
+<li><p><strong>dataset</strong> (<a class="reference internal" href="#realhf.PairedComparisonDatasetConfig" title="realhf.PairedComparisonDatasetConfig"><em>PairedComparisonDatasetConfig</em></a>) – Dataset configuration. The same for reward modeling.</p></li>
+<li><p><strong>beta</strong> (<em>float</em>) – KL regularization coefficient.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.PPOHyperparameters">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">PPOHyperparameters</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">max_new_tokens</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_new_tokens</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">greedy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_p</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.9</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">200</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">temperature</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">force_no_logits_mask</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ppo_n_minibatches</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">4</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kl_ctl</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">discount</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gae_lambda</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps_clip</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_eps_clip</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_reward_clip</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">20.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reward_output_scaling</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reward_output_bias</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">early_stop_imp_ratio</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">5.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_adaptive_kl_ctl</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">adv_norm</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_norm</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_norm_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'exp'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_norm_beta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.99995</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_norm_eps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1e-05</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.PPOHyperparameters" title="Link to this definition">¶</a></dt>
+<dd><p>Configuration of PPO hyperparameters.</p>
+<p>We implement a customized generation function instead of
+using HuggingFace’s to support pipelined generation.
+As a result, advanced generation techniques like
+diversity-promoting sampling or repeatition penalty
+are not supported during PPO training.
+However, we don’t find it to be a problem in practice.
+Increasing the sampling temperature and enabling
+top-k/top-p sampling can produce good models.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>max_new_tokens</strong> (<em>int</em>) – Maximum number of new tokens
+to generate.</p></li>
+<li><p><strong>min_new_tokens</strong> (<em>int</em>) – Minimum number of new tokens
+to generate.</p></li>
+<li><p><strong>greedy</strong> (<em>bool</em>) – Whether to use greedy decoding.
+PPO may not work if set to True.</p></li>
+<li><p><strong>top_p</strong> (<em>float</em>) – Tokens will be sampled from a
+vocabulary subset with probability summation
+larger than p.</p></li>
+<li><p><strong>top_k</strong> (<em>int</em>) – Tokens will be sampled from a
+vocabulary subset with top-k probabilities.</p></li>
+<li><p><strong>temperature</strong> (<em>float</em>) – Sampling temperature.</p></li>
+<li><p><strong>force_no_logits_mask</strong> (<em>bool</em>) – Whether to omit logits mask.
+The logits mask will be produced when using top-k or top-p sampling,
+where it is used to mark tokens that are filtered out.
+This mask will be used by the reference model and the actor model
+during training in order to align inferred logits with that during
+generation and produce accurate KLs.
+Logits mask with top-k/top-p sampling will largely improve the
+stability of PPO training because it narrows the action space.
+However, this benefit does not come for free.
+The logits mask will occupy a large amount of additional GPU memory.
+If this option is set to True, logits mask will be forcely omitted to
+save GPU memory, but the learning performance may also drop.</p></li>
+<li><p><strong>ppo_n_minibatches</strong> (<em>int</em>) – Number of minibatches in each PPO update.</p></li>
+<li><p><strong>kl_ctl</strong> (<em>float</em>) – Coefficient of KL divergence rewards.</p></li>
+<li><p><strong>discount</strong> (<em>float</em>) – Discount factor.</p></li>
+<li><p><strong>gae_lambda</strong> (<em>float</em>) – Lambda factor in GAE.</p></li>
+<li><p><strong>eps_clip</strong> (<em>float</em>) – PPO actor probability ratio clipping factor.</p></li>
+<li><p><strong>value_eps_clip</strong> (<em>float</em>) – PPO value clipping factor.</p></li>
+<li><p><strong>max_reward_clip</strong> (<em>float</em>) – Maximum reward value.</p></li>
+<li><p><strong>reward_output_scaling</strong> (<em>float</em>) – Scaling factor of the reward model output.</p></li>
+<li><p><strong>reward_output_bias</strong> (<em>float</em>) – Bias of the reward model output.
+The number outputed by the reward model will be
+CLIP((x - bias) * scaling, -max_reward_clip, max_reward_clip).</p></li>
+<li><p><strong>early_stop_imp_ratio</strong> (<em>float</em>) – PPO update will be early stopped if importance ratio
+exceeds this maximum value.</p></li>
+<li><p><strong>use_adaptive_kl_ctl</strong> (<em>bool</em>) – Whether to use adaptive KL divergence coefficient.</p></li>
+<li><p><strong>adv_norm</strong> (<em>bool</em>) – Whether to use advantage normalization.</p></li>
+<li><p><strong>value_norm</strong> (<em>bool</em>) – Whether to denormalize valued and normalize return predictions.</p></li>
+<li><p><strong>value_norm_type</strong> (<em>str</em>) – Type of value normalization.
+Either exponential moving average (“exp”) or moving average (“ma”).</p></li>
+<li><p><strong>value_norm_beta</strong> (<em>float</em>) – Exponential decay factor
+in exponential moving average.</p></li>
+<li><p><strong>value_norm_eps</strong> (<em>float</em>) – Epsilon factor in the
+denominator of exponential moving average.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.PPOConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">PPOConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">experiment_name:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">trial_name:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'???'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'slurm'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">partition:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'dev'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wandb_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">image_name:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'disabled'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recover_retries:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ignore_worker_error:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_mode:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'pipe_model'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allocation_use_cache:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_nodes:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_gpus_per_node:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">8</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodelist:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">total_train_epochs:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_freq_steps:</span> <span class="pre">int</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">20</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_sft_lora:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sft_lora_path:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_rew_lora:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rew_lora_path:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rew_head_path:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">actor:</span> <span class="pre">~realhf.api.quickstart.model.ModelTrainEvalConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">critic:</span> <span class="pre">~realhf.api.quickstart.model.ModelTrainEvalConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ref:</span> <span class="pre">~realhf.api.quickstart.model.ModelTrainEvalConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rew:</span> <span class="pre">~realhf.api.quickstart.model.ModelTrainEvalConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">actor_train:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">critic_train:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">actor_gen:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">critic_inf:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rew_inf:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ref_inf:</span> <span class="pre">~realhf.api.quickstart.device_mesh.AllocationConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dataset:</span> <span class="pre">~realhf.api.quickstart.dataset.PromptOnlyDatasetConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ppo:</span> <span class="pre">~realhf.experiments.common.ppo_exp.PPOHyperparameters</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.PPOConfig" title="Link to this definition">¶</a></dt>
+<dd><p>PPO experiment configuration.</p>
+<p>It is a subclass of <a class="reference internal" href="#realhf.CommonExperimentConfig" title="realhf.CommonExperimentConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">CommonExperimentConfig</span></code></a>,
+so all CLI options in the base class are available.</p>
+<p>We don’t implement runtime evaluation for PPO.</p>
+<p>We identify that the RLHF process is composed of four
+distinct models with independent parameters and six
+<em>model function calls</em> upon these models.</p>
+<p>The four models are:</p>
+<ul class="simple">
+<li><p>Actor: The primary LLM that generates text.</p></li>
+<li><p>Critic: The value function that estimates the value of a state.</p></li>
+<li><p>Ref: The reference LLM that provides KL regularization.</p></li>
+<li><p>Rew: The reward model that provides reward signals.</p></li>
+</ul>
+<p>The four model function calls and their dependencies are:</p>
+<ul class="simple">
+<li><p>Rollout: Generate text from the actor model.</p></li>
+<li><p>InfReward: Infer rewards from the reward model given generated text.</p></li>
+<li><p>InfRef: Infer log probabilities from the reference model given generated text.</p></li>
+<li><p>InfValues: Infer values from the critic model given generated text.</p></li>
+<li><p>TrainActor: Train the actor model given generated text, rewards, values, and reference log probabilities.</p></li>
+<li><p>TrainCritic: Train the critic model given generated text, rewards, values, and reference log probabilities.</p></li>
+</ul>
+<p>This class resolves these dependencies under the hood.
+What the users should specify are the runtime configurations
+of models and allocations of <em>each model function call</em>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>total_train_epochs</strong> (<em>int</em>) – Total number of training epochs
+(i.e., the number of times the training dataset is iterated).</p></li>
+<li><p><strong>save_freq_steps</strong> (<em>Optional</em><em>[</em><em>int</em><em>]</em>) – Save the model every this number of steps.
+“step” is a PPO training step, probabily composed of multiple
+model updates if ppo_n_minibatch &gt; 1.
+If None, the model will not be saved during training.
+The directory to save the model will be automatically resolved
+and prompted in the terminal when the experiment starts.</p></li>
+<li><p><strong>is_sft_lora</strong> (<em>bool</em>) – Whether LoRA was used for SFT.
+If so, the saved SFT model should only contain LoRA parameters.
+Since LoRA is currently not supported for SFT,
+this option is not used for now.</p></li>
+<li><p><strong>sft_lora_path</strong> – Path to the LoRA model for SFT.
+Since LoRA is currently not supported for SFT,
+this option is not used for now.</p></li>
+<li><p><strong>is_rw_lora</strong> (<em>bool</em>) – Whether LoRA was used for reward modeling.
+If so, the saved reward model should only contain LoRA parameters
+and the new reward head.
+Since LoRA is currently not supported for reward modeling,
+this option is not used for now.</p></li>
+<li><p><strong>rw_lora_path</strong> (<em>str</em>) – Path to the LoRA model for reward modeling.
+Since LoRA is currently not supported for reward modeling,
+this option is not used for now.</p></li>
+<li><p><strong>rew_head_path</strong> – Path to the new reward head for reward modeling.
+Since LoRA is currently not supported for reward modeling,
+this option is not used for now.</p></li>
+<li><p><strong>actor</strong> (<a class="reference internal" href="#realhf.ModelTrainEvalConfig" title="realhf.ModelTrainEvalConfig"><em>ModelTrainEvalConfig</em></a>) – Runtime configuration of the primary LLM.</p></li>
+<li><p><strong>critic</strong> (<a class="reference internal" href="#realhf.ModelTrainEvalConfig" title="realhf.ModelTrainEvalConfig"><em>ModelTrainEvalConfig</em></a>) – Runtime configuration of the critic model of PPO.</p></li>
+<li><p><strong>ref</strong> (<a class="reference internal" href="#realhf.ModelTrainEvalConfig" title="realhf.ModelTrainEvalConfig"><em>ModelTrainEvalConfig</em></a>) – Runtime configuration of the reference LLM.</p></li>
+<li><p><strong>rew</strong> (<a class="reference internal" href="#realhf.ModelTrainEvalConfig" title="realhf.ModelTrainEvalConfig"><em>ModelTrainEvalConfig</em></a>) – Runtime configuration of the reward LLM.</p></li>
+<li><p><strong>actor_train</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – <a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">AllocationConfig</span></code></a> for TrainActor.</p></li>
+<li><p><strong>critic_train</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – <a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">AllocationConfig</span></code></a> for TrainCritic.</p></li>
+<li><p><strong>actor_gen</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – <a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">AllocationConfig</span></code></a> for Rollout.</p></li>
+<li><p><strong>critic_inf</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – <a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">AllocationConfig</span></code></a> for InfValues.</p></li>
+<li><p><strong>rew_inf</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – <a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">AllocationConfig</span></code></a> for InfReward.</p></li>
+<li><p><strong>ref_inf</strong> (<a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><em>AllocationConfig</em></a>) – <a class="reference internal" href="#realhf.AllocationConfig" title="realhf.AllocationConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">AllocationConfig</span></code></a> for InfRef.</p></li>
+<li><p><strong>dataset</strong> (<a class="reference internal" href="#realhf.PromptOnlyDatasetConfig" title="realhf.PromptOnlyDatasetConfig"><em>PromptOnlyDatasetConfig</em></a>) – Dataset configuration.</p></li>
+<li><p><strong>ppo</strong> (<a class="reference internal" href="#realhf.PPOHyperparameters" title="realhf.PPOHyperparameters"><em>PPOHyperparameters</em></a>) – Configuration for the PPO algorithm.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
 </section>
 <section id="model-configurations">
 <h2>Model Configurations<a class="headerlink" href="#model-configurations" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.ModelTrainEvalConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">ModelTrainEvalConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type:</span> <span class="pre">~realhf.api.core.config.ModelFamily</span> <span class="pre">=</span> <span class="pre">llama-7</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">backend:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'megatron'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lora:</span> <span class="pre">~realhf.api.quickstart.model.LoRAConfig</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gradient_checkpointing:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">enable_fp16:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">enable_bf16:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">offload:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zero_stage:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">optimizer:</span> <span class="pre">~realhf.api.quickstart.model.OptimizerConfig</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_critic_from_actor:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.ModelTrainEvalConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Model (or LLM) runtime configuration in ReaL.</p>
+<p>We use a customized model class instead of HuggingFace’s.
+This class enables 3D parallelism and flash-attn for efficiency.
+The model uses non-pad flash-attn to save GPU memory,
+i.e., input sequences are packed into a single 1D tensor.
+The price is that we need to convert each HuggingFace model
+of interest to this customized model manually.</p>
+<p>If you find that the model of your interest is not supported,
+please reach out the developers for help.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>type</strong> (<em>ModelFamily</em>) – Model family type, e.g., LLaMA, QWen, etc.</p></li>
+<li><p><strong>backend</strong> (<em>str</em>) – Backend for training.
+Currently only “megatron” and “deepspeed” are supported.
+For offloaing parameters or optimizer states, use “deepspeed”.
+For parameter reallocation, use “megatron”.</p></li>
+<li><p><strong>path</strong> (<em>str</em>) – Path or identifier of the HuggingFace checkpoint.</p></li>
+<li><p><strong>lora</strong> (<em>LoraConfig</em>) – Whether to use LoRA.</p></li>
+<li><p><strong>gradient_checkpointing</strong> (<em>bool</em>) – Whether to use gradient checkpointing.</p></li>
+<li><p><strong>enable_fp16</strong> (<em>bool</em>) – Whether to use fp16.</p></li>
+<li><p><strong>enable_bf16</strong> (<em>bool</em>) – Whether to use bf16. Mutual exclusive with fp16.</p></li>
+<li><p><strong>offload</strong> (<em>bool</em>) – Whether to offload model parameters to CPU.
+Only valid for the deepspeed backend.</p></li>
+<li><p><strong>parallel</strong> (<a class="reference internal" href="#realhf.ParallelismConfig" title="realhf.ParallelismConfig"><em>ParallelismConfig</em></a>) – Parallelism configuration.</p></li>
+<li><p><strong>zero_stage</strong> (<em>int</em>) – Stage of ZeRO optimization.
+Should be one of 0, 1, 2, 3.</p></li>
+<li><p><strong>optimizer</strong> (<a class="reference internal" href="#realhf.OptimizerConfig" title="realhf.OptimizerConfig"><em>OptimizerConfig</em></a>) – Optimizer configuration.</p></li>
+<li><p><strong>init_critic_from_actor</strong> (<em>bool</em>) – Whether to initialize a
+critic/reward model from a saved LM checkpoint.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.OptimizerConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">OptimizerConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'empty'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lr</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1e-05</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weight_decay</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.05</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">beta1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.9</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">beta2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.95</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1e-05</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_lr_ratio</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lr_scheduler_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cosine'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">warmup_steps_proportion</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.02</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">offload</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.OptimizerConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Optimizer configuration.</p>
+<p>For models that will not be trained, its type should be “empty”.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>type</strong> (<em>str</em>) – Optimizer type. Currently only adam optimizer is supported.</p></li>
+<li><p><strong>lr</strong> (<em>float</em>) – Learning rate.</p></li>
+<li><p><strong>weight_decay</strong> (<em>float</em>) – Weight decay.</p></li>
+<li><p><strong>beta1</strong> (<em>float</em>) – Adam beta1.</p></li>
+<li><p><strong>beta2</strong> (<em>float</em>) – Adam beta2.</p></li>
+<li><p><strong>eps</strong> (<em>float</em>) – Adam epsilon in the denominator.</p></li>
+<li><p><strong>min_lr_ratio</strong> (<em>float</em>) – Minimum learning rate ratio after learning rate annealing.
+Should be in the interval of [0.0, 1.0].</p></li>
+<li><p><strong>lr_scheduler_type</strong> (<em>str</em>) – Learning rate scheduler type.
+One of “linear”, “cosine”, “constant”.</p></li>
+<li><p><strong>warmup_steps_proportion</strong> (<em>float</em>) – Proportion of total training steps to warm up.
+Should be in the interval of [0.0, 1.0].</p></li>
+<li><p><strong>offload</strong> (<em>bool</em>) – Whether to offload optimizer to CPU.
+Only valid for the deepspeed backend.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.ParallelismConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">ParallelismConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_parallel_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipeline_parallel_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_parallel_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_sequence_parallel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.ParallelismConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Model 3D parallelism configuration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>model_parallel_size</strong> (<em>int</em>) – Tensor-model parallelism size.</p></li>
+<li><p><strong>pipeline_parallel_size</strong> (<em>int</em>) – The number of pipeline parallelism stages.</p></li>
+<li><p><strong>data_parallel_size</strong> (<em>int</em>) – Data parallelism size for ZeRO optimization.</p></li>
+<li><p><strong>use_sequence_parallel</strong> (<em>bool</em>) – Whether to use sequence parallelism
+in Megatron combined with tensor-model parallelism.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.AllocationConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">AllocationConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parallel:</span> <span class="pre">~realhf.api.quickstart.model.ParallelismConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device_mesh:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.AllocationConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Allocation configuration for one RPC, used for manual allocation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>parallel</strong> (<a class="reference internal" href="#realhf.ParallelismConfig" title="realhf.ParallelismConfig"><em>ParallelismConfig</em></a>) – Parallelism strategy configuration.</p></li>
+<li><p><strong>device_mesh</strong> (<em>str</em>) – String representation for device mesh.
+If it is composed of multiple nodes, it should be in the form of
+slurm nodelist, e.g., node[01-02] or node01,node02.
+If it is a slice on a single node,
+we restrict it occupies 1, 2, 4, or 8 contiguous GPUs in the node.
+In this case, the string representation is similar to the MPI hostfile, e.g.,
+“node01:0-3” for the first 4 GPUs on node01.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.ReaLModelConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">ReaLModelConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">n_layers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_kv_heads</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">head_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hidden_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">intermediate_dim</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vocab_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_positions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embd_pdrop</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resid_pdrop</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">attn_pdrop</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">layer_norm_epsilon</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1e-05</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">activation_function</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'gelu'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">scale_attn_by_inverse_layer_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_attention_bias</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">layer_norm_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mlp_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">apply_rotary</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rotary_base</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10000.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rotary_interleaved</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rotary_scaling</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rotary_scaling_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_critic</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gradient_accumulation_fusion</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">share_embeddings_and_output_weights</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.ReaLModelConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Configuration for ReaLModel.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>n_layers</strong> (<em>int</em>) – Number of transformer blocks.</p></li>
+<li><p><strong>n_kv_heads</strong> (<em>int</em>) – Number of key-value attention heads.</p></li>
+<li><p><strong>head_dim</strong> (<em>int</em>) – Dimension of each attention head.
+The number of query heads is hidden_dim // head_dim.</p></li>
+<li><p><strong>hidden_dim</strong> (<em>int</em>) – Hidden dimension of the transformer block.</p></li>
+<li><p><strong>intermediate_dim</strong> (<em>int</em>) – Dimension of the intermediate layer in the MLP.</p></li>
+<li><p><strong>vocab_size</strong> (<em>int</em>) – Vocabulary size.</p></li>
+<li><p><strong>n_positions</strong> (<em>Optional</em><em>[</em><em>int</em><em>]</em>) – Maximum context length. Can be None for
+rotary embedding, where the context length is decided during runtime.</p></li>
+<li><p><strong>embd_pdrop</strong> (<em>float</em>) – Dropout probability for the embedding layer.</p></li>
+<li><p><strong>resid_pdrop</strong> (<em>float</em>) – Dropout probability for the residual connections.</p></li>
+<li><p><strong>attn_pdrop</strong> (<em>float</em>) – Dropout probability for the attention weights.</p></li>
+<li><p><strong>layer_norm_epsilon</strong> (<em>float</em>) – Epsilon for layer normalization.</p></li>
+<li><p><strong>activation_function</strong> (<em>str</em>) – Activation function for the MLP.</p></li>
+<li><p><strong>scale_attn_by_inverse_layer_idx</strong> (<em>bool</em>) – Whether to scale the attention weights
+by the inverse of the layer index.</p></li>
+<li><p><strong>use_attention_bias</strong> (<em>bool</em>) – Whether to use attention bias.</p></li>
+<li><p><strong>layer_norm_type</strong> (<em>Optional</em><em>[</em><em>str</em><em>]</em>) – Type of layer normalization. Either None or “rms”.</p></li>
+<li><p><strong>mlp_type</strong> (<em>Optional</em><em>[</em><em>str</em><em>]</em>) – Type of the MLP. Either None or “llama”.</p></li>
+<li><p><strong>apply_rotary</strong> (<em>bool</em>) – Whether to apply rotary embedding.</p></li>
+<li><p><strong>rotary_base</strong> (<em>float</em>) – Exponential base for the rotary embedding.</p></li>
+<li><p><strong>rotary_interleaved</strong> (<em>bool</em>) – Whether to use interleaved rotary embedding.</p></li>
+<li><p><strong>rotary_scaling</strong> (<em>Optional</em><em>[</em><em>float</em><em>]</em>) – Scaling factor for the rotary embedding.</p></li>
+<li><p><strong>rotary_scaling_type</strong> (<em>Optional</em><em>[</em><em>str</em><em>]</em>) – Type of scaling for the rotary embedding.</p></li>
+<li><p><strong>is_critic</strong> (<em>bool</em>) – Whether the model is a critic model.</p></li>
+<li><p><strong>gradient_accumulation_fusion</strong> (<em>bool</em>) – Whether to fuse
+gradient accumulation in Megatron.
+Currently not supported.</p></li>
+<li><p><strong>share_embeddings_and_output_weights</strong> (<em>bool</em>) – Whether to share
+the embeddings and output weights.
+Currently not supported.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.impl.model.nn.real_llm_api.</span></span><span class="sig-name descname"><span class="pre">ReaLModel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#realhf.ReaLModelConfig" title="realhf.api.core.model_api.ReaLModelConfig"><span class="pre">ReaLModelConfig</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dtype</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">device</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel" title="Link to this definition">¶</a></dt>
+<dd><p>The transformer model used in ReaL.</p>
+<p>This model supports 3D parallelism, offloaded inference,
+and parameter reallocation. It is usually more efficient
+than HuggingFace implementations.</p>
+<p>During construction, model parameters are not instantiated
+immediately because the model may be redistributed.
+The method <code class="docutils literal notranslate"><span class="pre">instantiate</span></code> should be called before using
+model parameters, e.g., forward or state dict.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>config</strong> (<a class="reference internal" href="#realhf.ReaLModelConfig" title="realhf.api.core.model_api.ReaLModelConfig"><em>model_api.ReaLModelConfig</em></a>) – The model configuration.</p></li>
+<li><p><strong>dtype</strong> (<em>Optional</em><em>[</em><em>torch.dtype</em><em>]</em><em>, </em><em>optional</em>) – The data type of the model.</p></li>
+<li><p><strong>device</strong> – The device of the model.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.async_offload">
+<span class="sig-name descname"><span class="pre">async_offload</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.async_offload" title="Link to this definition">¶</a></dt>
+<dd><p>Trigger offload asynchronously.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_codellama">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">config_from_codellama</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hf_config</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_critic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_codellama" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_deepseek">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">config_from_deepseek</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hf_config</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_critic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_deepseek" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_llama">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">config_from_llama</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hf_config</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_critic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_llama" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_codellama">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">config_to_codellama</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_codellama" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_deepseek">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">config_to_deepseek</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_deepseek" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_llama">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">config_to_llama</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_llama" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.from_codellama">
+<span class="sig-name descname"><span class="pre">from_codellama</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">load_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_critic_from_actor</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.from_codellama" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.from_deepseek">
+<span class="sig-name descname"><span class="pre">from_deepseek</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">load_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_critic_from_actor</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.from_deepseek" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.from_llama">
+<span class="sig-name descname"><span class="pre">from_llama</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">load_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_critic_from_actor</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.from_llama" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.instantiate">
+<span class="sig-name descname"><span class="pre">instantiate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.instantiate" title="Link to this definition">¶</a></dt>
+<dd><p>Instantiate the model parameters.</p>
+<p>Note that users can append hooks to this method
+to do more processing, such as loading from HuggingFace models.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.is_critic">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">is_critic</span></span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.is_critic" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.num_layers">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">num_layers</span></span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.num_layers" title="Link to this definition">¶</a></dt>
+<dd><p>Return the number of embedding or transformer layers in this pipeline stage.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.to_codellama">
+<span class="sig-name descname"><span class="pre">to_codellama</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tokenizer</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.to_codellama" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.to_deepseek">
+<span class="sig-name descname"><span class="pre">to_deepseek</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tokenizer</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.to_deepseek" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.to_llama">
+<span class="sig-name descname"><span class="pre">to_llama</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tokenizer</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.to_llama" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.impl.model.nn.real_llm_api.ReaLModel.wait_for_offload">
+<span class="sig-name descname"><span class="pre">wait_for_offload</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.wait_for_offload" title="Link to this definition">¶</a></dt>
+<dd><p>Wait for offload to finish.</p>
+</dd></dl>
+
+</dd></dl>
+
 </section>
 <section id="dataset-configurations">
 <h2>Dataset Configurations<a class="headerlink" href="#dataset-configurations" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.PromptAnswerDatasetConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">PromptAnswerDatasetConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">train_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">valid_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_seqlen</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1024</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">train_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">valid_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.PromptAnswerDatasetConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Datasets used for SFT.</p>
+<p>The raw data must be a json or jsonl file, where each piece of data is a dictionary
+with keys <cite>prompt</cite> and <cite>answer</cite>. Both <cite>prompt</cite> and <cite>answer</cite> are strings.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>train_path</strong> (<em>str</em>) – Path to the training dataset.</p></li>
+<li><p><strong>valid_path</strong> (<em>str</em>) – Path to the evaluation dataset.</p></li>
+<li><p><strong>max_seqlen</strong> (<em>int</em>) – Maximum sequence length (prompt + answer).
+Sequences longer than this will be truncated.</p></li>
+<li><p><strong>train_bs_n_seqs</strong> (<em>int</em>) – Number of sequences in each batch during training.</p></li>
+<li><p><strong>valid_bs_n_seqs</strong> (<em>int</em>) – Number of sequences in each batch during validation.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.PairedComparisonDatasetConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">PairedComparisonDatasetConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">train_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">valid_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_pairs_per_prompt</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_seqlen</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1024</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">train_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">valid_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.PairedComparisonDatasetConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Datasets used for paired-comparison reward modeling and DPO.</p>
+<p>The raw data must be a json or jsonl file, where each piece of data is a dictionary
+with keys <cite>prompt</cite>, <cite>pos_answers</cite>, and <cite>neg_answers</cite>. <cite>prompt</cite> is a string.
+<cite>pos_answers</cite> and <cite>neg_answers</cite> are lists of strings. They must have the same size.</p>
+<p>Answer pairs of the same prompt will be sampled in the same batch. Hence, the number of sequences
+in each batch must be even, in the form of [P1A1+, P1A1-, P1A2+, P1A2-, P2A1+, P2A1-, P2A2+, P2A2-, …],
+where <cite>P</cite> means prompt, <cite>A</cite> means answer, <cite>+</cite> means positive, and <cite>-</cite> means negative.</p>
+<p>The raw dataset may contain multiple answer pairs for each prompt. We will randomly sample
+<cite>max_pairs_per_prompt</cite> answer pairs for each prompt in each epoch.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>train_path</strong> (<em>str</em>) – Path to the training dataset.</p></li>
+<li><p><strong>valid_path</strong> (<em>str</em>) – Path to the evaluation dataset.</p></li>
+<li><p><strong>max_pairs_per_prompt</strong> (<em>int</em>) – Maximum number of answer pairs per prompt.</p></li>
+<li><p><strong>max_seqlen</strong> (<em>int</em>) – Maximum sequence length (prompt + answer).
+Sequences longer than this will be truncated.</p></li>
+<li><p><strong>train_bs_n_seqs</strong> (<em>int</em>) – Number of sequences in each batch during training.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.PromptOnlyDatasetConfig">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">PromptOnlyDatasetConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_prompt_len</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">train_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad_to_max_length</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.PromptOnlyDatasetConfig" title="Link to this definition">¶</a></dt>
+<dd><p>Datasets used for PPO RLHF.</p>
+<p>The raw data must be a json or jsonl file, where each piece of data is a dictionary
+with a single key called <cite>prompt</cite>, which is a string.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>path</strong> (<em>str</em>) – Path to the training dataset.</p></li>
+<li><p><strong>max_prompt_len</strong> (<em>int</em>) – Maximum prompt length.
+Prompts longer than this will be truncated.</p></li>
+<li><p><strong>train_bs_n_seqs</strong> (<em>int</em>) – Number of prompts in each batch.</p></li>
+<li><p><strong>pad_to_max_length</strong> (<em>bool</em>) – Whether to pad prompts to the maximum length.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
 </section>
 <section id="namedarray">
 <h2><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code><a class="headerlink" href="#namedarray" title="Link to this heading">¶</a></h2>
@@ -223,9 +851,155 @@ It is inherited from the previous SRL project.</p>
 <li><p>NamedArray can store metadata such as sequence lengths, which is useful for padding and masking without causing CUDA synchronization.</p></li>
 </ol>
 <p>Users can regard it as a nested dictionary of arrays, except that indexing a <code class="docutils literal notranslate"><span class="pre">NamedArray</span></code> results in <em>slicing every hosted arrays</em> (again, we don’t use this feature in this project).</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.base.namedarray.</span></span><span class="sig-name descname"><span class="pre">NamedArray</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray" title="Link to this definition">¶</a></dt>
+<dd><p>A class acting like a dict that holds torch tensors as values.</p>
+<p>NamedArray supports dict-like unpacking and string indexing, and exposes integer slicing reads
+and writes applied to all contained objects, which must share
+indexing (__getitem__) behavior (e.g. numpy arrays or torch tensors).</p>
+<p>NamedArray also supports metadata, which is useful for recording sequence lengths.</p>
+<p>Example:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">class</span> <span class="nc">Point</span><span class="p">(</span><span class="n">NamedArray</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+<span class="gp">... </span>        <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+<span class="gp">... </span>        <span class="n">y</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+<span class="gp">... </span>        <span class="p">):</span>
+<span class="gp">... </span>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="n">y</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="o">=</span><span class="n">Point</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">]),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">3</span><span class="p">,</span><span class="mi">4</span><span class="p">]))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span>
+<span class="go">Point(x=array([1, 2]), y=array([3, 4]))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+<span class="go">Point(x=array([1]), y=array([3]))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="go">Point(x=1, y=3)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="o">.</span><span class="n">x</span>
+<span class="go">array([1, 2])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[</span><span class="s1">&#39;y&#39;</span><span class="p">]</span>
+<span class="go">array([3, 4])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span>
+<span class="go">Point(x=array([0, 2]), y=array([0, 4]))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">Point</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span>
+<span class="go">Point(x=array([5, 2]), y=array([5, 4]))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="s1">&#39;x&#39;</span> <span class="ow">in</span> <span class="n">p</span>
+<span class="go">True</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">list</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+<span class="go">[&#39;x&#39;, &#39;y&#39;]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">list</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+<span class="go">[array([5, 2]), array([5, 4])]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+<span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+<span class="gp">...</span>
+<span class="go">x [5 2]</span>
+<span class="go">y [5 4]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">foo</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<span class="gp">...</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">foo</span><span class="p">(</span><span class="o">**</span><span class="n">p</span><span class="p">)</span>
+<span class="go">[5 2] [5 4]</span>
+</pre></div>
+</div>
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.clear_metadata">
+<span class="sig-name descname"><span class="pre">clear_metadata</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.clear_metadata" title="Link to this definition">¶</a></dt>
+<dd><p>Clear all metadata recorded in this object.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.items">
+<span class="sig-name descname"><span class="pre">items</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.items" title="Link to this definition">¶</a></dt>
+<dd><p>Iterate over ordered (field_name, value) pairs like a dict.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.metadata">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">metadata</span></span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.metadata" title="Link to this definition">¶</a></dt>
+<dd><p>Return the metadata of the NamedArray object.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A dict-like metadata of the NamedArray object.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>MappingProxyType</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.pop_metadata">
+<span class="sig-name descname"><span class="pre">pop_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.pop_metadata" title="Link to this definition">¶</a></dt>
+<dd><p>Clear a single metadata entry named “key”.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>key</strong> (<em>str</em>) – The key to be removed.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The value of the removed key.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Any</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.register_metadata">
+<span class="sig-name descname"><span class="pre">register_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.register_metadata" title="Link to this definition">¶</a></dt>
+<dd><p>Register metadata to the NamedArray object.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>kwargs</strong> (<em>Dict</em>) – Metadata to be registered.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
 </section>
 <section id="dataflow-graph">
 <h2>Dataflow Graph<a class="headerlink" href="#dataflow-graph" title="Link to this heading">¶</a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="realhf.MFCDef">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">MFCDef</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_name:</span> <span class="pre">~realhf.api.core.config.ModelName</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_type:</span> <span class="pre">~realhf.api.core.config.ModelFamily</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_path:</span> <span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interface_type:</span> <span class="pre">~realhf.api.core.dfg.ModelInterfaceType</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interface_impl:</span> <span class="pre">~realhf.api.core.dfg.ModelInterface</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_n_seqs:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_n_seqs:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_data:</span> <span class="pre">~typing.List[str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_key_remap:</span> <span class="pre">~typing.Dict[str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_data:</span> <span class="pre">~typing.List[str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_key_remap:</span> <span class="pre">~typing.Dict[str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_return_value:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_n_seqs_per_dp:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">balanced_dp:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_concurrent_calls:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pre_hooks:</span> <span class="pre">~typing.List[~realhf.api.core.dfg.OffloadHook</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.dfg.SyncParamHook]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">post_hooks:</span> <span class="pre">~typing.List[~realhf.api.core.dfg.OffloadHook</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.dfg.SyncParamHook]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_min_flow_seqs:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parents:</span> <span class="pre">~typing.List[str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">children:</span> <span class="pre">~typing.List[str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parent_rpcs:</span> <span class="pre">~typing.List[~realhf.api.core.dfg.MFCDef]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">children_rpcs:</span> <span class="pre">~typing.List[~realhf.api.core.dfg.MFCDef]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_producers:</span> <span class="pre">~typing.Dict[str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">~realhf.api.core.config.ModelName]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data2required_rpc_names:</span> <span class="pre">~typing.Dict[str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">~typing.List[str]]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.MFCDef" title="Link to this definition">¶</a></dt>
+<dd><p>This class defines a model function call (MFC) node in the dataflow graph.</p>
+<p>Dependencies are automatically resolved by the <cite>build_graph</cite> function
+according to the input/output data keys and the model name.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>model_name</strong> (<em>ModelName</em>) – The model identifier to be used by the node.</p></li>
+<li><p><strong>model_type</strong> (<em>ModelFamily</em>) – The specification of the LLM, e.g., LLaMA-7B.
+Used by the profiler and search engine to produce an optimal execution plan.</p></li>
+<li><p><strong>model_path</strong> (<em>str</em>) – The path to the model file. Used to get the config.</p></li>
+<li><p><strong>interface_type</strong> (<em>ModelInterfaceType</em>) – The interface type of this node, e.g., “generate”.</p></li>
+<li><p><strong>interface_impl</strong> (<a class="reference internal" href="customization.html#realhf.ModelInterface" title="realhf.ModelInterface"><em>ModelInterface</em></a>) – The actual interface implementation
+when running the this node.</p></li>
+<li><p><strong>min_n_seqs</strong> (<em>int</em>) – The minimum number of sequences to be processed in a batch.</p></li>
+<li><p><strong>max_n_seqs</strong> (<em>int</em>) – The maximum number of sequences to be processed in a batch.</p></li>
+<li><p><strong>input_data</strong> (<em>List</em><em>[</em><em>str</em><em>]</em>) – The data keys required by this node.</p></li>
+<li><p><strong>input_key_remap</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em>) – Remap input keys to let the interface implementation
+recognize them. Keys are <code class="docutils literal notranslate"><span class="pre">input_data</span></code> and values are the identifiers known to the
+interface.</p></li>
+<li><p><strong>output_data</strong> (<em>List</em><em>[</em><em>str</em><em>]</em>) – The data keys generated by this node.</p></li>
+<li><p><strong>output_key_remap</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em>) – Remap output keys to let MFC recognize them.
+Keys are identifiers known to the interface and values are <code class="docutils literal notranslate"><span class="pre">output_data</span></code>.</p></li>
+<li><p><strong>log_return_value</strong> (<em>bool</em>) – Whether to log the return value of the interface implementation.</p></li>
+<li><p><strong>min_n_seqs_per_dp</strong> (<em>int</em>) – The minimum number of sequences per data parallelism.</p></li>
+<li><p><strong>balanced_dp</strong> (<em>bool</em>) – Whether to balance the data parallelism.</p></li>
+<li><p><strong>max_concurrent_calls</strong> (<em>int</em>) – The maximum number of concurrent calls.</p></li>
+<li><p><strong>pre_hooks</strong> (<em>List</em><em>[</em><em>RPCHook</em><em>]</em>) – The hooks to be executed before the interface implementation.
+Typically parameter reallocation. Should not be manually changed in
+using quickstart experiments.</p></li>
+<li><p><strong>post_hooks</strong> (<em>List</em><em>[</em><em>RPCHook</em><em>]</em>) – The hooks to be executed after the interface implementation.
+Typically offload or parameter reallocation. Should not be manually changed in
+using quickstart experiments.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
 </section>
 </section>
 
@@ -242,11 +1016,64 @@ It is inherited from the previous SRL project.</p>
               <nav id="TableOfContents">
                 <ul>
 <li><a class="reference internal" href="#">Configurations</a><ul>
-<li><a class="reference internal" href="#experiment-configurations">Experiment Configurations</a></li>
-<li><a class="reference internal" href="#model-configurations">Model Configurations</a></li>
-<li><a class="reference internal" href="#dataset-configurations">Dataset Configurations</a></li>
-<li><a class="reference internal" href="#namedarray"><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code></a></li>
-<li><a class="reference internal" href="#dataflow-graph">Dataflow Graph</a></li>
+<li><a class="reference internal" href="#experiment-configurations">Experiment Configurations</a><ul>
+<li><a class="reference internal" href="#realhf.CommonExperimentConfig"><code class="docutils literal notranslate"><span class="pre">CommonExperimentConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SFTConfig"><code class="docutils literal notranslate"><span class="pre">SFTConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.RWConfig"><code class="docutils literal notranslate"><span class="pre">RWConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.DPOConfig"><code class="docutils literal notranslate"><span class="pre">DPOConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.PPOHyperparameters"><code class="docutils literal notranslate"><span class="pre">PPOHyperparameters</span></code></a></li>
+<li><a class="reference internal" href="#realhf.PPOConfig"><code class="docutils literal notranslate"><span class="pre">PPOConfig</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#model-configurations">Model Configurations</a><ul>
+<li><a class="reference internal" href="#realhf.ModelTrainEvalConfig"><code class="docutils literal notranslate"><span class="pre">ModelTrainEvalConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.OptimizerConfig"><code class="docutils literal notranslate"><span class="pre">OptimizerConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.ParallelismConfig"><code class="docutils literal notranslate"><span class="pre">ParallelismConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.AllocationConfig"><code class="docutils literal notranslate"><span class="pre">AllocationConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.ReaLModelConfig"><code class="docutils literal notranslate"><span class="pre">ReaLModelConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel"><code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code></a><ul>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.async_offload"><code class="docutils literal notranslate"><span class="pre">ReaLModel.async_offload()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_codellama"><code class="docutils literal notranslate"><span class="pre">ReaLModel.config_from_codellama()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_deepseek"><code class="docutils literal notranslate"><span class="pre">ReaLModel.config_from_deepseek()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_from_llama"><code class="docutils literal notranslate"><span class="pre">ReaLModel.config_from_llama()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_codellama"><code class="docutils literal notranslate"><span class="pre">ReaLModel.config_to_codellama()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_deepseek"><code class="docutils literal notranslate"><span class="pre">ReaLModel.config_to_deepseek()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.config_to_llama"><code class="docutils literal notranslate"><span class="pre">ReaLModel.config_to_llama()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.from_codellama"><code class="docutils literal notranslate"><span class="pre">ReaLModel.from_codellama()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.from_deepseek"><code class="docutils literal notranslate"><span class="pre">ReaLModel.from_deepseek()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.from_llama"><code class="docutils literal notranslate"><span class="pre">ReaLModel.from_llama()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.instantiate"><code class="docutils literal notranslate"><span class="pre">ReaLModel.instantiate()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.is_critic"><code class="docutils literal notranslate"><span class="pre">ReaLModel.is_critic</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.num_layers"><code class="docutils literal notranslate"><span class="pre">ReaLModel.num_layers</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.to_codellama"><code class="docutils literal notranslate"><span class="pre">ReaLModel.to_codellama()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.to_deepseek"><code class="docutils literal notranslate"><span class="pre">ReaLModel.to_deepseek()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.to_llama"><code class="docutils literal notranslate"><span class="pre">ReaLModel.to_llama()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.impl.model.nn.real_llm_api.ReaLModel.wait_for_offload"><code class="docutils literal notranslate"><span class="pre">ReaLModel.wait_for_offload()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#dataset-configurations">Dataset Configurations</a><ul>
+<li><a class="reference internal" href="#realhf.PromptAnswerDatasetConfig"><code class="docutils literal notranslate"><span class="pre">PromptAnswerDatasetConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.PairedComparisonDatasetConfig"><code class="docutils literal notranslate"><span class="pre">PairedComparisonDatasetConfig</span></code></a></li>
+<li><a class="reference internal" href="#realhf.PromptOnlyDatasetConfig"><code class="docutils literal notranslate"><span class="pre">PromptOnlyDatasetConfig</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#namedarray"><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code></a><ul>
+<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray"><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code></a><ul>
+<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.clear_metadata"><code class="docutils literal notranslate"><span class="pre">NamedArray.clear_metadata()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.items"><code class="docutils literal notranslate"><span class="pre">NamedArray.items()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.metadata"><code class="docutils literal notranslate"><span class="pre">NamedArray.metadata</span></code></a></li>
+<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.pop_metadata"><code class="docutils literal notranslate"><span class="pre">NamedArray.pop_metadata()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.register_metadata"><code class="docutils literal notranslate"><span class="pre">NamedArray.register_metadata()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#dataflow-graph">Dataflow Graph</a><ul>
+<li><a class="reference internal" href="#realhf.MFCDef"><code class="docutils literal notranslate"><span class="pre">MFCDef</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

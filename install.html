@@ -213,8 +213,12 @@ image for deployment in a cluster. The Dockerfile is also available in the repos
 <p>The source code is available at /realhf inside the container. This is an editable installation, so you can modify the code or run experiments directly.</p>
 <p>If you want to develop the code outside a Docker container,
 remember to rerun the editable installation command after mounting:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/your/mounted/code/path<span class="w"> </span>--no-build-isolation
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">REAL_CUDA</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/your/mounted/code/path<span class="w"> </span>--no-build-isolation
 </pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> environment variable is used to install the CUDA extension.</p>
 </div>
 </section>
 <section id="install-from-pypi-or-source">
@@ -222,27 +226,32 @@ remember to rerun the editable installation command after mounting:</p>
 <p>If you prefer not to use Docker, you can also install ReaL from PyPI or from the source.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>We don’t upload a pre-built wheel to PyPI, so the installation will require compiling the C++ and CUDA extensions. If CUDA is not available on your machine, only the C++ extension will be installed.</p>
+<p>We don’t upload a pre-built wheel to PyPI, so the installation will require compiling the C++ and CUDA extensions.
+Control whether to install the extentions with environment variables <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> and <code class="docutils literal notranslate"><span class="pre">REAL_NO_EXT</span></code>.</p>
+<p>The CUDA extention will be installed only if <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> is set to 1.
+No extention will be installed if <code class="docutils literal notranslate"><span class="pre">REAL_NO_EXT</span></code> is set to 1.</p>
 </div>
 <p>First, clone the repository and install all dependencies:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>-U<span class="w"> </span>pip
+<span class="gp">$ </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
 <span class="gp">$ </span><span class="nb">cd</span><span class="w"> </span>ReaLHF
-<span class="gp">$ </span>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>requirements.txt
+<span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>requirements.txt
 </pre></div>
 </div>
-<p>On a GPU machine, also install the requirement CUDA runtime packages:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>git+https://github.com/NVIDIA/TransformerEngine.git@v1.7<span class="w"> </span>--no-deps
-<span class="gp">$ </span>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>flash_attn<span class="w"> </span>--no-build-isolation
+<p>On a GPU machine, also install the required runtime packages:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">MAX_JOBS</span><span class="o">=</span><span class="m">8</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>git+https://github.com/NVIDIA/TransformerEngine.git@v1.4<span class="w"> </span>--no-deps<span class="w"> </span>--no-build-isolation
+<span class="gp">$ </span><span class="nv">MAX_JOBS</span><span class="o">=</span><span class="m">8</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="nv">flash_attn</span><span class="o">==</span><span class="m">2</span>.4.2<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
 <p>Install ReaLHF from PyPI:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>realhf<span class="w"> </span>--no-build-isolation
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">REAL_CUDA</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>realhf<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
-<p>The PyPI package allows you to launch existing experiments with the quickstart command. If you want to modify the code, you should clone the source code and install it from the source:</p>
+<p>The PyPI package allows you to launch existing experiments with the quickstart command.
+If you want to modify the code, you should clone the source code and install it from the source:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
 <span class="gp">$ </span><span class="nb">cd</span><span class="w"> </span>ReaLHF
-<span class="gp">$ </span>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--no-build-isolation
+<span class="gp">$ </span><span class="nv">REAL_CUDA</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
 <p>Next, check <span class="xref std std-doc">quickstart`</span> for instructions on running experiments.</p>
