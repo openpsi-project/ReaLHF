@@ -39,6 +39,9 @@ Issues = "https://github.com/openpsi-project/ReaLHF/issues"
 Documentation = "https://openpsi-project.github.io/ReaLHF/"
 Repository = "https://github.com/openpsi-project/ReaLHF"
 
+[tool.setuptools.dynamic]
+version = {attr = "realhf.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["."] # ["."] by default
 # include = ["csrc/*", "realhf/*"] # ["*"] by default
