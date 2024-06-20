@@ -283,6 +283,9 @@ search_extension = setuptools.Extension(
 )
 ext_modules.append(search_extension)
 
+if os.getenv("REAL_NO_EXT", "0") == "1":
+    ext_modules = []
+
 setuptools.setup(
     name="realhf",
     ext_modules=ext_modules,

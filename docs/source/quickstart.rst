@@ -4,13 +4,9 @@ Quickstart
 Installation
 ---------------
 
-First, clone the ReaL repository from GitHub:
+First, clone the ReaL repository from GitHub and follow the installation instructions in :doc:`install`.
+The following tutorial will run on a GPU machine in the repository directory.
 
-.. code-block:: shell
-
-    $ git clone https://github.com/openpsi-project/ReaLHF
-    $ cd ReaLHF
-    $ pip3 install -e . --no-build-isolation
 
 RLHF with 4x LLaMA-7B in 30min
 ------------------------------------------------
