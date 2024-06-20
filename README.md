@@ -56,7 +56,7 @@ We provide pre-built [Docker images](https://openpsi-project.github.io/ReaLHF/in
 pip3 install realhf --no-build-isolation
 ```
 
-For detailed information, please visit our [documentation site](https://openpsi-project.github.io/ReaLHF/).\
+For detailed information, please visit our [documentation site](https://openpsi-project.github.io/ReaLHF/).
 
 - [Quickstart](https://openpsi-project.github.io/ReaLHF/quickstart.html)
 

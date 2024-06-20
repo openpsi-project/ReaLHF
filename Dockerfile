@@ -1,5 +1,8 @@
+ARG REAL_CPU_BASE_IMAGE
+ARG REAL_GPU_BASE_IMAGE
+
 # >>>>>> CPU image
-FROM ubuntu:22.04 as cpu
+FROM ${REAL_CPU_BASE_IMAGE} as cpu
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update
@@ -31,7 +34,7 @@ EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 
 # >>>>>> GPU image
-FROM nvcr.io/nvidia/pytorch:23.10-py3 AS gpu
+FROM ${REAL_GPU_BASE_IMAGE} AS gpu
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update
