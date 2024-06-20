@@ -4,62 +4,56 @@ Installation
 Docker Images
 --------------
 
-The easiest way to run ReaL is to use the provided Docker images.
-We provide a CPU-only image to launch experiments and a runtime GPU
-image to be deployed in the cluster.
-The Dockerfile has been provided in the repository as well.
+The easiest way to run ReaL is by using the provided Docker images.
+We offer a CPU-only image for launching experiments and a runtime GPU
+image for deployment in a cluster. The Dockerfile is also available in the repository.
 
 To pull the images, run:
 
 .. code-block:: console
 
-   $ docker pull docker.io/garrett4wade/real-cpu
-   $ docker pull docker.io/garrett4wade/real-gpu
+   $ docker pull docker.io/garrett4wade/real-cpu:22.04-0.1.0
+   $ docker pull docker.io/garrett4wade/real-gpu:23.10-py3-0.1.0
 
-.. warning::
+The CPU image is built from "ubuntu:22.04" and the GPU image is built from "nvcr.io/nvidia/pytorch:23.10-py3". The current package version is "0.1.0".
 
-   when using these docker images locally, the user should mount the user code directory
-   to path ``/realhf`` in the container. This is because the image shifts an editable
-   installation at ``/realhf``. When the user code overwrites this path, the change of user
-   code will take effect without re-installing this ``realhf`` PyPI package.
-
-   It's also okay to mount to another location and re-install the package in the container.
-
-To build the images from scratch, run:
+After pulling the Docker images, run your Docker container locally on a GPU node with the following command:
 
 .. code-block:: console
 
-   $ docker build --target=cpu -t real-cpu .
-   $ docker build --target=gpu -t real-gpu .
+   $ docker run -it --gpus all garrett4wade/real-gpu:23.10-py3-0.1.0 bash
+
+The source code is available at /realhf inside the container. This is an editable installation, so you can modify the code or run experiments directly.
+
+If you want to develop the code outside a Docker container,
+remember to rerun the editable installation command after mounting:
+
+.. code-block:: console
+
+   $ pip install -e /your/mounted/code/path --no-build-isolation
+
 
 Install From PyPI or Source
 ----------------------------
 
-If you don't want to use docker, you can also install ReaL from PyPI
-or from source.
+If you prefer not to use Docker, you can also install ReaL from PyPI or from the source.
+
+.. note::
+
+   We don't upload a pre-built wheel to PyPI, so the installation will require compiling the C++ and CUDA extensions. If CUDA is not available on your machine, only the C++ extension will be installed.
 
 Install from PyPI:
 
 .. code-block:: console
 
-   $ pip install realhf --no-build-isolation
+   $ python3 -m pip install realhf --no-build-isolation
 
-.. note::
-
-   Installing from the PyPI wheel still requires the user to clone the
-   source code to launch experiments.
-
-Install from source:
+The PyPI package allows you to launch existing experiments with the quickstart command. If you want to modify the code, you should clone the source code and install it from the source:
 
 .. code-block:: console
 
-   $ $ git clone https://github.com/openpsi-project/ReaLHF
+   $ git clone https://github.com/openpsi-project/ReaLHF
    $ cd ReaLHF
-   $ pip install -e . --no-build-isolation
+   $ python3 -m pip install -e . --no-build-isolation
 
-.. note::
-
-   In an environment without CUDA, ReaL will only
-   install necessary Python modules for launching distributed experiments.
-   That's why we have two different docker images for
-   launching and deploying ReaL.
+Next, check :doc:`quickstart`` for instructions on running experiments.
