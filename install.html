@@ -30,7 +30,7 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
-        <link rel="next" title="Quickstart" href="quickstart.html" />
+        <link rel="next" title="Configurations" href="expconfig.html" />
         <link rel="prev" title="Introduction" href="intro.html" />
     <style>
       :root {
@@ -173,10 +173,9 @@
     <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="intro.html">Introduction</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Installation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
@@ -198,55 +197,44 @@
 <h1>Installation<a class="headerlink" href="#installation" title="Link to this heading">¶</a></h1>
 <section id="docker-images">
 <h2>Docker Images<a class="headerlink" href="#docker-images" title="Link to this heading">¶</a></h2>
-<p>The easiest way to run ReaL is to use the provided Docker images.
-We provide a CPU-only image to launch experiments and a runtime GPU
-image to be deployed in the cluster.
-The Dockerfile has been provided in the repository as well.</p>
+<p>The easiest way to run ReaL is by using the provided Docker images.
+We offer a CPU-only image for launching experiments and a runtime GPU
+image for deployment in a cluster. The Dockerfile is also available in the repository.</p>
 <p>To pull the images, run:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-cpu
-<span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-gpu
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-cpu:22.04-0.1.0
+<span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-gpu:23.10-py3-0.1.0
 </pre></div>
 </div>
-<div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p>when using these docker images locally, the user should mount the user code directory
-to path <code class="docutils literal notranslate"><span class="pre">/realhf</span></code> in the container. This is because the image shifts an editable
-installation at <code class="docutils literal notranslate"><span class="pre">/realhf</span></code>. When the user code overwrites this path, the change of user
-code will take effect without re-installing this <code class="docutils literal notranslate"><span class="pre">realhf</span></code> PyPI package.</p>
-<p>It’s also okay to mount to another location and re-install the package in the container.</p>
+<p>The CPU image is built from “ubuntu:22.04” and the GPU image is built from “nvcr.io/nvidia/pytorch:23.10-py3”. The current package version is “0.1.0”.</p>
+<p>After pulling the Docker images, run your Docker container locally on a GPU node with the following command:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--gpus<span class="w"> </span>all<span class="w"> </span>garrett4wade/real-gpu:23.10-py3-0.1.0<span class="w"> </span>bash
+</pre></div>
 </div>
-<p>To build the images from scratch, run:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>build<span class="w"> </span>--target<span class="o">=</span>cpu<span class="w"> </span>-t<span class="w"> </span>real-cpu<span class="w"> </span>.
-<span class="gp">$ </span>docker<span class="w"> </span>build<span class="w"> </span>--target<span class="o">=</span>gpu<span class="w"> </span>-t<span class="w"> </span>real-gpu<span class="w"> </span>.
+<p>The source code is available at /realhf inside the container. This is an editable installation, so you can modify the code or run experiments directly.</p>
+<p>If you want to develop the code outside a Docker container,
+remember to rerun the editable installation command after mounting:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/your/mounted/code/path<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
 </section>
 <section id="install-from-pypi-or-source">
 <h2>Install From PyPI or Source<a class="headerlink" href="#install-from-pypi-or-source" title="Link to this heading">¶</a></h2>
-<p>If you don’t want to use docker, you can also install ReaL from PyPI
-or from source.</p>
+<p>If you prefer not to use Docker, you can also install ReaL from PyPI or from the source.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>We don’t upload a pre-built wheel to PyPI, so the installation will require compiling the C++ and CUDA extensions. If CUDA is not available on your machine, only the C++ extension will be installed.</p>
+</div>
 <p>Install from PyPI:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>realhf<span class="w"> </span>--no-build-isolation
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>realhf<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Installing from the PyPI wheel still requires the user to clone the
-source code to launch experiments.</p>
-</div>
-<p>Install from source:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
+<p>The PyPI package allows you to launch existing experiments with the quickstart command. If you want to modify the code, you should clone the source code and install it from the source:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
 <span class="gp">$ </span><span class="nb">cd</span><span class="w"> </span>ReaLHF
-<span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--no-build-isolation
+<span class="gp">$ </span>python3<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>In an environment without CUDA, ReaL will only
-install necessary Python modules for launching distributed experiments.
-That’s why we have two different docker images for
-launching and deploying ReaL.</p>
-</div>
+<p>Next, check <span class="xref std std-doc">quickstart`</span> for instructions on running experiments.</p>
 </section>
 </section>
 
@@ -290,10 +278,10 @@ launching and deploying ReaL.</p>
             </a>
           </li>
         <li class="page-item ms-auto">
-            <a href="quickstart.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Quickstart">
+            <a href="expconfig.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Configurations">
               <div class="d-flex flex-column">
                 <span class="text-small text-end text-start text-muted">Next</span>
-                <span class="underline">Quickstart</span>
+                <span class="underline">Configurations</span>
               </div>
               <span class="next-page"><i class="bi bi-caret-right"></i></span>
             </a>

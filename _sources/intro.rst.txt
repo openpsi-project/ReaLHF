@@ -1,13 +1,6 @@
 Introduction
 ----------------
 
-ReaL introduces a novel technique called *Parameter Reallocation*
-(the name *ReaL* is the abbreviation for *ReaLlocation*), which dynamically
-shifts model parameters and changes the parallelization strategy during training.
-This technique can significantly reduce the communication overhead and improve
-GPU utilization in RLHF training, leading to a substantial speedup over the state-of-the-art
-open-source systems.
-
 We observe two major limitations based on our profiling
 of the previous RLHF systems, as shown in the :ref:`timeline`.
 
@@ -39,8 +32,8 @@ The key idea of ReaL is to enable dynamic **reallocation of
 model parameters** between GPUs to improve the efficiency of
 the entire RLHF training process.
 By first choosing a parallelization strategy tailored for
-each model function call
-(e.g., use pipelining for Generation, while tensor parallelism for Training)
+each computation workload
+(e.g., pipelining for Generation and tensor parallelism for Training)
 and then executing these calls concurrently with a smaller
 parallelization degree (e.g., Actor and Critic in Training),
 we can eliminate redundant communication while maximizing GPU utilization,
@@ -50,6 +43,8 @@ prior solutions.
 
 We show throughput comparison with the state-of-the-art open-source systems
 in the following figure.
+
+(In the following figure, as the number of GPUs increases, the model size scales up from LLaMA 7B, LLaMA 13B, and CodeLLaMA 34B, to the largest LLaMA 70B.)
 
 .. image:: images/vws.svg
 

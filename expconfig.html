@@ -30,8 +30,8 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
-        <link rel="next" title="Customization" href="customization.html" />
-        <link rel="prev" title="Quickstart" href="quickstart.html" />
+        <link rel="next" title="Quickstart" href="quickstart.html" />
+        <link rel="prev" title="Installation" href="install.html" />
     <style>
       :root {
         --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
@@ -173,10 +173,9 @@
     <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="intro.html">Introduction</a></li>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Configurations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
@@ -198,7 +197,7 @@
 <h1>Configurations<a class="headerlink" href="#configurations" title="Link to this heading">¶</a></h1>
 <p>We illustrate configurations for quickstart experiments in this page.
 Each type of experiment (e.g., SFT, PPO) corresponds to a specific
-configuration class (e.g., <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code> for SFT).</p>
+configuration object (e.g., <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code> for SFT).</p>
 <p>Since ReaL uses <a class="reference external" href="https://hydra.cc/">Hydra</a> for configuration management,
 users can override these options provided by the class recursively
 with command line arguments.
@@ -214,14 +213,14 @@ Please check <a class="reference internal" href="quickstart.html"><span class="d
 </section>
 <section id="namedarray">
 <h2><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code><a class="headerlink" href="#namedarray" title="Link to this heading">¶</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">NamedArray`</span></code> is an object we use in model function calls.
+<p><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code> is an object we use in model function calls.
 It is inherited from the previous SRL project.</p>
 <p>Named array extends plain arrays/tensors in the following ways.</p>
 <ol class="arabic simple">
 <li><p>NamedArray aggregates multiple arrays, possibly of different shapes.</p></li>
 <li><p>Each array is given a name, providing a user-friendly way of indexing to the corresponding data.</p></li>
 <li><p>NamedArrays can be nested. (Although it should <em>not</em> be nested in this system.)</p></li>
-<li><p>NamedArray can store metadata such as sequence length, which is useful for padding and masking without causing CUDA synchronization.</p></li>
+<li><p>NamedArray can store metadata such as sequence lengths, which is useful for padding and masking without causing CUDA synchronization.</p></li>
 </ol>
 <p>Users can regard it as a nested dictionary of arrays, except that indexing a <code class="docutils literal notranslate"><span class="pre">NamedArray</span></code> results in <em>slicing every hosted arrays</em> (again, we don’t use this feature in this project).</p>
 </section>
@@ -264,19 +263,19 @@ It is inherited from the previous SRL project.</p>
       <nav id="paginator" class="py-4" aria-label="Documentation navigation">
     <div class="container">
       <ul class="pagination justify-content-between mb-0"><li class="page-item">
-            <a href="quickstart.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Quickstart">
+            <a href="install.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Installation">
               <span class="prev-page"><i class="bi bi-caret-left"></i></span>
               <div class="d-flex flex-column">
                 <span class="text-small text-start text-muted">Previous</span>
-                <span class="underline">Quickstart</span>
+                <span class="underline">Installation</span>
               </div>
             </a>
           </li>
         <li class="page-item ms-auto">
-            <a href="customization.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Customization">
+            <a href="quickstart.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Quickstart">
               <div class="d-flex flex-column">
                 <span class="text-small text-end text-start text-muted">Next</span>
-                <span class="underline">Customization</span>
+                <span class="underline">Quickstart</span>
               </div>
               <span class="next-page"><i class="bi bi-caret-right"></i></span>
             </a>

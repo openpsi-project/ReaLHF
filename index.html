@@ -172,10 +172,9 @@
     <ul>
 <li class="toctree-l1"><a class="reference internal" href="intro.html">Introduction</a></li>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
@@ -195,31 +194,6 @@
         <article id="content" class="nftt-content" role="main">
     <section id="welcome-to-real-s-documentation">
 <h1>Welcome to ReaL’s documentation!<a class="headerlink" href="#welcome-to-real-s-documentation" title="Link to this heading">¶</a></h1>
-<section id="highlights-of-real">
-<h2>Highlights of ReaL<a class="headerlink" href="#highlights-of-real" title="Link to this heading">¶</a></h2>
-<section id="super-efficient">
-<h3><strong>Super-Efficient</strong><a class="headerlink" href="#super-efficient" title="Link to this heading">¶</a></h3>
-<p>ReaL introduces a novel <em>parameter reallocation</em> technique. It dynamically shifts parameters and
-adjusts parallel strategies of LLMs during training. This technique significantly reduces communication
-overhead and improves GPU utilization for RLHF.</p>
-<p>Combined with advanced techniques for LLM training, such as 3D parallelism, ZeRO optimization, and offloading,
-ReaL can scale RLHF training to hundreds or thousands of GPUs, maintaining high throughput and efficiency.</p>
-<p>Beyond large-scale training, ReaL is also memory-efficient with limited resources. For example, ReaL can
-train 70B LLMs with offloading on a single node.</p>
-<p>For more details, check our <a class="reference external" href="intro">introduction page</a>.</p>
-</section>
-<section id="easy-to-use">
-<h3><strong>Easy to use</strong><a class="headerlink" href="#easy-to-use" title="Link to this heading">¶</a></h3>
-<p>Install with PyPI or use our Docker image, then run your experiment with a single command!</p>
-<p>Check our <a class="reference external" href="quickstart">quickstart guide</a> for more details.</p>
-</section>
-<section id="flexible">
-<h3><strong>Flexible</strong><a class="headerlink" href="#flexible" title="Link to this heading">¶</a></h3>
-<p>ReaL’s system implementations are fully decoupled from algorithm interfaces. Achieve optimal performance
-for your customized application within 100 lines of code!</p>
-<p>Please refer to our <a class="reference external" href="customization">customization guide</a> for more details.</p>
-</section>
-</section>
 <section id="contents">
 <h2>Contents<a class="headerlink" href="#contents" title="Link to this heading">¶</a></h2>
 <div class="toctree-wrapper compound">
@@ -228,6 +202,14 @@ for your customized application within 100 lines of code!</p>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="install.html#docker-images">Docker Images</a></li>
 <li class="toctree-l2"><a class="reference internal" href="install.html#install-from-pypi-or-source">Install From PyPI or Source</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="expconfig.html#experiment-configurations">Experiment Configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="expconfig.html#model-configurations">Model Configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="expconfig.html#dataset-configurations">Dataset Configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="expconfig.html#namedarray"><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="expconfig.html#dataflow-graph">Dataflow Graph</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a><ul>
@@ -241,35 +223,25 @@ for your customized application within 100 lines of code!</p>
 </li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="expconfig.html#experiment-configurations">Experiment Configurations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="expconfig.html#model-configurations">Model Configurations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="expconfig.html#dataset-configurations">Dataset Configurations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="expconfig.html#namedarray"><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="expconfig.html#dataflow-graph">Dataflow Graph</a></li>
-</ul>
-</li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="customization.html#customizing-datasets">Customizing Datasets</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="customization.html#overview">Overview</a></li>
-<li class="toctree-l3"><a class="reference internal" href="customization.html#how-dataset-configuration-is-parsed">How dataset configuration is parsed</a></li>
-<li class="toctree-l3"><a class="reference internal" href="customization.html#steps-for-implementing-a-new-dataset">Steps for implementing a new dataset</a></li>
+<li class="toctree-l3"><a class="reference internal" href="customization.html#how-dataset-configuration-is-parsed">How Dataset Configuration is Parsed</a></li>
+<li class="toctree-l3"><a class="reference internal" href="customization.html#steps-for-implementing-a-new-dataset">Steps for Implementing a New Dataset</a></li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="customization.html#customizing-models">Customizing Models</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="customization.html#id1">Overview</a></li>
-<li class="toctree-l3"><a class="reference internal" href="customization.html#steps-to-support-a-new-huggingface-model">Steps to support a new HuggingFace model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="customization.html#steps-to-support-a-new-huggingface-model">Steps to Support a New HuggingFace Model</a></li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="customization.html#customizing-algorithms">Customizing Algorithms</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="customization.html#id2">Overview</a></li>
-<li class="toctree-l3"><a class="reference internal" href="customization.html#example-1-replace-the-interface">Example 1: Replace the interface</a></li>
-<li class="toctree-l3"><a class="reference internal" href="customization.html#example-2-develop-a-new-dataflow">Example 2: Develop a new dataflow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="customization.html#example-a-customized-reward-function-for-ppo">Example: A Customized Reward Function for PPO</a></li>
 </ul>
 </li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
@@ -290,12 +262,6 @@ for your customized application within 100 lines of code!</p>
               <nav id="TableOfContents">
                 <ul>
 <li><a class="reference internal" href="#">Welcome to ReaL’s documentation!</a><ul>
-<li><a class="reference internal" href="#highlights-of-real">Highlights of ReaL</a><ul>
-<li><a class="reference internal" href="#super-efficient"><strong>Super-Efficient</strong></a></li>
-<li><a class="reference internal" href="#easy-to-use"><strong>Easy to use</strong></a></li>
-<li><a class="reference internal" href="#flexible"><strong>Flexible</strong></a></li>
-</ul>
-</li>
 <li><a class="reference internal" href="#contents">Contents</a></li>
 </ul>
 </li>

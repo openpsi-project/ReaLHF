@@ -3,7 +3,7 @@ Configurations
 
 We illustrate configurations for quickstart experiments in this page.
 Each type of experiment (e.g., SFT, PPO) corresponds to a specific 
-configuration class (e.g., :class:`realhf.SFTConfig` for SFT).
+configuration object (e.g., :class:`realhf.SFTConfig` for SFT).
 
 Since ReaL uses `Hydra <https://hydra.cc/>`_ for configuration management,
 users can override these options provided by the class recursively
@@ -57,7 +57,7 @@ Dataset Configurations
 ``NamedArray``
 -----------------------
 
-``NamedArray``` is an object we use in model function calls.
+``NamedArray`` is an object we use in model function calls.
 It is inherited from the previous SRL project.
 
 Named array extends plain arrays/tensors in the following ways.
@@ -65,7 +65,7 @@ Named array extends plain arrays/tensors in the following ways.
 1. NamedArray aggregates multiple arrays, possibly of different shapes.
 2. Each array is given a name, providing a user-friendly way of indexing to the corresponding data.
 3. NamedArrays can be nested. (Although it should *not* be nested in this system.)
-4. NamedArray can store metadata such as sequence length, which is useful for padding and masking without causing CUDA synchronization.
+4. NamedArray can store metadata such as sequence lengths, which is useful for padding and masking without causing CUDA synchronization.
 
 Users can regard it as a nested dictionary of arrays, except that indexing a ``NamedArray`` results in *slicing every hosted arrays* (again, we don't use this feature in this project).
 

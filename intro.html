@@ -173,10 +173,9 @@
     <ul class="current">
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Introduction</a></li>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
@@ -196,12 +195,6 @@
         <article id="content" class="nftt-content" role="main">
     <section id="introduction">
 <h1>Introduction<a class="headerlink" href="#introduction" title="Link to this heading">¶</a></h1>
-<p>ReaL introduces a novel technique called <em>Parameter Reallocation</em>
-(the name <em>ReaL</em> is the abbreviation for <em>ReaLlocation</em>), which dynamically
-shifts model parameters and changes the parallelization strategy during training.
-This technique can significantly reduce the communication overhead and improve
-GPU utilization in RLHF training, leading to a substantial speedup over the state-of-the-art
-open-source systems.</p>
 <p>We observe two major limitations based on our profiling
 of the previous RLHF systems, as shown in the <a class="reference internal" href="#timeline"><span class="std std-ref">Timeline Figure</span></a>.</p>
 <figure class="align-default" id="id1">
@@ -229,8 +222,8 @@ of the dependencies between tasks.</p>
 model parameters</strong> between GPUs to improve the efficiency of
 the entire RLHF training process.
 By first choosing a parallelization strategy tailored for
-each model function call
-(e.g., use pipelining for Generation, while tensor parallelism for Training)
+each computation workload
+(e.g., pipelining for Generation and tensor parallelism for Training)
 and then executing these calls concurrently with a smaller
 parallelization degree (e.g., Actor and Critic in Training),
 we can eliminate redundant communication while maximizing GPU utilization,
@@ -238,6 +231,7 @@ effectively addressing the limitations of
 prior solutions.</p>
 <p>We show throughput comparison with the state-of-the-art open-source systems
 in the following figure.</p>
+<p>(In the following figure, as the number of GPUs increases, the model size scales up from LLaMA 7B, LLaMA 13B, and CodeLLaMA 34B, to the largest LLaMA 70B.)</p>
 <img alt="_images/vws.svg" src="_images/vws.svg" /><p>We also show the estimated time for
 completing the entire full-scale 4*70B RLHF training process,
 composed of 4 iterations with 400 steps for each iteration as for LLaMA-2.</p>

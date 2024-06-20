@@ -30,8 +30,8 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
-        <link rel="next" title="Configurations" href="expconfig.html" />
-        <link rel="prev" title="Installation" href="install.html" />
+        <link rel="next" title="Customization" href="customization.html" />
+        <link rel="prev" title="Configurations" href="expconfig.html" />
     <style>
       :root {
         --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
@@ -173,10 +173,9 @@
     <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="intro.html">Introduction</a></li>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
-<li class="toctree-l1 current"><a class="current reference internal" href="#">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
@@ -201,6 +200,7 @@
 <p>First, clone the ReaL repository from GitHub:</p>
 <div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
 $<span class="w"> </span><span class="nb">cd</span><span class="w"> </span>ReaLHF
+$<span class="w"> </span>pip3<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
 </section>
@@ -343,7 +343,7 @@ training and validation sets for reward modeling, respectively.</p>
 <span class="w">    </span>dataset.valid_bs_n_seqs<span class="o">=</span><span class="m">512</span>
 </pre></div>
 </div>
-<p>It’s common practice to use the SFT model to initialize the reward model.
+<p>It’s a common practice to use the SFT model to initialize the reward model.
 Therefore, we can pass the path of the saved SFT model as the <code class="docutils literal notranslate"><span class="pre">model.path</span></code> option.
 Using the pre-trained LLaMA checkpoint is also feasible, but it may not perform as well.</p>
 <p>In reward modeling, the batch size is the number of paired comparisons.
@@ -473,9 +473,8 @@ In ReaL, these function calls can have independent <em>allocations</em> and <em>
 Each GPU can accommodate parameter shards of multiple models (e.g., both the Actor and the Reward).
 Between two function calls upon the same model, ReaL will automatically re-allocate
 model parameters between source and destination locations and properly remap
-parallel strategies.
-.. The reallocation also includes GPU-to-CPU reallocation, referred to as <em>offloading</em>.
-This technique can substantially reduce communication overhead caused by parallelization
+parallel strategies.</p>
+<p>This technique can substantially reduce communication overhead caused by parallelization
 and improve GPU utilization.
 Please check <a class="reference internal" href="intro.html"><span class="doc">Introduction</span></a> for more details.</p>
 <p>In the above command, fields <code class="docutils literal notranslate"><span class="pre">actor</span></code>, <code class="docutils literal notranslate"><span class="pre">critic</span></code>, <code class="docutils literal notranslate"><span class="pre">ref</span></code>, and <code class="docutils literal notranslate"><span class="pre">rew</span></code>
@@ -536,19 +535,19 @@ and iterate on the algorithm design.</p>
       <nav id="paginator" class="py-4" aria-label="Documentation navigation">
     <div class="container">
       <ul class="pagination justify-content-between mb-0"><li class="page-item">
-            <a href="install.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Installation">
+            <a href="expconfig.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Configurations">
               <span class="prev-page"><i class="bi bi-caret-left"></i></span>
               <div class="d-flex flex-column">
                 <span class="text-small text-start text-muted">Previous</span>
-                <span class="underline">Installation</span>
+                <span class="underline">Configurations</span>
               </div>
             </a>
           </li>
         <li class="page-item ms-auto">
-            <a href="expconfig.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Configurations">
+            <a href="customization.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Customization">
               <div class="d-flex flex-column">
                 <span class="text-small text-end text-start text-muted">Next</span>
-                <span class="underline">Configurations</span>
+                <span class="underline">Customization</span>
               </div>
               <span class="next-page"><i class="bi bi-caret-right"></i></span>
             </a>

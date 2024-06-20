@@ -10,6 +10,7 @@ First, clone the ReaL repository from GitHub:
 
     $ git clone https://github.com/openpsi-project/ReaLHF
     $ cd ReaLHF
+    $ pip3 install -e . --no-build-isolation
 
 RLHF with 4x LLaMA-7B in 30min
 ------------------------------------------------
@@ -170,7 +171,7 @@ Run the following command to train the reward model:
         dataset.train_bs_n_seqs=512 \
         dataset.valid_bs_n_seqs=512
 
-It's common practice to use the SFT model to initialize the reward model.
+It's a common practice to use the SFT model to initialize the reward model.
 Therefore, we can pass the path of the saved SFT model as the ``model.path`` option.
 Using the pre-trained LLaMA checkpoint is also feasible, but it may not perform as well.
 
@@ -325,7 +326,9 @@ Each GPU can accommodate parameter shards of multiple models (e.g., both the Act
 Between two function calls upon the same model, ReaL will automatically re-allocate
 model parameters between source and destination locations and properly remap
 parallel strategies.
+
 .. The reallocation also includes GPU-to-CPU reallocation, referred to as *offloading*.
+
 This technique can substantially reduce communication overhead caused by parallelization
 and improve GPU utilization.
 Please check :doc:`intro` for more details.

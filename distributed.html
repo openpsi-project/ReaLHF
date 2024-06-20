@@ -31,7 +31,7 @@
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
         <link rel="next" title="Contributing" href="contributing.html" />
-        <link rel="prev" title="Code Architecture" href="arch.html" />
+        <link rel="prev" title="Customization" href="customization.html" />
     <style>
       :root {
         --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
@@ -173,10 +173,9 @@
     <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="intro.html">Introduction</a></li>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
@@ -196,31 +195,31 @@
         <article id="content" class="nftt-content" role="main">
     <section id="set-up-distributed-experiments">
 <h1>Set Up Distributed Experiments<a class="headerlink" href="#set-up-distributed-experiments" title="Link to this heading">¶</a></h1>
-<p>Currently, ReaL supports launching distrbited experiments using
+<p>Currently, ReaL supports launching distributed experiments using
 <a class="reference external" href="https://slurm.schedmd.com/documentation.html">SLURM</a>
 with the <a class="reference external" href="https://github.com/NVIDIA/pyxis">Pyxis</a> plugin.
 This plugin allows for launching enroot containers with the
 <code class="docutils literal notranslate"><span class="pre">srun</span></code> command.</p>
-<p>To set up distributed experiments, you should write a JSON
-cluster configuration as the example in <code class="docutils literal notranslate"><span class="pre">examples/cluster_config.json</span></code>.</p>
+<p>To set up distributed experiments, you need to create a JSON
+cluster configuration file, as shown in the example in  <code class="docutils literal notranslate"><span class="pre">examples/cluster_config.json</span></code>.</p>
 <ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">cluster_type</span></code>: The type of cluster. Currently, only “slurm” is supported.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cluster_type</span></code>: The type of the cluster. Currently, only “slurm” is supported.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">cluster_name</span></code>: The name of the cluster. Arbitrary.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">fileroot</span></code>: An NFS path that all nodes can access. This is where the log and checkpoints will be stored.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">default_mount</span></code>: Comma separated list of paths to mount on all nodes. This should include the above <code class="docutils literal notranslate"><span class="pre">fileroot</span></code>.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">node_type_from_node_name</span></code>: A dictionary mapping a regular expression to a node type. Any host in this cluster should match one of these regular expressions. Node types include [“g1”, “g2”, “g8”, “a100”]. “g” refers low-end GPUs in the cluster.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">gpu_type_from_node_name</span></code>: A dictionary mapping a regular expression to a GPU type. GPU type is used by SLURM.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">cpu_image</span></code>: The docker image of the controller and the master worker.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">gpu_image</span></code>: The docker image of the model worker.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">node_name_prefix</span></code>: The prefix of the host names. We assume host names in the cluster is prefixed by a string followed by some integer, e.g., “com-01”, where “com-” is the prefix.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fileroot</span></code>: An NFS path accessible by all nodes. This is where logs and checkpoints will be stored.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">default_mount</span></code>: A comma-separated list of paths to mount on all nodes. This should include the <code class="docutils literal notranslate"><span class="pre">fileroot</span></code> mentioned above..</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">node_type_from_node_name</span></code>: A dictionary mapping a regular expression to a node type. Every host in this cluster should match one of these regular expressions. Node types include [“g1”, “g2”, “g8”, “a100”]. “g” refers to low-end GPUs in the cluster.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpu_type_from_node_name</span></code>: A dictionary mapping a regular expression to a GPU type. The GPU type is used by SLURM.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cpu_image</span></code>: The Docker image for the controller and the master worker.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpu_image</span></code>: The Docker image for the model worker.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">node_name_prefix</span></code>: The prefix of the host names. We assume that host names in the cluster are prefixed by a string followed by an integer, e.g., “com-01”, where “com-” is the prefix.</p></li>
 </ul>
 <p>The path of this file should be specified in the <code class="docutils literal notranslate"><span class="pre">CLUSTER_SPEC_PATH</span></code> environment variable
-inside the used docker images and when launching the experiment. For example,</p>
+inside the Docker images used and when launching the experiment. For example:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">CLUSTER_SPEC_PATH=/tmp/my-cluster.json python3 -m realhf.apps.quickstart ppo ...</span>
 </pre></div>
 </div>
-<p>You also need to add an additional layer in the docker images like the following:</p>
-<div class="highlight-dockerfile notranslate"><div class="highlight"><pre><span></span><span class="k">FROM</span><span class="w"> </span><span class="s">docker.io/garrett4wade/real-cpu</span>
+<p>You also need to add an additional layer in the Docker images as shown below:</p>
+<div class="highlight-dockerfile notranslate"><div class="highlight"><pre><span></span><span class="k">FROM</span><span class="w"> </span><span class="s">garrett4wade/real-cpu:22.04-0.1.0</span>
 <span class="k">ENV</span><span class="w"> </span><span class="nv">CLUSTER_SPEC_PATH</span><span class="o">=</span>/tmp/my-cluster.json
 </pre></div>
 </div>
@@ -237,11 +236,11 @@ inside the used docker images and when launching the experiment. For example,</p
       <nav id="paginator" class="py-4" aria-label="Documentation navigation">
     <div class="container">
       <ul class="pagination justify-content-between mb-0"><li class="page-item">
-            <a href="arch.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Code Architecture">
+            <a href="customization.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Customization">
               <span class="prev-page"><i class="bi bi-caret-left"></i></span>
               <div class="d-flex flex-column">
                 <span class="text-small text-start text-muted">Previous</span>
-                <span class="underline">Code Architecture</span>
+                <span class="underline">Customization</span>
               </div>
             </a>
           </li>
