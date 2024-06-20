@@ -50,7 +50,7 @@ def glob(pattern: str):
 
 def get_pybind11_include_path() -> str:
     pybind11_meta = subprocess.check_output(
-        "pip show pybind11", shell=True
+        "python3 -m pip show pybind11", shell=True
     ).decode("ascii")
     for line in pybind11_meta.split("\n"):
         line = line.strip()

@@ -1,5 +1,6 @@
 sphinx-nefertiti
 sphinx
+build>=1.2.1
 huggingface_hub
 datasets
 accelerate
