@@ -14,11 +14,11 @@ from .api.quickstart.model import (
     OptimizerConfig,
     ParallelismConfig,
 )
+from .base.namedarray import NamedArray
 from .experiments.common.common import CommonExperimentConfig
 from .experiments.common.dpo_exp import DPOConfig
 from .experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 from .experiments.common.rw_exp import RWConfig
 from .experiments.common.sft_exp import SFTConfig
-from .base.namedarray import NamedArray
 
 __version__ = "0.1.0"
