@@ -42,7 +42,22 @@ If you prefer not to use Docker, you can also install ReaL from PyPI or from the
 
    We don't upload a pre-built wheel to PyPI, so the installation will require compiling the C++ and CUDA extensions. If CUDA is not available on your machine, only the C++ extension will be installed.
 
-Install from PyPI:
+First, clone the repository and install all dependencies:
+
+.. code-block:: console
+
+   $ git clone https://github.com/openpsi-project/ReaLHF
+   $ cd ReaLHF
+   $ python3 -m pip install -r requirements.txt
+
+On a GPU machine, also install the requirement CUDA runtime packages:
+
+.. code-block:: console
+
+   $ python3 -m pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.7 --no-deps
+   $ python3 -m pip install flash_attn --no-build-isolation
+
+Install ReaLHF from PyPI:
 
 .. code-block:: console
 
