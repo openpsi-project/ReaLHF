@@ -322,13 +322,13 @@ if __name__ == "__main__":
         8,
         real_model_parallel_generate,
         model_family,
-        ParallelismConfig(8, 1, 1, False),
+        ParallelismConfig(4, 2, 1, False),
         256,
         32,
         128,
         128,
         False,
-        10,
+        3,
     )
     real_test.launch()
 

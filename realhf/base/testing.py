@@ -457,3 +457,20 @@ def check_generation_consistency(
             print(
                 f"Batch {i} matched {matched_seqs}/{bs} sequences and {matched_tokens}/{bs*gen_len} tokens"
             )
+
+
+# FIXME: DEBUG
+def shape_if_not_none(t):
+    if torch.is_tensor(t):
+        return t.shape
+    return str(t)
+
+
+def print_dict(d):
+    if constants.model_parallel_rank() == 0:
+        for k, v in d.items():
+            if isinstance(v, list):
+                for i, vv in enumerate(v):
+                    print(f"{k} {i}: {shape_if_not_none(vv)}")
+            else:
+                print(f"{k}: {shape_if_not_none(v)}")

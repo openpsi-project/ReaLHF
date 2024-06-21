@@ -153,7 +153,7 @@ def genstep(
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
-def init_kv_cache(
+def prepare(
     module: "ReaLModel",
     gconfig: GenerationConfig,
     x: PipeTransferData,
@@ -161,35 +161,58 @@ def init_kv_cache(
 ):
     cu_seqlens = x.cu_seqlens
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    assert constants.pipe_parallel_world_size() >= 2
+    # assert constants.pipe_parallel_world_size() >= 2
     layer_indices = range(module.layer_idx_start, module.layer_idx_end)
+    min_layer_index = module.layer_idx_start
+
+    block_ys = ys
     if constants.is_first_pipe_stage():
         layer_indices = layer_indices[1:]
-    elif constants.is_last_pipe_stage():
+        block_ys = ys[1:]
+    if constants.is_last_pipe_stage():
         layer_indices = layer_indices[:-1]
+        block_ys = block_ys[:-1]
 
-    assert len(layer_indices) == len(ys), (len(ys), layer_indices)
+    assert len(layer_indices) == len(block_ys), (len(block_ys), layer_indices)
     bs = input_lens.shape[0]
-    for y, layer_idx in zip(ys, layer_indices):
+    cache_seqlens = input_lens.clone().to(dtype=torch.int32)
+    for y, layer_idx in zip(block_ys, layer_indices):
         assert (
             y.k_cache is not None
             and y.v_cache is not None
             and y.cache_seqlens is not None
-        )
+        ), (y.k_cache is None, y.v_cache is None, y.cache_seqlens is None)
         kvcache_seqlen = max(
             constants.max_prompt_len() + gconfig.max_new_tokens,
             module.config.hidden_dim // module.config.head_dim + 10,
         )
-        k_cache = torch.zeros(
-            (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-            dtype=y.k_cache.dtype,
-            device=y.k_cache.device,
+        k_cache_handle = cuda_graph.input_buffer_handle(
+            CUDA_GRAPH_NAME, "k_caches"
         )
-        v_cache = torch.zeros(
-            (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-            dtype=y.v_cache.dtype,
-            device=y.v_cache.device,
+        v_cache_handle = cuda_graph.input_buffer_handle(
+            CUDA_GRAPH_NAME, "v_caches"
         )
+        if k_cache_handle is not None and v_cache_handle is not None:
+            # print(k_cache_handle)
+            # print(v_cache_handle)
+            # print(type(k_cache_handle), len(k_cache_handle), layer_idx, layer_indices)
+            k_cache = k_cache_handle[layer_idx - min_layer_index][
+                :bs, :kvcache_seqlen
+            ]
+            v_cache = v_cache_handle[layer_idx - min_layer_index][
+                :bs, :kvcache_seqlen
+            ]
+        else:
+            k_cache = torch.zeros(
+                (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                dtype=y.k_cache.dtype,
+                device=y.k_cache.device,
+            )
+            v_cache = torch.zeros(
+                (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                dtype=y.v_cache.dtype,
+                device=y.v_cache.device,
+            )
         indices = (
             torch.arange(kvcache_seqlen, device=module.device, dtype=torch.long)[
                 None, :
@@ -201,6 +224,37 @@ def init_kv_cache(
         y.k_cache = k_cache
         y.v_cache = v_cache
         y.cache_seqlens = input_lens.clone().to(dtype=torch.int32)
+        # if constants.is_last_pipe_stage():
+        #     print(y.cache_seqlens
+
+    # use cuda graph if env var USE_CUDA_GRAPH is set to 1,
+    # otherwise `graph` should be None
+    input_buffers = dict(
+        input_ids=torch.ones((bs,), dtype=torch.long, device="cuda"),
+        position_ids=cache_seqlens.unsqueeze(-1).clone(),
+        k_caches=[y.k_cache for y in ys],
+        v_caches=[y.v_cache for y in ys],
+        cache_seqlens=cache_seqlens.clone(),
+        max_seqlen=x.max_seqlen,
+        cu_seqlens=x.cu_seqlens.clone(),
+        hidden_states=(
+            torch.zeros(
+                (bs, x.pp_input.shape[1]), dtype=x.pp_input.dtype, device="cuda"
+            )
+            if x.pp_input is not None
+            else None
+        ),
+    )
+
+    graph, input_buffers, output_buffers = cuda_graph.capture_func(
+        CUDA_GRAPH_NAME,
+        module._forward,
+        input_buffers,
+        force_recapture=False,
+        no_grad=True,
+    )
+
+    return x, ys, cache_seqlens, graph, input_buffers, output_buffers
 
 
 @torch.no_grad()
@@ -242,7 +296,7 @@ def generate(
             f"Input sequence length {max_seqlen} is larger than the maximum sequence length "
             f"supported by the model {constants.max_prompt_len()}."
         )
-    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    # input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
     x = PipeTransferData(
         cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True
     )
@@ -255,50 +309,52 @@ def generate(
     prompt_logits = model(x, ys)[0].pp_output
     logits = prompt_logits[cu_seqlens[1:] - 1]
 
-    cache_seqlens = input_lens.clone().to(dtype=torch.int32)
-    for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
-        assert (
-            y.k_cache is not None
-            and y.v_cache is not None
-            and y.cache_seqlens is not None
-        )
-        # fix of a flash attention bug
-        kvcache_seqlen = max(
-            constants.max_prompt_len() + gconfig.max_new_tokens,
-            mconfig.hidden_dim // mconfig.head_dim + 10,
-        )
+    # cache_seqlens = input_lens.clone().to(dtype=torch.int32)
+    # for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
+    #     assert (
+    #         y.k_cache is not None
+    #         and y.v_cache is not None
+    #         and y.cache_seqlens is not None
+    #     )
+    #     # fix of a flash attention bug
+    #     kvcache_seqlen = max(
+    #         constants.max_prompt_len() + gconfig.max_new_tokens,
+    #         mconfig.hidden_dim // mconfig.head_dim + 10,
+    #     )
 
-        k_cache_handle = cuda_graph.input_buffer_handle(
-            CUDA_GRAPH_NAME, "k_caches"
-        )
-        v_cache_handle = cuda_graph.input_buffer_handle(
-            CUDA_GRAPH_NAME, "v_caches"
-        )
-        if k_cache_handle is not None and v_cache_handle is not None:
-            k_cache = k_cache_handle[layer_idx + 1][:bs, :kvcache_seqlen]
-            v_cache = v_cache_handle[layer_idx + 1][:bs, :kvcache_seqlen]
-        else:
-            k_cache = torch.zeros(
-                (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-                dtype=y.k_cache.dtype,
-                device=y.k_cache.device,
-            )
-            v_cache = torch.zeros(
-                (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-                dtype=y.v_cache.dtype,
-                device=y.v_cache.device,
-            )
-        indices = (
-            torch.arange(kvcache_seqlen, device=device, dtype=torch.long)[None, :]
-            < input_lens[:, None]
-        )
-        k_cache[indices] = y.k_cache
-        v_cache[indices] = y.v_cache
-        y.k_cache = k_cache
-        y.v_cache = v_cache
-        y.cache_seqlens = cache_seqlens
-    x = PipeTransferData(store_kv_cache=True)
-    ys[0].cache_seqlens = cache_seqlens
+    #     k_cache_handle = cuda_graph.input_buffer_handle(
+    #         CUDA_GRAPH_NAME, "k_caches"
+    #     )
+    #     v_cache_handle = cuda_graph.input_buffer_handle(
+    #         CUDA_GRAPH_NAME, "v_caches"
+    #     )
+    #     if k_cache_handle is not None and v_cache_handle is not None:
+    #         k_cache = k_cache_handle[layer_idx + 1][:bs, :kvcache_seqlen]
+    #         v_cache = v_cache_handle[layer_idx + 1][:bs, :kvcache_seqlen]
+    #     else:
+    #         k_cache = torch.zeros(
+    #             (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+    #             dtype=y.k_cache.dtype,
+    #             device=y.k_cache.device,
+    #         )
+    #         v_cache = torch.zeros(
+    #             (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+    #             dtype=y.v_cache.dtype,
+    #             device=y.v_cache.device,
+    #         )
+    #     indices = (
+    #         torch.arange(kvcache_seqlen, device=device, dtype=torch.long)[
+    #             None, :
+    #         ]
+    #         < input_lens[:, None]
+    #     )
+    #     k_cache[indices] = y.k_cache
+    #     v_cache[indices] = y.v_cache
+    #     y.k_cache = k_cache
+    #     y.v_cache = v_cache
+    #     y.cache_seqlens = cache_seqlens
+    # x = PipeTransferData(store_kv_cache=True)
+    # ys[0].cache_seqlens = cache_seqlens
 
     # Next, we will generate the next token after prompts.
     # cache_seqlens is exactly the lengths of prompts.
@@ -313,43 +369,46 @@ def generate(
 
     # use cuda graph if env var USE_CUDA_GRAPH is set to 1,
     # other `graph` should be None
-    input_buffers_meta = dict(
-        input_ids=cuda_graph.TensorMetadata(shape=(bs,), dtype=torch.long),
-        position_ids=cuda_graph.TensorMetadata(
-            shape=(bs, 1), dtype=cache_seqlens.dtype
-        ),
-        k_caches=[
-            (
-                cuda_graph.TensorMetadata(
-                    shape=y.k_cache.shape,
-                    dtype=y.k_cache.dtype,
-                )
-                if y.k_cache is not None
-                else cuda_graph.TensorMetadata()
-            )
-            for y in ys
-        ],
-        v_caches=[
-            (
-                cuda_graph.TensorMetadata(
-                    shape=y.v_cache.shape,
-                    dtype=y.v_cache.dtype,
-                )
-                if y.v_cache is not None
-                else cuda_graph.TensorMetadata()
-            )
-            for y in ys
-        ],
-        cache_seqlens=cuda_graph.TensorMetadata(shape=(bs,), dtype=torch.int32),
-        max_seqlen=cuda_graph.TensorMetadata(),
-        cu_seqlens=cuda_graph.TensorMetadata(),
-        hidden_states=cuda_graph.TensorMetadata(),
-    )
-    graph, input_buffers, output_buffers = cuda_graph.capture_func(
-        CUDA_GRAPH_NAME,
-        model._forward,
-        input_buffers_meta,
-        force_recapture=False,
+    # input_buffers_meta = dict(
+    #     input_ids=cuda_graph.TensorMetadata(shape=(bs,), dtype=torch.long),
+    #     position_ids=cuda_graph.TensorMetadata(
+    #         shape=(bs, 1), dtype=cache_seqlens.dtype
+    #     ),
+    #     k_caches=[
+    #         (
+    #             cuda_graph.TensorMetadata(
+    #                 shape=y.k_cache.shape,
+    #                 dtype=y.k_cache.dtype,
+    #             )
+    #             if y.k_cache is not None
+    #             else cuda_graph.TensorMetadata()
+    #         )
+    #         for y in ys
+    #     ],
+    #     v_caches=[
+    #         (
+    #             cuda_graph.TensorMetadata(
+    #                 shape=y.v_cache.shape,
+    #                 dtype=y.v_cache.dtype,
+    #             )
+    #             if y.v_cache is not None
+    #             else cuda_graph.TensorMetadata()
+    #         )
+    #         for y in ys
+    #     ],
+    #     cache_seqlens=cuda_graph.TensorMetadata(shape=(bs,), dtype=torch.int32),
+    #     max_seqlen=cuda_graph.TensorMetadata(),
+    #     cu_seqlens=cuda_graph.TensorMetadata(),
+    #     hidden_states=cuda_graph.TensorMetadata(),
+    # )
+    # graph, input_buffers, output_buffers = cuda_graph.capture_func(
+    #     CUDA_GRAPH_NAME,
+    #     model._forward,
+    #     input_buffers_meta,
+    #     force_recapture=False,
+    # )
+    x, ys, cache_seqlens, graph, input_buffers, output_buffers = prepare(
+        model, gconfig, x, ys
     )
 
     # The main loop.

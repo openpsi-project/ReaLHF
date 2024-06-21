@@ -22,6 +22,9 @@ import realhf.base.constants as constants
 import realhf.base.logging as logging
 import realhf.impl.model.parallelism.pipeline_parallel.p2p as p2p
 import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
+import realhf.impl.model.parallelism.pipeline_parallel.p2p as p2p
+import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
+import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import data_api
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.base.namedarray import NamedArray
@@ -250,6 +253,7 @@ def _exec_pipe_schedule(
                 elif not is_last_stage and type(cmd) != schedule.SendActivation:
                     continue
 
+            print(f"rank {constants.parallelism_rank()} exec cmd {cmd}")
             try:
                 instr_map[type(cmd)](module, tensor_buffer, *cmd.args)
             except Exception as e:
@@ -259,6 +263,7 @@ def _exec_pipe_schedule(
                     f"Exception in cmd: {cmd}"
                 )
                 raise e
+            print(f"rank {constants.parallelism_rank()} exec cmd {cmd} done")
         step_count += 1
 
         if will_break:
@@ -371,6 +376,8 @@ class PipeGenInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
+        graph = cuda_graph.get_graph(CUDA_GRAPH_NAME)
+
         is_first_stage = constants.is_first_pipe_stage()
         if is_first_stage:
             buf = tensor_buffer.get(
@@ -389,6 +396,7 @@ class PipeGenInstrSet:
 
         ys = tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
 
+        others = None
         if buf is not None:
             if is_first_stage:
                 x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
@@ -406,9 +414,37 @@ class PipeGenInstrSet:
         else:
             x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
 
-        _zero_grads(x)
-        _zero_grads(ys)
-        x, ys = module.forward(x, ys)
+        if graph is None or step_id == 0:
+            # _zero_grads(x)
+            # _zero_grads(ys)
+            x, ys = module.forward(x, ys)
+        else:
+            # only replay decoding phase
+            if is_first_stage:
+                bs = ys[0].cache_seqlens.shape[0]
+                cuda_graph.input_buffer_handle(CUDA_GRAPH_NAME, "input_ids")[
+                    :bs
+                ].copy_(ys[0].packed_input_ids, non_blocking=True)
+                cuda_graph.input_buffer_handle(CUDA_GRAPH_NAME, "position_ids")[
+                    :bs
+                ].copy_(ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True)
+                cuda_graph.input_buffer_handle(
+                    CUDA_GRAPH_NAME, "cache_seqlens"
+                )[:bs].copy_(ys[0].cache_seqlens, non_blocking=True)
+            else:
+                cuda_graph.input_buffer_handle(
+                    CUDA_GRAPH_NAME, "hidden_states"
+                ).copy_(x.pp_input, non_blocking=True)
+                cuda_graph.input_buffer_handle(
+                    CUDA_GRAPH_NAME, "cu_seqlens"
+                ).copy_(x.cu_seqlens, non_blocking=True)
+                # cuda_graph.input_buffer_handle(CUDA_GRAPH_NAME, "max_seqlen").copy_(
+                #     torch.tensor(x.max_seqlen), non_blocking=True
+                # )
+            graph.replay()
+            x.pp_output = cuda_graph.output_buffer_handle(
+                CUDA_GRAPH_NAME, "output"
+            )
 
         tensor_buffer.put("batch_output_x", micro_batch_id, x)
 
@@ -422,11 +458,9 @@ class PipeGenInstrSet:
             assert constants.pipe_parallel_world_size() >= 2
             if constants.is_first_pipe_stage():
                 ys[0].cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
-                init_kv_cache(module, gconfig, x, ys[1:])
-            elif constants.is_last_pipe_stage():
-                init_kv_cache(module, gconfig, x, ys[:-1])
-            else:
-                init_kv_cache(module, gconfig, x, ys)
+            x, ys, cache_seqlens, graph, input_buffers, output_buffers = (
+                prepare(module, gconfig, x, ys)
+            )
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
 

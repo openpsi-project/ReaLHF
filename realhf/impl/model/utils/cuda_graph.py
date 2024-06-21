@@ -1,5 +1,5 @@
 from contextlib import nullcontext
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import dataclasses
 import gc
 import os
@@ -15,34 +15,50 @@ CUDA_GRAPH_INPUT_BUFFER: Dict[str, Dict[str, torch.Tensor]] = dict()
 CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, Dict[str, torch.Tensor]] = dict()
 
 
-@dataclasses.dataclass
-class TensorMetadata:
-    """Metadata for a pytorch tensor in GPU."""
+# @dataclasses.dataclass
+# class TensorMetadata:
+#     """Metadata for a pytorch tensor in GPU."""
 
-    shape: Optional[Tuple[int]] = None
-    dtype: Optional[torch.dtype] = None
+#     shape: Tuple[int]
+#     dtype: torch.dtype
 
-    @staticmethod
-    def from_tensor(t: Optional[torch.Tensor]):
-        if t is None:
-            return TensorMetadata()
-        return TensorMetadata(t.shape, t.dtype)
+#     @staticmethod
+#     def from_tensor(t: torch.Tensor):
+#         return TensorMetadata(t.shape, t.dtype)
 
-    def to_tensor(self):
-        if self.shape is None:
-            assert self.dtype is None
-            return None
-        return torch.zeros(self.shape, dtype=self.dtype, device="cuda")
+#     def to_tensor(self):
+#         return torch.zeros(self.shape, dtype=self.dtype, device="cuda")
+
+# def metadata_to_buffer(metadata: Dict[str, Union[List[Any], Any]]):
+#     buf = {}
+#     for k, v in metadata.items():
+#         if isinstance(v, list):
+#             buf[k] = [vv.to_tensor() if isinstance(vv, TensorMetadata) else vv
+#                       for vv in v]
+#         elif isinstance(v, TensorMetadata):
+#             buf[k] = v.to_tensor()
+#         else:
+#             buf[k] = v
+#     return buf
+
+# def buffer_to_metadata(buffer: Dict[str, Union[List[Any], Any]]):
+#     metadata = {}
+#     for k, v in buffer.items():
+#         if isinstance(v, list):
+#             metadata[k] = [TensorMetadata.from_tensor() if torch.is_tensor(v) else vv
+#                            for vv in v]
+#         elif torch.is_tensor(v):
+#             metadata[k] = TensorMetadata.from_tensor()
+#         else:
+#             metadata[k] = v
+#     return metadata
 
 
 @torch.no_grad()
 def capture_func(
     name: str,
     func: Callable,
-    input_metadata: Dict[str, Union[List[TensorMetadata], TensorMetadata]],
-    output_metadata: Dict[
-        str, Union[List[TensorMetadata], TensorMetadata]
-    ] = None,
+    input_buffer: Dict[str, Any],
     force_recapture: bool = False,
     no_grad: bool = False,
 ) -> Tuple[
@@ -75,57 +91,39 @@ def capture_func(
                 CUDA_GRAPH_OUTPUT_BUFFER[name],
             )
 
+    print(f"initializing ca")
     if not custom_all_reduce.is_initialized():
         custom_all_reduce.init_custom_ar()
+    print(f"initialized ca")
     assert (
         custom_all_reduce.is_initialized()
         or constants.model_parallel_world_size() == 1
     )
     assert not constants.sequence_parallel()
 
-    input_buffer = {
-        k: (
-            v.to_tensor()
-            if not isinstance(v, list)
-            else [vv.to_tensor() for vv in v]
-        )
-        for k, v in input_metadata.items()
-    }
-
     maybe_no_grad = nullcontext() if not no_grad else torch.no_grad()
     st = time.monotonic()
     with custom_all_reduce.graph_capture(), maybe_no_grad:
+        print(f"rank {torch.distributed.get_rank()}: Warmup for capture {name}")
         func(**input_buffer)
         torch.cuda.synchronize()
 
+        print(
+            f"rank {torch.distributed.get_rank()}: Capturing CUDA graph for {name}"
+        )
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             output = func(**input_buffer)
 
         torch.cuda.synchronize()
 
-    print(
-        f"Capturing CUDA graph {name} for decoding takes {time.monotonic() - st:.2f} seconds."
-    )
+        print(
+            f"rank {torch.distributed.get_rank()}: Capturing CUDA graph {name} "
+            f"for decoding takes {time.monotonic() - st:.2f} seconds."
+        )
 
-    if output_metadata is not None:
-        output_buffer = {
-            k: (
-                v.to_tensor()
-                if not isinstance(v, list)
-                else [vv.to_tensor() for vv in v]
-            )
-            for k, v in output_metadata.items()
-        }
-    else:
-        if torch.is_tensor(output):
-            output_buffer = dict(output=output)
-        elif isinstance(output, (list, tuple)):
-            output_buffer = dict(zip(range(len(output)), output))
-        elif dataclasses.is_dataclass(output):
-            output_buffer = dataclasses.asdict(output)
-        elif isinstance(output, dict):
-            output_buffer = output
+    assert torch.is_tensor(output)
+    output_buffer = dict(output=output)
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -141,7 +139,8 @@ def input_buffer_handle(graph_name: str, tensor_name: str):
         return None
     if tensor_name not in CUDA_GRAPH_INPUT_BUFFER[graph_name]:
         raise ValueError(
-            f"Tensor {tensor_name} not found in input buffer of graph {graph_name}"
+            f"Tensor {tensor_name} not found in input buffer of graph {graph_name}, "
+            f"Existing keys = {CUDA_GRAPH_INPUT_BUFFER[graph_name].keys()}"
         )
     return CUDA_GRAPH_INPUT_BUFFER[graph_name][tensor_name]
 
@@ -149,8 +148,13 @@ def input_buffer_handle(graph_name: str, tensor_name: str):
 def output_buffer_handle(graph_name: str, tensor_name: str):
     if graph_name not in CUDA_GRAPH_OUTPUT_BUFFER:
         return None
-    if tensor_name not in CUDA_GRAPH_INPUT_BUFFER[graph_name]:
+    if tensor_name not in CUDA_GRAPH_OUTPUT_BUFFER[graph_name]:
         raise ValueError(
-            f"Tensor {tensor_name} not found in output buffer of graph {graph_name}"
+            f"Tensor {tensor_name} not found in output buffer of graph {graph_name}, "
+            f"existing keys = {CUDA_GRAPH_OUTPUT_BUFFER[graph_name].keys()}"
         )
     return CUDA_GRAPH_OUTPUT_BUFFER[graph_name][tensor_name]
+
+
+def get_graph(name: str):
+    return CUDA_GRAPH_STORAGE.get(name, None)
