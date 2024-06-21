@@ -1,6 +1,6 @@
-from typing import Callable, Dict, List, Optional
 import itertools
 import json
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -39,9 +39,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         self.max_pairs_per_prompt = max_pairs_per_prompt
 
         self.rng = np.random.RandomState(seed=seed)
-        data = data_api.load_shuffle_split_dataset(
-            util, dataset_path, dataset_builder
-        )
+        data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
         prompts = [x["prompt"] for x in data]
 
@@ -60,9 +58,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
                     "pos_answers and neg_answers must be one-to-one pairs."
                 )
             if len(a) == 0:
-                raise RuntimeError(
-                    "pos_answers and neg_answers must be non-empty."
-                )
+                raise RuntimeError("pos_answers and neg_answers must be non-empty.")
 
         group_sizes = [len(x) for x in pos_answers]
 
@@ -93,16 +89,10 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         offset = 0
         for g in group_sizes:
             pos_answer_tokens.append(
-                {
-                    k: v[offset : offset + g]
-                    for k, v in _pos_answer_tokens.items()
-                }
+                {k: v[offset : offset + g] for k, v in _pos_answer_tokens.items()}
             )
             neg_answer_tokens.append(
-                {
-                    k: v[offset : offset + g]
-                    for k, v in _neg_answer_tokens.items()
-                }
+                {k: v[offset : offset + g] for k, v in _neg_answer_tokens.items()}
             )
             offset += g
 
@@ -121,9 +111,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         prompt_len = self.prompt_tokens["length"][idx]
         n_pairs_this_prompt = len(self.pos_answer_tokens[idx]["input_ids"])
         group_size = min(self.max_pairs_per_prompt, n_pairs_this_prompt)
-        pair_indices = self.rng.choice(
-            n_pairs_this_prompt, group_size, replace=False
-        )
+        pair_indices = self.rng.choice(n_pairs_this_prompt, group_size, replace=False)
 
         packed_input_ids = []
         for i in pair_indices:
@@ -131,12 +119,10 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
             packed_input_ids += self.neg_answer_tokens[idx]["input_ids"][i]
 
         pos_input_lens = [
-            len(self.pos_answer_tokens[idx]["input_ids"][i])
-            for i in pair_indices
+            len(self.pos_answer_tokens[idx]["input_ids"][i]) for i in pair_indices
         ]
         neg_input_lens = [
-            len(self.neg_answer_tokens[idx]["input_ids"][i])
-            for i in pair_indices
+            len(self.neg_answer_tokens[idx]["input_ids"][i]) for i in pair_indices
         ]
 
         input_lens = [x + y for x, y in zip(pos_input_lens, neg_input_lens)]

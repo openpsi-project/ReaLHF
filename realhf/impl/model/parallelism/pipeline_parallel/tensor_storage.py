@@ -70,9 +70,7 @@ class TensorBuffer:
             else:
                 return None
 
-    def remove(
-        self, name: str, mbid: Optional[int] = None, check_exists: bool = False
-    ):
+    def remove(self, name: str, mbid: Optional[int] = None, check_exists: bool = False):
         try:
             if mbid is None:
                 del self.tensors[name]
@@ -81,9 +79,7 @@ class TensorBuffer:
         except KeyError:
             if not check_exists:
                 return
-            raise KeyError(
-                f"TensorBuffer.remove: key {name} mbid {mbid} not found"
-            )
+            raise KeyError(f"TensorBuffer.remove: key {name} mbid {mbid} not found")
 
     def check_name(self, name: str):
         return name in self.tensors

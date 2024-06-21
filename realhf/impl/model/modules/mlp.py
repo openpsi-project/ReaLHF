@@ -1,20 +1,20 @@
-from typing import Callable, Optional, Union
 import functools
 import math
 import os
+from typing import Callable, Optional, Union
 
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from realhf.impl.model.parallelism.model_parallel.modules import (
-    ColumnParallelLinear,
-    merged_linear_with_grad_accumulation_and_async_allreduce,
-    RowParallelLinear,
-)
 import realhf.base.constants as constants
 import realhf.base.logging as logging
+from realhf.impl.model.parallelism.model_parallel.modules import (
+    ColumnParallelLinear,
+    RowParallelLinear,
+    merged_linear_with_grad_accumulation_and_async_allreduce,
+)
 
 logger = logging.getLogger("Modules")
 
@@ -29,9 +29,7 @@ def get_activation_fn(activation_function: str) -> Callable:
     elif activation_function == "silu":
         return nn.SiLU()
     else:
-        raise NotImplementedError(
-            'Only "gelu" activation function is available.'
-        )
+        raise NotImplementedError('Only "gelu" activation function is available.')
 
 
 SEQUENCE_PARALLEL_WARNED = False
@@ -58,9 +56,7 @@ class LayerNormQKVLinear(nn.Module):
     ):
         super().__init__()
         sequence_parallel = constants.sequence_parallel()
-        if not model_parallel and (
-            sequence_parallel or gradient_accumulation_fusion
-        ):
+        if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             global SEQUENCE_PARALLEL_WARNED
             if not SEQUENCE_PARALLEL_WARNED:
                 logger.warning(
@@ -199,12 +195,8 @@ class LayerNormQKVLinear(nn.Module):
             k = k.view(*k.shape[:-1], self.nkv, self.d)
             v = v.view(*v.shape[:-1], self.nkv, self.d)
         else:
-            _gradient_accumulation_fusion = (
-                self.q_attn.gradient_accumulation_fusion
-            )
-            _async_grad_allreduce = (
-                self.q_attn.async_tensor_model_parallel_allreduce
-            )
+            _gradient_accumulation_fusion = self.q_attn.gradient_accumulation_fusion
+            _async_grad_allreduce = self.q_attn.async_tensor_model_parallel_allreduce
             _sequence_parallel = constants.sequence_parallel()
             _is_w_parallel = [
                 True,
@@ -253,9 +245,7 @@ class LayerNormMLP(nn.Module):
     ):
         super().__init__()
         sequence_parallel = constants.sequence_parallel()
-        if not model_parallel and (
-            sequence_parallel or gradient_accumulation_fusion
-        ):
+        if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             global SEQUENCE_PARALLEL_WARNED
             if not SEQUENCE_PARALLEL_WARNED:
                 logger.warning(
@@ -322,9 +312,7 @@ class LlamaLayerNormMLP(nn.Module):
     ):
         super().__init__()
         sequence_parallel = constants.sequence_parallel()
-        if not model_parallel and (
-            sequence_parallel or gradient_accumulation_fusion
-        ):
+        if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             global SEQUENCE_PARALLEL_WARNED
             if not SEQUENCE_PARALLEL_WARNED:
                 logger.warning(
@@ -397,30 +385,22 @@ class LlamaLayerNormMLP(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.ln(x)
         if not self.model_parallel:
-            return self.down_proj(
-                self.act_fn(self.gate_proj(x)) * self.up_proj(x)
-            )
+            return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         else:
-            _gradient_accumulation_fusion = (
-                self.gate_proj.gradient_accumulation_fusion
-            )
-            _async_grad_allreduce = (
-                self.gate_proj.async_tensor_model_parallel_allreduce
-            )
+            _gradient_accumulation_fusion = self.gate_proj.gradient_accumulation_fusion
+            _async_grad_allreduce = self.gate_proj.async_tensor_model_parallel_allreduce
             _sequence_parallel = constants.sequence_parallel()
             _is_w_parallel = [True, True]
-            gate, upproj = (
-                merged_linear_with_grad_accumulation_and_async_allreduce(
-                    x,
-                    _gradient_accumulation_fusion,
-                    _async_grad_allreduce,
-                    _sequence_parallel,
-                    _is_w_parallel,
-                    self.gate_proj.weight,
-                    self.gate_proj.bias,
-                    self.up_proj.weight,
-                    self.up_proj.bias,
-                )
+            gate, upproj = merged_linear_with_grad_accumulation_and_async_allreduce(
+                x,
+                _gradient_accumulation_fusion,
+                _async_grad_allreduce,
+                _sequence_parallel,
+                _is_w_parallel,
+                self.gate_proj.weight,
+                self.gate_proj.bias,
+                self.up_proj.weight,
+                self.up_proj.bias,
             )
             return self.down_proj(self.act_fn(gate) * upproj)
 
@@ -438,18 +418,14 @@ class _LlamaRMSNorm(nn.Module):
         LlamaRMSNorm is equivalent to T5LayerNorm
         """
         super().__init__()
-        self.weight = nn.Parameter(
-            torch.ones(hidden_size, dtype=dtype, device=device)
-        )
+        self.weight = nn.Parameter(torch.ones(hidden_size, dtype=dtype, device=device))
         self.variance_epsilon = eps
 
     def forward(self, hidden_states: torch.Tensor):
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(
-            variance + self.variance_epsilon
-        )
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         return self.weight * hidden_states.to(input_dtype)
 
 

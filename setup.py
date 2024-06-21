@@ -1,23 +1,23 @@
 # Modified from https://github.com/vllm-project/vllm/blob/main/setup.py
-from pathlib import Path
-from typing import List, Set
 import contextlib
 import io
 import os
 import re
 import subprocess
 import warnings
+from pathlib import Path
+from typing import List, Set
 
-from packaging.version import parse, Version
-from torch.utils.cpp_extension import (
-    BuildExtension,
-    CUDA_HOME,
-    CUDAExtension,
-    ROCM_HOME,
-)
 import setuptools
 import torch
 import torch.utils.cpp_extension as torch_cpp_ext
+from packaging.version import Version, parse
+from torch.utils.cpp_extension import (
+    CUDA_HOME,
+    ROCM_HOME,
+    BuildExtension,
+    CUDAExtension,
+)
 
 ROOT_DIR = os.path.dirname(__file__)
 
@@ -142,9 +142,7 @@ if _is_cuda():
             compute_capabilities.remove("9.0")
     # Validate the NVCC CUDA version.
     if nvcc_cuda_version < Version("11.0"):
-        raise RuntimeError(
-            "CUDA 11.0 or higher is required to build the package."
-        )
+        raise RuntimeError("CUDA 11.0 or higher is required to build the package.")
     if nvcc_cuda_version < Version("11.1") and any(
         cc.startswith("8.6") for cc in compute_capabilities
     ):
@@ -291,4 +289,13 @@ setuptools.setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     packages=setuptools.find_packages(),
+    include_package_data=True,
+    package_data={
+        "": [
+            "csrc/**/*.cu",
+            "csrc/**/*.cuh",
+            "csrc/**/*.hpp",
+            "csrc/**/*.cpp",
+        ],
+    },
 )

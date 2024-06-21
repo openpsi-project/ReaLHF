@@ -9,8 +9,8 @@ import realhf.base.constants as constants
 import realhf.base.logging as logging
 
 try:
-    from custom_all_reduce import custom_ar
     import pynvml
+    from custom_all_reduce import custom_ar
 except ImportError:
     # For AMD GPUs
     custom_ar = None
@@ -165,9 +165,7 @@ class CustomAllreduce:
         # 8*world_size bytes where world_size is at most 8. Allocating 8MB
         # is enough for 131072 such tuples. The largest model I've seen only
         # needs less than 10000 of registered tuples.
-        self.rank_data = torch.empty(
-            8 * 1024 * 1024, dtype=torch.uint8, device="cuda"
-        )
+        self.rank_data = torch.empty(8 * 1024 * 1024, dtype=torch.uint8, device="cuda")
         self.max_size = max_size
         self.world_size = world_size
         handles, offsets = self._get_ipc_meta(self.meta)

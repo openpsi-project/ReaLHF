@@ -1,8 +1,8 @@
-from typing import *
 import dataclasses
 import json
 import os
 import time
+from typing import *
 
 import torch
 import torch.distributed as dist
@@ -80,20 +80,12 @@ class HFModelRegistry:
             elif lidx == model.config.n_layers + 1:
                 required_hf_sd_names += self.head_param_names(model.config)
             else:
-                required_hf_sd_names += self.tblock_param_names(
-                    model.config, lidx - 1
-                )
+                required_hf_sd_names += self.tblock_param_names(model.config, lidx - 1)
 
-        if os.path.exists(
-            os.path.join(load_dir, "pytorch_model.bin.index.json")
-        ):
-            with open(
-                os.path.join(load_dir, "pytorch_model.bin.index.json"), "r"
-            ) as f:
+        if os.path.exists(os.path.join(load_dir, "pytorch_model.bin.index.json")):
+            with open(os.path.join(load_dir, "pytorch_model.bin.index.json"), "r") as f:
                 hf_sd_mapping = json.load(f)["weight_map"]
-            files_to_load = set(
-                hf_sd_mapping[name] for name in required_hf_sd_names
-            )
+            files_to_load = set(hf_sd_mapping[name] for name in required_hf_sd_names)
         else:
             files_to_load = ["pytorch_model.bin"]
         setup_time = time.perf_counter() - tik
@@ -138,9 +130,7 @@ class HFModelRegistry:
         # Some logging info
         copy_time = time.perf_counter() - copy_tik
         load_times = "[" + ", ".join(f"{t:.2f}" for t in load_times) + "]"
-        partition_times = (
-            "[" + ", ".join(f"{t:.2f}" for t in partition_times) + "]"
-        )
+        partition_times = "[" + ", ".join(f"{t:.2f}" for t in partition_times) + "]"
         if os.getenv("REAL_LOG_LOAD_TIME", None) == "1":
             logger.info(
                 f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
@@ -170,17 +160,12 @@ class HFModelRegistry:
         # To decrease the size of each saved file, we split the file
         # of each pipeline stage into smaller shards.
         approx_param_size = (
-            sum(
-                v.numel() * v.element_size()
-                for v in model.state_dict().values()
-            )
+            sum(v.numel() * v.element_size() for v in model.state_dict().values())
             * mp_size
         )
 
         # By default a shard is at most 1GB. A small size enables parallel saving during training.
-        max_shard_size_byte = int(
-            os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e9))
-        )
+        max_shard_size_byte = int(os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e9)))
         n_shards_this_stage = (
             approx_param_size + max_shard_size_byte - 1
         ) // max_shard_size_byte
@@ -216,9 +201,7 @@ class HFModelRegistry:
                 gathered = v
             else:
                 gather_list = [torch.zeros_like(v) for _ in range(mp_size)]
-                dist.all_gather(
-                    gather_list, v, group=constants.model_parallel_group()
-                )
+                dist.all_gather(gather_list, v, group=constants.model_parallel_group())
                 gathered = mp_merge_key(k, gather_list, model.config)
             cpu_sd[k] = gathered.cpu()
 
@@ -277,9 +260,7 @@ class HFModelRegistry:
                 shard_idx = shard_offset + i + s
                 torch.save(
                     shard,
-                    os.path.join(
-                        save_dir, output_fn.format(shard=shard_idx + 1)
-                    ),
+                    os.path.join(save_dir, output_fn.format(shard=shard_idx + 1)),
                 )
 
             for i, shard in enumerate(shards):

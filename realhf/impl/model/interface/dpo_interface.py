@@ -1,18 +1,18 @@
-from typing import Dict
 import dataclasses
+from typing import Dict
 
 import torch
 import torch.distributed as dist
 import torch.utils.data
 import tqdm
 
-from realhf.base import constants
-from realhf.base.namedarray import from_dict, NamedArray, recursive_apply
-from realhf.impl.model.nn.real_llm_api import ReaLModel
-from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 import realhf.impl.model.utils.dpo_functional as dpo_functional
+from realhf.base import constants
+from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
+from realhf.impl.model.nn.real_llm_api import ReaLModel
+from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
 
 logger = logging.getLogger("Packed DPO Interface")
 
@@ -36,9 +36,7 @@ def _dpo_loss_from_model_outputs(
     offset = 0
     for i in range(prompt_lens.shape[0]):
         logprob_sum.append(
-            logprobs[
-                offset + prompt_lens[i] - 1 : offset + input_lens[2 * i] - 1
-            ].sum()
+            logprobs[offset + prompt_lens[i] - 1 : offset + input_lens[2 * i] - 1].sum()
         )
         offset += input_lens[2 * i] - 1
         logprob_sum.append(
@@ -66,9 +64,7 @@ def _dpo_loss_from_model_outputs(
     n_seqs = torch.tensor(
         [prompt_lens.shape[0]], dtype=torch.float32, device=loss.device
     )
-    dist.all_reduce(
-        n_seqs, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
-    )
+    dist.all_reduce(n_seqs, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
     dist.all_reduce(
         pos_score, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
     )
@@ -80,9 +76,7 @@ def _dpo_loss_from_model_outputs(
         op=dist.ReduceOp.SUM,
         group=constants.data_parallel_group(),
     )
-    dist.all_reduce(
-        kl, op=dist.ReduceOp.SUM, group=constants.data_parallel_group()
-    )
+    dist.all_reduce(kl, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
 
     return loss, dict(
         loss=logging_loss,
@@ -112,9 +106,7 @@ class DPOInterface(model_api.ModelInterface):
             [data["pos_input_lens"], pair_lens - data["pos_input_lens"]], 1
         ).view(-1)
         prompt_lens: torch.IntTensor = data["prompt_lens"]
-        cu_seqlens = torch.cat(
-            [input_lens.new_zeros(1), input_lens.cumsum(0)]
-        ).int()
+        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)]).int()
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = int(max(input_lens))
 
@@ -144,11 +136,7 @@ class DPOInterface(model_api.ModelInterface):
             offset += input_lens[2 * i] - 1
             logprob_sum.append(
                 logprobs[
-                    offset
-                    + prompt_lens[i]
-                    - 1 : offset
-                    + input_lens[2 * i + 1]
-                    - 1
+                    offset + prompt_lens[i] - 1 : offset + input_lens[2 * i + 1] - 1
                 ].sum()
             )
             offset += input_lens[2 * i + 1] - 1
@@ -174,9 +162,7 @@ class DPOInterface(model_api.ModelInterface):
             [data["pos_input_lens"], neg_input_lens], 1
         ).view(-1)
         prompt_lens: torch.IntTensor = data["prompt_lens"]
-        cu_seqlens = torch.cat(
-            [input_lens.new_zeros(1), input_lens.cumsum(0)], 0
-        ).int()
+        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module = model.module

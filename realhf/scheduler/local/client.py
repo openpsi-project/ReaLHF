@@ -1,13 +1,14 @@
-from collections import defaultdict
-from typing import Dict, List, Optional, Tuple, Union
 import os
 import re
 import signal as signal_module
 import subprocess
 import time
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple, Union
 
 import psutil
 
+import realhf.base.logging as logging
 from realhf.base.constants import LOG_ROOT
 from realhf.scheduler.client import (
     JobException,
@@ -16,7 +17,6 @@ from realhf.scheduler.client import (
     SchedulerClient,
     SchedulerError,
 )
-import realhf.base.logging as logging
 
 logger = logging.getLogger("Local Scheduler")
 
@@ -48,9 +48,7 @@ for job_state, process_statuses in JOB_STATE_TO_PROCESS_STATUS.items():
         PROCESS_STATUS_TO_JOB_STATE[process_status] = job_state
 
 
-def terminate_process_and_children(
-    pid: int, signal: Optional[Union[str, int]] = None
-):
+def terminate_process_and_children(pid: int, signal: Optional[Union[str, int]] = None):
     if signal is None:
         signal = signal_module.SIGKILL
     if isinstance(signal, str):
@@ -154,9 +152,7 @@ class LocalSchedulerClient(SchedulerClient):
             )
             for i in range(count):
                 if use_gpu:
-                    available_device_id = self._gpu_counter % len(
-                        self._cuda_devices
-                    )
+                    available_device_id = self._gpu_counter % len(self._cuda_devices)
                     env_vars["CUDA_VISIBLE_DEVICES"] = str(
                         self._cuda_devices[available_device_id]
                     )
@@ -206,9 +202,7 @@ class LocalSchedulerClient(SchedulerClient):
 
     def find(self, job_name):
         if job_name in self._jobs:
-            return JobInfo(
-                name=job_name, state=JobState.RUNNING, host="localhost"
-            )
+            return JobInfo(name=job_name, state=JobState.RUNNING, host="localhost")
         else:
             return JobInfo(name=job_name, state=JobState.NOT_FOUND)
 

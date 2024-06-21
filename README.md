@@ -72,4 +72,14 @@ We would like to thank the authors of our paper and the following individuals fo
 
 ## Citation
 
-If you find our system useful for your research or production, please cite our paper.
+If you find our system useful for your research or production, please cite our [paper](https://arxiv.org/abs/2406.14088).
+
+```
+@misc{mei2024realhf,
+      title={ReaLHF: Optimized RLHF Training for Large Language Models through Parameter Reallocation}, 
+      author={Zhiyu Mei and Wei Fu and Kaiwei Li and Guangju Wang and Huanchen Zhang and Yi Wu},
+      year={2024},
+      eprint={2406.14088},
+      archivePrefix={arXiv},
+}
+```

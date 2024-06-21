@@ -16,9 +16,9 @@ import torch.nn.functional as F
 @torch.jit.script
 def bias_gelu(y, bias):
     x = bias + y
-    return (
-        x * 0.5 * (1.0 + torch.tanh(0.79788456 * x * (1 + 0.044715 * x * x)))
-    ).to(dtype=y.dtype)
+    return (x * 0.5 * (1.0 + torch.tanh(0.79788456 * x * (1 + 0.044715 * x * x)))).to(
+        dtype=y.dtype
+    )
 
 
 # gradient of tanh approximation of gelu
@@ -60,9 +60,9 @@ bias_gelu_impl = GeLUFunction.apply
 # x * 0.5 * (1.0 + torch.erf(x * 0.70710678))
 @torch.jit.script
 def gelu_fwd(x):
-    return (
-        x * 0.5 * (1.0 + torch.tanh(0.79788456 * x * (1 + 0.044715 * x * x)))
-    ).to(dtype=x.dtype)
+    return (x * 0.5 * (1.0 + torch.tanh(0.79788456 * x * (1 + 0.044715 * x * x)))).to(
+        dtype=x.dtype
+    )
 
 
 @torch.jit.script
@@ -77,8 +77,7 @@ def new_gelu_activation(input: torch.Tensor) -> torch.Tensor:
         * (
             1.0
             + torch.tanh(
-                math.sqrt(2.0 / math.pi)
-                * (input + 0.044715 * torch.pow(input, 3.0))
+                math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))
             )
         )
     )

@@ -1,8 +1,8 @@
 # Adapted from https://github.com/mlcommons/training_results_v1.1/blob/main/NVIDIA/benchmarks/bert/implementations/pytorch/padding.py
 
-from einops import rearrange, repeat
 import torch
 import torch.nn.functional as F
+from einops import rearrange, repeat
 
 from realhf.base import constants
 
@@ -80,9 +80,7 @@ def index_put_first_axis(
     values: torch.Tensor, indices: torch.LongTensor, first_axis_dim: int
 ):
     if len(values.shape) == 1:
-        output = torch.zeros(
-            first_axis_dim, device=values.device, dtype=values.dtype
-        )
+        output = torch.zeros(first_axis_dim, device=values.device, dtype=values.dtype)
         output[indices] = values
         return output
     else:
@@ -112,9 +110,7 @@ class IndexFirstAxisResidual(torch.autograd.Function):
         assert grad_residual.shape[1:] == other_shape
         grad_input = grad_residual
         # grad_input[indices] += grad_output
-        indices = indices.reshape(
-            indices.shape[0], *((1,) * (grad_output.ndim - 1))
-        )
+        indices = indices.reshape(indices.shape[0], *((1,) * (grad_output.ndim - 1)))
         indices = indices.expand_as(grad_output)
         grad_input.scatter_add_(0, indices, grad_output)
         return grad_input.reshape(ctx.first_axis_dim, *other_shape), None
@@ -145,18 +141,14 @@ def unpad_input(hidden_states, attention_mask):
     # index with integer indices. Moreover, torch's index is a bit slower than it needs to be,
     # so we write custom forward and backward to make it a bit faster.
     return (
-        index_first_axis(
-            rearrange(hidden_states, "b s ... -> (b s) ..."), indices
-        ),
+        index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices),
         indices,
         cu_seqlens,
         max_seqlen_in_batch,
     )
 
 
-def unpad_input_for_concatenated_sequences(
-    hidden_states, attention_mask_in_length
-):
+def unpad_input_for_concatenated_sequences(hidden_states, attention_mask_in_length):
     """
     Supports concatenating short samples in one sequence.
     The attention_mask_in_length is utilized to mask other short samples.
@@ -220,9 +212,7 @@ def unpad_input_for_concatenated_sequences(
         attention_mask_in_length.flatten(), as_tuple=False
     ).flatten()
     seqlens_in_batch = attention_mask_in_length.flatten()[real_indices_idx]
-    indices = torch.nonzero(
-        attention_mask_2d.flatten(), as_tuple=False
-    ).flatten()
+    indices = torch.nonzero(attention_mask_2d.flatten(), as_tuple=False).flatten()
     max_seqlen_in_batch = seqlens_in_batch.max().item()
     cu_seqlens = F.pad(
         torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0)
@@ -233,9 +223,7 @@ def unpad_input_for_concatenated_sequences(
     # index with integer indices. Moreover, torch's index is a bit slower than it needs to be,
     # so we write custom forward and backward to make it a bit faster.
     return (
-        index_first_axis(
-            rearrange(hidden_states, "b s ... -> (b s) ..."), indices
-        ),
+        index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices),
         indices,
         cu_seqlens,
         max_seqlen_in_batch,
@@ -311,9 +299,9 @@ def pad_sequence_parallel_generate_input(
         pad_seq_size = mp_world_size - (len(cu_seqlens) - 1) % mp_world_size
         if pad_size < pad_seq_size:
             pad_size += mp_world_size
-        pad_cu_seqlens = torch.tensor(
-            list(range(1, pad_seq_size)) + [pad_size]
-        ) + len(packed_input_ids)
+        pad_cu_seqlens = torch.tensor(list(range(1, pad_seq_size)) + [pad_size]) + len(
+            packed_input_ids
+        )
         pad_cu_seqlens = pad_cu_seqlens.to(
             dtype=cu_seqlens.dtype, device=cu_seqlens.device
         )

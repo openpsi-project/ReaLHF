@@ -1,6 +1,6 @@
-from typing import Dict
 import os
 import shutil
+from typing import Dict
 
 import tqdm
 
@@ -15,9 +15,7 @@ def split_state_dict_into_shards(state_dict: Dict, n_shards: int) -> Dict:
 
     keys = list(state_dict.keys())
     if len(keys) < n_shards:
-        raise ValueError(
-            f"state_dict has {len(keys)} keys, but n_shards={n_shards}"
-        )
+        raise ValueError(f"state_dict has {len(keys)} keys, but n_shards={n_shards}")
 
     shard_size = len(keys) // n_shards
     extra = len(keys) % n_shards
@@ -56,8 +54,6 @@ def copy_hf_configs(src_model_dir, dst_model_dir):
                 os.path.join(src_model_dir, file),
                 os.path.join(dst_model_dir, file),
             )
-            logger.info(
-                f"copied {file} from {src_model_dir} to {dst_model_dir}"
-            )
+            logger.info(f"copied {file} from {src_model_dir} to {dst_model_dir}")
         except FileNotFoundError:
             logger.info(f"{file} not exist in {src_model_dir} skipping.")

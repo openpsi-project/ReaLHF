@@ -35,9 +35,7 @@ def upcast_softmax(x: torch.Tensor, scale: float, softmax_dtype: torch.dtype):
 
 
 @torch.jit.script
-def masked_softmax(
-    x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor
-):
+def masked_softmax(x: torch.Tensor, mask: torch.Tensor, mask_value: torch.Tensor):
     x = torch.where(mask, x, mask_value)
     x = torch.nn.functional.softmax(x, dim=-1)
     return x
@@ -115,9 +113,7 @@ def build_shift_one_indices(
     total_seqlen = x.shape[0]
     bs = cu_seqlens.shape[0] - 1
     short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
-    short1cu_seqlens = torch.nn.functional.pad(
-        short1lens.cumsum(0), (1, 0), value=0
-    )
+    short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
     indexing_t = torch.arange(
         total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device
     )
@@ -155,9 +151,7 @@ def build_leave_one_indices(
     total_seqlen = x.shape[0]
     bs = cu_seqlens.shape[0] - 1
     short1lens = cu_seqlens[1:] - cu_seqlens[:-1] - 1
-    short1cu_seqlens = torch.nn.functional.pad(
-        short1lens.cumsum(0), (1, 0), value=0
-    )
+    short1cu_seqlens = torch.nn.functional.pad(short1lens.cumsum(0), (1, 0), value=0)
     indexing_t = torch.arange(
         total_seqlen - bs, dtype=torch.long, device=cu_seqlens.device
     )
@@ -196,9 +190,7 @@ def gather_packed_shifted_log_probs(
             vocab_parallel_cross_entropy,
         )
 
-        logprobs = -vocab_parallel_cross_entropy(logits, labels)[
-            leave_one_indices
-        ]
+        logprobs = -vocab_parallel_cross_entropy(logits, labels)[leave_one_indices]
         ########### sanity check ###########
         # world_size = constants.model_parallel_world_size()
         # dim_size = [logits.shape[1] * world_size, logits.shape[0]]
@@ -224,13 +216,9 @@ def gather_packed_shifted_log_probs(
     # ])
     # shift labels one step to the left and pad it to match the shape of logits
     log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-    log_probs_labels = log_probs.gather(
-        dim=-1, index=labels.unsqueeze(-1)
-    ).squeeze(-1)
+    log_probs_labels = log_probs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
     log_probs_labels = log_probs_labels[leave_one_indices]
-    assert (
-        log_probs_labels.shape[0] == logits_shape[0] - cu_seqlens.shape[0] + 1
-    ), (
+    assert log_probs_labels.shape[0] == logits_shape[0] - cu_seqlens.shape[0] + 1, (
         log_probs_labels.shape,
         logits_shape,
         cu_seqlens.shape,
@@ -241,19 +229,14 @@ def gather_packed_shifted_log_probs(
 
 
 def apply_logits_mask(logits: torch.HalfTensor, mask: torch.BoolTensor):
-    assert (
-        mask.shape[-1]
-        == logits.shape[-1] * constants.model_parallel_world_size()
-    ), (
+    assert mask.shape[-1] == logits.shape[-1] * constants.model_parallel_world_size(), (
         constants.model_parallel_world_size(),
         logits.shape,
         mask.shape,
     )
     parallel_vocab_size = logits.shape[-1]
     mp_rank = constants.model_parallel_rank()
-    mask = mask[
-        :, mp_rank * parallel_vocab_size : (mp_rank + 1) * parallel_vocab_size
-    ]
+    mask = mask[:, mp_rank * parallel_vocab_size : (mp_rank + 1) * parallel_vocab_size]
     logits.masked_fill_(mask, torch.finfo(logits.dtype).min)
 
 
@@ -332,9 +315,7 @@ def get_eos_indices(
     tokenizer: transformers.PreTrainedTokenizerFast,
 ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
     if torch.any(input_ids[:, 0] == tokenizer.eos_token_id):
-        indices = (
-            (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
-        )
+        indices = (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()
         bad_input_ids = input_ids[indices]
         bad_strs = tokenizer.batch_decode(
             bad_input_ids,
@@ -416,9 +397,7 @@ def torch_attn_func(
     scores = torch.matmul(q, k.transpose(2, 3)) * softmax_scale
 
     mask = (
-        attention_mask_k.unsqueeze(1)
-        .unsqueeze(1)
-        .repeat(1, nq, max_seqlen_q, 1)
+        attention_mask_k.unsqueeze(1).unsqueeze(1).repeat(1, nq, max_seqlen_q, 1)
     )  # [bs, nq, seqlen, seqlen]
     if causal:
         _ms = max(max_seqlen_q, max_seqlen_k)
@@ -510,8 +489,7 @@ def apply_rotary_varlen(
     # sin = repeat(sin, "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
     return torch.cat(
         [
-            x[..., :ro_dim] * cos
-            + rotate_half(x[..., :ro_dim], interleaved) * sin,
+            x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin,
             x[..., ro_dim:],
         ],
         dim=-1,
@@ -538,8 +516,7 @@ def apply_rotary(
         sin = sin[:, None, :, None].repeat(1, 1, 1, 2).flatten(start_dim=-2)
     return torch.cat(
         [
-            x[..., :ro_dim] * cos
-            + rotate_half(x[..., :ro_dim], interleaved) * sin,
+            x[..., :ro_dim] * cos + rotate_half(x[..., :ro_dim], interleaved) * sin,
             x[..., ro_dim:],
         ],
         dim=-1,

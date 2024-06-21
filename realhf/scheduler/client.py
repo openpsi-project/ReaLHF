@@ -1,6 +1,6 @@
-from typing import List, Optional
 import dataclasses
 import enum
+from typing import List, Optional
 
 
 class JobState(enum.Enum):
@@ -22,9 +22,7 @@ class SchedulerError(Exception):
 class JobException(Exception):
 
     def __init__(self, run_name, worker_type, host, reason: JobState):
-        super().__init__(
-            f"Job {run_name}:{worker_type} {reason} at node {host}"
-        )
+        super().__init__(f"Job {run_name}:{worker_type} {reason} at node {host}")
         self.run_name = run_name
         self.worker_type = worker_type
         self.host = host
@@ -130,9 +128,7 @@ def setup_cmd(expr_name, trial_name, debug):
     return bash_cmd
 
 
-def control_cmd(
-    expr_name, trial_name, debug, ignore_worker_error, controller_type
-):
+def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_type):
     bash_cmd = (  # f"pip3 install -e $REAL_PACKAGE_PATH --no-build-isolation && "
         f"python3 {'' if debug else '-O'} -m realhf.apps.remote controller "
         f"-e {expr_name} -f {trial_name} "
@@ -145,7 +141,9 @@ def control_cmd(
 
 def ray_cluster_cmd(expr_name, trial_name, worker_type):
     flags = [f"-e {expr_name}", f"-f {trial_name}", f"-w {worker_type}"]
-    return f"python3 -m realhf.apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}"
+    return (
+        f"python3 -m realhf.apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}"
+    )
 
 
 def make(mode, expr_name, trial_name, **kwargs) -> SchedulerClient:

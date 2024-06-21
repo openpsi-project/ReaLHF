@@ -1,11 +1,11 @@
-from collections import defaultdict
-from typing import *
 import dataclasses
 import itertools
 import os
 import platform
 import socket
 import time
+from collections import defaultdict
+from typing import *
 
 import realhf.base.logging as logging
 import realhf.base.name_resolve as name_resolve
@@ -52,9 +52,7 @@ def reveal_ddp_identity(expr_name, trial_name, worker_index):
     master_group_name = names.trainer_ddp_peer(
         expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME
     )
-    name_resolve.add_subentry(
-        master_group_name, str(worker_index), keepalive_ttl=30
-    )
+    name_resolve.add_subentry(master_group_name, str(worker_index), keepalive_ttl=30)
     # local_peer_name = names.trainer_ddp_local_peer(expr_name, trial_name, socket.gethostname(), peer_name)
     # name_resolve.add_subentry(local_peer_name, peer_index, keepalive_ttl=30)
 
@@ -99,9 +97,7 @@ def isolate_cuda_device(
         keepalive_ttl=60,
     )
     name_resolve.add_subentry(
-        names.trainer_ddp_peer(
-            experiment_name, trial_name, name_resolve_identifier
-        ),
+        names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier),
         rank,
         keepalive_ttl=30,
     )
@@ -129,18 +125,16 @@ def isolate_cuda_device(
     local_peers = list(
         [
             str(x)
-            for x in sorted(
-                [int(x) for x in name_resolve.get_subtree(local_peer_name)]
-            )
+            for x in sorted([int(x) for x in name_resolve.get_subtree(local_peer_name)])
         ]
     )
     # logger.info(f"Rank {rank} discovers local peers with global ranks {local_peers}")
 
     local_peer_index = local_peers.index(str(rank))
     if len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == len(local_peers):
-        local_gpu_id = list(
-            map(int, os.environ["CUDA_VISIBLE_DEVICES"].split(","))
-        )[local_peer_index]
+        local_gpu_id = list(map(int, os.environ["CUDA_VISIBLE_DEVICES"].split(",")))[
+            local_peer_index
+        ]
     elif len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1:
         local_gpu_id = int(os.environ["CUDA_VISIBLE_DEVICES"])
     else:

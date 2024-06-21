@@ -1,6 +1,6 @@
-from typing import Dict, Optional
 import dataclasses
 import os
+from typing import Dict, Optional
 
 import colorama
 import deepspeed
@@ -8,11 +8,11 @@ import torch
 import torch.distributed as dist
 import tqdm
 
-from realhf.base import constants
-from realhf.base.namedarray import from_dict, NamedArray, recursive_apply
-from realhf.impl.model.nn.real_llm_api import ReaLModel
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
+from realhf.base import constants
+from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
+from realhf.impl.model.nn.real_llm_api import ReaLModel
 
 logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")
 
@@ -26,14 +26,11 @@ def _paired_rw_loss_from_model_outputs(
 ):
     scores = scores[cu_seqlens[1:] - 1].view(-1, 2).float()
     loss = -(
-        torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1])
-        * group_factor
+        torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1]) * group_factor
     ).sum()
 
     # Logging.
-    correct_predictions = (
-        (scores[:, 0] > scores[:, 1]).count_nonzero().detach().float()
-    )
+    correct_predictions = (scores[:, 0] > scores[:, 1]).count_nonzero().detach().float()
     total_predictions = torch.tensor(
         scores.shape[0], dtype=torch.float32, device=scores.device
     )
@@ -107,9 +104,7 @@ class PairedRewardInterface(model_api.ModelInterface):
         seqlens_cpu = data.metadata["seqlens"]
         max_seqlen = max(seqlens_cpu)
         cu_seqlens = torch.nn.functional.pad(
-            torch.tensor(
-                seqlens_cpu, dtype=torch.int32, device=model.device
-            ).cumsum(0),
+            torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0),
             (1, 0),
         )
 
@@ -145,9 +140,7 @@ class PairedRewardInterface(model_api.ModelInterface):
         res.register_metadata(**data.metadata)
         return res
 
-    def train_step(
-        self, model: model_api.Model, data: NamedArray
-    ) -> NamedArray:
+    def train_step(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
@@ -159,9 +152,7 @@ class PairedRewardInterface(model_api.ModelInterface):
             [data["pos_input_lens"], neg_input_lens], 1
         ).view(-1)
         group_factor: torch.Tensor = data["group_factor"]
-        cu_seqlens = torch.cat(
-            [input_lens.new_zeros(1), input_lens.cumsum(0)], 0
-        ).int()
+        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
         max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
         module = model.module
@@ -184,16 +175,10 @@ class PairedRewardInterface(model_api.ModelInterface):
         res = {}
         if stats:
             if constants.pipe_parallel_world_size() > 1:
-                stats["max_pos_score"] /= (
-                    constants.pipe_parallel_world_size() * 2
-                )
-                stats["min_neg_score"] /= (
-                    constants.pipe_parallel_world_size() * 2
-                )
+                stats["max_pos_score"] /= constants.pipe_parallel_world_size() * 2
+                stats["min_neg_score"] /= constants.pipe_parallel_world_size() * 2
             self.train_total_predictions += int(stats["total_predictions"])
-            self.train_total_correct_predictions += int(
-                stats["correct_predictions"]
-            )
+            self.train_total_correct_predictions += int(stats["correct_predictions"])
             res = dict(
                 loss=float(stats["loss"] / stats["total_predictions"]),
                 epoch_acc=self.train_total_correct_predictions
@@ -201,12 +186,8 @@ class PairedRewardInterface(model_api.ModelInterface):
                 batch_acc=float(
                     stats["correct_predictions"] / stats["total_predictions"]
                 ),
-                avg_pos_score=float(
-                    stats["pos_score"] / stats["total_predictions"]
-                ),
-                avg_neg_score=float(
-                    stats["neg_score"] / stats["total_predictions"]
-                ),
+                avg_pos_score=float(stats["pos_score"] / stats["total_predictions"]),
+                avg_neg_score=float(stats["neg_score"] / stats["total_predictions"]),
                 total_predictions=int(stats["total_predictions"]),
                 correct_predictions=int(stats["correct_predictions"]),
                 max_pos_score=float(stats["max_pos_score"]),
@@ -216,9 +197,7 @@ class PairedRewardInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
         if model.version.epoch > cur_epoch:
-            self.train_total_predictions = (
-                self.train_total_correct_predictions
-            ) = 0
+            self.train_total_predictions = self.train_total_correct_predictions = 0
 
         return res
 
@@ -256,9 +235,9 @@ class PairedRewardInterface(model_api.ModelInterface):
             packed_input_ids: torch.Tensor = data["packed_input_ids"]
             neg_input_lens = pair_lens - data["pos_input_lens"]
             assert (neg_input_lens > 0).all()
-            input_lens = torch.stack(
-                [data["pos_input_lens"], neg_input_lens], 1
-            ).view(-1)
+            input_lens = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(
+                -1
+            )
             group_factor: torch.Tensor = data["group_factor"]
             cu_seqlens = torch.cat(
                 [input_lens.new_zeros(1), input_lens.cumsum(0)], 0
@@ -285,12 +264,8 @@ class PairedRewardInterface(model_api.ModelInterface):
                 total_predictions += stats["total_predictions"].item()
                 pos_score += stats["pos_score"].item()
                 neg_score += stats["neg_score"].item()
-                max_pos_score = max(
-                    max_pos_score, stats["max_pos_score"].item()
-                )
-                min_neg_score = min(
-                    min_neg_score, stats["min_neg_score"].item()
-                )
+                max_pos_score = max(max_pos_score, stats["max_pos_score"].item())
+                min_neg_score = min(min_neg_score, stats["min_neg_score"].item())
 
         if total_predictions > 0:
             return dict(

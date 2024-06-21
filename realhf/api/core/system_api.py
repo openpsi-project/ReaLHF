@@ -1,4 +1,3 @@
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 import collections
 import copy
 import dataclasses
@@ -8,7 +7,10 @@ import itertools
 import math
 import os
 import sys
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
+import realhf.api.core.dfg as dfg
+import realhf.base.topology as topology
 from realhf.api.core.config import *
 from realhf.base.cluster import spec as cluster_spec
 from realhf.base.constants import (
@@ -17,8 +19,6 @@ from realhf.base.constants import (
     TORCH_EXTENSIONS_DIR,
     TRITON_CACHE_PATH,
 )
-import realhf.api.core.dfg as dfg
-import realhf.base.topology as topology
 
 _LLM_ENVVARS = {
     # "NCCL_P2P_DISABLE": "1",
@@ -68,9 +68,7 @@ class Scheduling:
     nodelist: str = None
     exclude: str = None
     container_image: str = _LLM_CPU_IMAGE
-    env_vars: Dict[str, str] = dataclasses.field(
-        default_factory=lambda: _LLM_ENVVARS
-    )
+    env_vars: Dict[str, str] = dataclasses.field(default_factory=lambda: _LLM_ENVVARS)
     # time utils from "https://slurm.schedmd.com/sbatch.html"
     time_limit: Optional[str] = None  # see  "--time" option for format
     begin: Optional[str] = None  # see "--begin" option for format
@@ -108,9 +106,7 @@ class WorkerInformation:
     """
 
     experiment_name: str = ""
-    trial_name: str = (
-        ""  # Name of the trial of the experiment; e.g. "{USER}-0".
-    )
+    trial_name: str = ""  # Name of the trial of the experiment; e.g. "{USER}-0".
     worker_type: str = ""  # E.g. "policy", "actor", or "trainer".
     worker_index: int = (
         -1
@@ -121,9 +117,7 @@ class WorkerInformation:
     worker_tag: Optional[str] = (
         None  # For actor and policy worker, can be "training" or "evaluation".
     )
-    host_key: Optional[str] = (
-        None  # Worker will update and keep this key alive.
-    )
+    host_key: Optional[str] = None  # Worker will update and keep this key alive.
     watch_keys: Union[str, List[str]] = (
         None  # Worker will exit if all of the watching keys are gone.
     )
@@ -249,9 +243,7 @@ class ExperimentConfig:
         ############### Sanity check of model names ###############
         _roles = set(mn.role for mn in model_names)
         _replica_ids = {
-            _role: sorted(
-                [mn.replica_id for mn in model_names if mn.role == _role]
-            )
+            _role: sorted([mn.replica_id for mn in model_names if mn.role == _role])
             for _role in _roles
         }
         for v in _replica_ids.values():
@@ -261,16 +253,12 @@ class ExperimentConfig:
                 )
         ############### Sanity check of model names ###############
 
-        model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = (
-            {}
-        )
+        model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = {}
         model_configs: Dict[ModelName, Model] = {}
         for model_name in model_names:
             _this_mws = list(
                 filter(
-                    lambda mw: any(
-                        x.id.model_name == model_name for x in mw.shards
-                    ),
+                    lambda mw: any(x.id.model_name == model_name for x in mw.shards),
                     self.model_worker,
                 )
             )
@@ -319,9 +307,7 @@ class ExperimentConfig:
                 data_src_rpc.model_name,
                 r.model_name,
             ) not in data_transfer_pairs:
-                data_transfer_pairs.append(
-                    (data_src_rpc.model_name, r.model_name)
-                )
+                data_transfer_pairs.append((data_src_rpc.model_name, r.model_name))
         data_transfer_pairs += [(mn, mn) for mn in model_names]
 
         sync_param_pairs: List[Tuple[ModelName, ModelName]] = []
@@ -358,10 +344,8 @@ class ExperimentConfig:
                 )
                 self_topo = model_topos[rpc.model_name]
                 if (
-                    self_topo.get_dim("model") % other_topo.get_dim("model")
-                    != 0
-                    and other_topo.get_dim("model") % self_topo.get_dim("model")
-                    != 0
+                    self_topo.get_dim("model") % other_topo.get_dim("model") != 0
+                    and other_topo.get_dim("model") % self_topo.get_dim("model") != 0
                 ):
                     raise ValueError(
                         "To synchronize parameters between two models, "
@@ -420,8 +404,7 @@ class ExperimentConfig:
         model_names_to_instantiate = []
         for role in _roles:
             _trainable_this_role = [
-                _model_is_trainable[ModelName(role, i)]
-                for i in range(_role_cnt[role])
+                _model_is_trainable[ModelName(role, i)] for i in range(_role_cnt[role])
             ]
             if _role_cnt[role] == 1 or not any(_trainable_this_role):
                 model_names_to_instantiate.append(ModelName(role, 0))
@@ -429,14 +412,10 @@ class ExperimentConfig:
             if any(_trainable_this_role):
                 assert sum(_trainable_this_role) == 1
                 _trainable_idx = _trainable_this_role.index(True)
-                model_names_to_instantiate.append(
-                    ModelName(role, _trainable_idx)
-                )
+                model_names_to_instantiate.append(ModelName(role, _trainable_idx))
         for mw in self.model_worker:
             for s in mw.shards:
-                s.should_instantiate = (
-                    s.id.model_name in model_names_to_instantiate
-                )
+                s.should_instantiate = s.id.model_name in model_names_to_instantiate
 
         msid2mwid = {}
         for i, mw in enumerate(self.model_worker):
@@ -542,10 +521,7 @@ def config_to_dataclass(config: Union[List, Dict]):
     elif isinstance(config, dict):
         if "config_class" in config.keys():
             return getattr(sys.modules[__name__], config["config_class"])(
-                **{
-                    k: config_to_dataclass(v)
-                    for k, v in config["config_value"].items()
-                }
+                **{k: config_to_dataclass(v) for k, v in config["config_value"].items()}
             )
         else:
             return config

@@ -1,5 +1,3 @@
-from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple, Union
 import asyncio
 import collections
 import copy
@@ -10,6 +8,8 @@ import os
 import re
 import time
 import uuid
+from collections import defaultdict
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import deepspeed
@@ -17,6 +17,14 @@ import numpy as np
 import torch
 import torch.distributed
 
+import realhf.api.core.config as config_api
+import realhf.api.core.data_api as data_api
+import realhf.api.core.dfg as dfg
+import realhf.api.core.model_api as model_api
+import realhf.api.core.system_api as config_pkg
+import realhf.base.recover as recover
+import realhf.system.request_reply_stream as request_reply_stream
+import realhf.system.worker_base as worker_base
 from realhf.api.core.config import ModelName
 from realhf.api.core.model_api import ReaLModelConfig
 from realhf.base import datapack, logging, namedarray, timeutil, topology
@@ -33,14 +41,6 @@ from realhf.base.monitor import (
     calculate_llama_train_flops,
 )
 from realhf.system.buffer import AsyncIOSequenceBuffer
-import realhf.api.core.config as config_api
-import realhf.api.core.data_api as data_api
-import realhf.api.core.dfg as dfg
-import realhf.api.core.model_api as model_api
-import realhf.api.core.system_api as config_pkg
-import realhf.base.recover as recover
-import realhf.system.request_reply_stream as request_reply_stream
-import realhf.system.worker_base as worker_base
 
 logger = logging.getLogger("master worker", "system")
 blogger = logging.getLogger("benchmark")
@@ -81,17 +81,13 @@ def request_all(
         for handler, data in zip(handlers, datas)
     ]
     if verbose:
-        blogger.debug(
-            f"master worker #request_all# *end* time ${time.time_ns()}$"
-        )
+        blogger.debug(f"master worker #request_all# *end* time ${time.time_ns()}$")
     tik = time.perf_counter()
 
     # A protocol to ensure that any model worker execute jobs in the same order.
     [stream.post(r) for r in requests]
     [
-        stream.poll(
-            block=True, pattern=create_exact_match_pattern([p.syn_reply_id])
-        )
+        stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
         for p in requests
     ]
     [
@@ -112,9 +108,7 @@ def request_all(
     return [r.request_id for r in requests]
 
 
-def create_exact_match_pattern(
-    string_list: List[Union[uuid.UUID, str]]
-) -> re.Pattern:
+def create_exact_match_pattern(string_list: List[Union[uuid.UUID, str]]) -> re.Pattern:
     escaped_strings = [re.escape(str(s)) for s in string_list]
     pattern = f"({'|'.join(escaped_strings)})$"
     return re.compile(pattern)
@@ -140,9 +134,7 @@ async def gather_all_replies(
     """Collect responses from multiple streams. Blocking method."""
     responses = await asyncio.gather(
         *[
-            _awaitable_response(
-                stream, pattern=create_exact_match_pattern([req_id])
-            )
+            _awaitable_response(stream, pattern=create_exact_match_pattern([req_id]))
             for req_id in request_ids
         ]
     )
@@ -215,9 +207,7 @@ def _request_parameter_sync(
     ]
     request_ids = [stream.post(p) for p in payloads]
     [
-        stream.poll(
-            pattern=create_exact_match_pattern([p.syn_reply_id]), block=True
-        )
+        stream.poll(pattern=create_exact_match_pattern([p.syn_reply_id]), block=True)
         for p in payloads
     ]
     [
@@ -236,9 +226,7 @@ def _request_parameter_sync(
 
 @dataclasses.dataclass
 class InterfaceDataAmount:
-    train_configs: List[ReaLModelConfig] = dataclasses.field(
-        default_factory=list
-    )
+    train_configs: List[ReaLModelConfig] = dataclasses.field(default_factory=list)
     train_bs: List[int] = dataclasses.field(default_factory=list)
     train_seqlens: List[List[int]] = dataclasses.field(default_factory=list)
 
@@ -295,9 +283,7 @@ class RPCCorountineControl:
     # recover information
     used_hash_vals_this_epoch: Set[int] = dataclasses.field(default_factory=set)
     is_recover_epoch: bool = False
-    hash_vals_to_ignore_in_recover: Set[int] = dataclasses.field(
-        default_factory=set
-    )
+    hash_vals_to_ignore_in_recover: Set[int] = dataclasses.field(default_factory=set)
 
 
 def _attach_payloads_with_hooks(
@@ -309,9 +295,7 @@ def _attach_payloads_with_hooks(
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
     main_handlers: List[config_pkg.ModelShardID],
     hook_type: str,
-) -> Tuple[
-    Dict[config_api.ModelShardID, request_reply_stream.Payload], List[int]
-]:
+) -> Tuple[Dict[config_api.ModelShardID, request_reply_stream.Payload], List[int]]:
     assert hook_type in ["pre", "post"], hook_type
 
     main_mwids = set([msid2mwid[h] for h in main_handlers])
@@ -341,9 +325,7 @@ def _attach_payloads_with_hooks(
                 "to_model_config": dst_config,
             }
             for h in main_handlers:
-                getattr(payloads[h], f"{hook_type}_hooks").append(
-                    "param_realloc"
-                )
+                getattr(payloads[h], f"{hook_type}_hooks").append("param_realloc")
                 getattr(payloads[h], f"{hook_type}_hook_data").append(ps_data)
             other_handlers = [
                 config_api.ModelShardID.from_parallelism_rank(
@@ -357,21 +339,13 @@ def _attach_payloads_with_hooks(
                         handler=h,
                         handle_name="empty",
                     )
-                    setattr(
-                        payloads[h], f"{hook_type}_hooks", ["param_realloc"]
-                    )
+                    setattr(payloads[h], f"{hook_type}_hooks", ["param_realloc"])
                     setattr(payloads[h], f"{hook_type}_hook_data", [ps_data])
                     mwids.append(msid2mwid[h])
                 elif msid2mwid[h] not in main_mwids:
-                    hh = next(
-                        hh for hh in payloads if msid2mwid[hh] == msid2mwid[h]
-                    )
-                    getattr(payloads[hh], f"{hook_type}_hooks").append(
-                        "param_realloc"
-                    )
-                    getattr(payloads[hh], f"{hook_type}_hook_data").append(
-                        ps_data
-                    )
+                    hh = next(hh for hh in payloads if msid2mwid[hh] == msid2mwid[h])
+                    getattr(payloads[hh], f"{hook_type}_hooks").append("param_realloc")
+                    getattr(payloads[hh], f"{hook_type}_hook_data").append(ps_data)
 
         elif isinstance(hook, dfg.OffloadHook):
             for h in main_handlers:
@@ -457,9 +431,7 @@ async def scatter_tensor_to_mws(
         hook_type="post",
     )
     req_ids = [stream.post(p) for h, p in payloads.items() if h in handlers]
-    other_req_ids = [
-        stream.post(p) for h, p in payloads.items() if h not in handlers
-    ]
+    other_req_ids = [stream.post(p) for h, p in payloads.items() if h not in handlers]
     await asyncio.gather(
         *[
             _awaitable_response(
@@ -527,8 +499,7 @@ async def model_rpc_request_func(
 
         # Ensure that parent RPCs will not be over-consumed.
         while any(
-            this_rpc_consumed_seqs
-            >= (ctrl.rpc_traversal[c.name] + 1) * c.max_n_seqs
+            this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.max_n_seqs
             for c in rpc.children_rpcs
         ):
             await asyncio.sleep(0.1)
@@ -539,8 +510,8 @@ async def model_rpc_request_func(
             ctrl.training_buffer_indices = ctrl.training_buffer_indices.union(
                 sample.indices
             )
-            ctrl.used_hash_vals_this_epoch = (
-                ctrl.used_hash_vals_this_epoch.union(sample.hash_vals)
+            ctrl.used_hash_vals_this_epoch = ctrl.used_hash_vals_this_epoch.union(
+                sample.hash_vals
             )
 
         if rpc.interface_type == dfg.ModelInterfaceType.GENERATE:
@@ -573,9 +544,7 @@ async def model_rpc_request_func(
             dp_size,
             min_size=min_n_seqs_per_dp,
         )
-        target_mapping = {
-            i: list(range(v[0], v[1])) for i, v in enumerate(partitions)
-        }
+        target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
 
         # Set data owner of produced data by this RPC, such that downstream RPCs can know
         # whether to fetch these data.
@@ -598,9 +567,7 @@ async def model_rpc_request_func(
             producer_mapping = defaultdict(list)
             for i, dp_idx in enumerate(dp_indices):
                 producer_mapping[dp_idx].append(i)
-            producer_mapping = {
-                k: sorted(v) for k, v in producer_mapping.items()
-            }
+            producer_mapping = {k: sorted(v) for k, v in producer_mapping.items()}
             producer_mappings[names[0], k] = producer_mapping
 
         # send partitioned data to model workers
@@ -621,9 +588,7 @@ async def model_rpc_request_func(
         await request_queues[response_coroutine_idx].put(
             (req_ids, other_req_ids, time.perf_counter())
         )
-        response_coroutine_idx = (response_coroutine_idx + 1) % len(
-            request_queues
-        )
+        response_coroutine_idx = (response_coroutine_idx + 1) % len(request_queues)
         logger.info(f"Model rpc {rpc.name} requested.")
 
 
@@ -704,9 +669,7 @@ async def model_rpc_reply_func(
                 [response.data["buffer_indices"] for response in responses], []
             )
             keys = res
-            seqlens = sum(
-                [response.data["seqlens"] for response in responses], []
-            )
+            seqlens = sum([response.data["seqlens"] for response in responses], [])
             await buffer.amend_batch(
                 buffer_indices, [(keys, seqlen) for seqlen in seqlens]
             )
@@ -735,14 +698,12 @@ async def load_data_func(
 
         is_final_batch = False
         while not is_final_batch:
-            data_batches: List[data_api.DataBatchMeta] = (
-                await group_rpc_blocked(
-                    stream,
-                    handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
-                    handle_type="fetch",
-                    datas=[None for _ in range(src_rpc_dp_size)],
-                    verbose=False,
-                )
+            data_batches: List[data_api.DataBatchMeta] = await group_rpc_blocked(
+                stream,
+                handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
+                handle_type="fetch",
+                datas=[None for _ in range(src_rpc_dp_size)],
+                verbose=False,
             )
             cur_epoch = data_batches[0].epoch
 
@@ -757,9 +718,7 @@ async def load_data_func(
             all_data += data_api.unpack_data_batch(x)
 
         steps_per_epoch = len(all_data) // src_rpc.max_n_seqs
-        avg_tokens_per_batch = (
-            sum(x.seqlens[0] for x in all_data) / steps_per_epoch
-        )
+        avg_tokens_per_batch = sum(x.seqlens[0] for x in all_data) / steps_per_epoch
         logger.info(
             f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
             f"Each batch has {avg_tokens_per_batch:.2f} tokens in average."
@@ -778,9 +737,7 @@ async def load_data_func(
             seqlens, src_rpc.max_n_seqs
         )
         recover_indices = np.argsort(reorder_indices)
-        all_data: List[data_api.DataBatchMeta] = [
-            all_data[i] for i in reorder_indices
-        ]
+        all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
 
         keys = all_data[0].keys
         batch = [(keys, x.seqlens[0], x.hash_vals[0]) for x in all_data]
@@ -830,15 +787,10 @@ def _gather_stat(src: List[Dict]) -> Dict:
         for k, v in reply.items():
             cnt[k] = cnt.get(k, 0) + 1
             stats[k] = stats.get(k, 0) + v
-    res = {
-        k: v / cnt
-        for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())
-    }
+    res = {k: v / cnt for k, v, cnt in zip(stats.keys(), stats.values(), cnt.values())}
     for k, c in cnt.items():
         if c != len(src):
-            logger.warning(
-                f"Gathered `{k}` is not present in every returned stats."
-            )
+            logger.warning(f"Gathered `{k}` is not present in every returned stats.")
     for k, v in res.items():
         if any(abs(v - x.get(k, None)) > 1e-4 for x in src):
             logger.warning(
@@ -891,9 +843,9 @@ class MasterWorker(worker_base.Worker):
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
 
-        self.__model_topos: Dict[
-            ModelName, topology.PipeModelDataParallelTopology
-        ] = config.model_topos
+        self.__model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = (
+            config.model_topos
+        )
 
         # Build execution graph and initialize concurrency utilities.
         self.__model_rpcs, _ = dfg.build_graph(config.model_rpcs)
@@ -913,12 +865,8 @@ class MasterWorker(worker_base.Worker):
         for msid, mwid in self.config.msid2mwid.items():
             self.__mwid2msids[mwid].append(msid)
 
-        self.__rpc_srcs = list(
-            filter(lambda rpc: rpc.is_src, self.__model_rpcs)
-        )
-        self.__rpc_dsts = list(
-            filter(lambda rpc: rpc.is_dst, self.__model_rpcs)
-        )
+        self.__rpc_srcs = list(filter(lambda rpc: rpc.is_src, self.__model_rpcs))
+        self.__rpc_dsts = list(filter(lambda rpc: rpc.is_dst, self.__model_rpcs))
         self.__n_rpc_srcs = len(self.__rpc_srcs)
         self.__n_rpc_dsts = len(self.__rpc_dsts)
 
@@ -984,9 +932,7 @@ class MasterWorker(worker_base.Worker):
         src_rpc_dp_size = src_rpc_topo.get_dim("data")
         src_rpc_pp_size = src_rpc_topo.get_dim("pipe")
         for i in range(src_rpc_dp_size):
-            rank = src_rpc_topo.get_rank(
-                data=i, pipe=src_rpc_pp_size - 1, model=0
-            )
+            rank = src_rpc_topo.get_rank(data=i, pipe=src_rpc_pp_size - 1, model=0)
             handler_routing[f"__data{i}__"] = self.config.msid2mwid[
                 config_pkg.ModelShardID.from_parallelism_rank(
                     model_name=src_rpc.model_name,
@@ -1003,9 +949,7 @@ class MasterWorker(worker_base.Worker):
 
         src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
         src_rpc_model_name = src_rpc.model_name
-        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim(
-            "data"
-        )
+        src_rpc_dp_size = self.config.model_topos[src_rpc.model_name].get_dim("data")
 
         # Request training specification from data workers.
         total_n_seqs = 0
@@ -1039,15 +983,11 @@ class MasterWorker(worker_base.Worker):
         for model_name, topo in self.config.model_topos.items():
             num_dp = topo.get_dim("data")
             self.__all_model_handlers += [
-                config_pkg.ModelShardID.from_parallelism_rank(
-                    model_name, topo, j
-                )
+                config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in range(topo.world_size())
             ]
             self.__dp0_model_handlers += [
-                config_pkg.ModelShardID.from_parallelism_rank(
-                    model_name, topo, j
-                )
+                config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in topo.filter_match(data=0)
             ]
 
@@ -1116,8 +1056,7 @@ class MasterWorker(worker_base.Worker):
                 continue
             _indices = list(range(_role_cnt[role]))
             _trainable_this_role = [
-                _model_is_trainable[ModelName(role, i)]
-                for i in range(_role_cnt[role])
+                _model_is_trainable[ModelName(role, i)] for i in range(_role_cnt[role])
             ]
             if any(_trainable_this_role):
                 assert sum(_trainable_this_role) == 1
@@ -1136,9 +1075,7 @@ class MasterWorker(worker_base.Worker):
             topo = self.config.model_topos[model_name]
             # Build FinetuneSpec, which is required to initialize backends.
             _handlers = [
-                config_pkg.ModelShardID.from_parallelism_rank(
-                    model_name, topo, j
-                )
+                config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in range(topo.world_size())
             ]
             train_rpcs = list(
@@ -1172,9 +1109,7 @@ class MasterWorker(worker_base.Worker):
             # Reallocate parameters if necessary.
             if model_name.role in _initialized_roles:
                 assert model_name in _param_recevers
-                _param_realloc_src = _param_senders[
-                    _param_recevers.index(model_name)
-                ]
+                _param_realloc_src = _param_senders[_param_recevers.index(model_name)]
                 _request_parameter_sync(
                     stream=self.__stream,
                     msid2mwid=self.config.msid2mwid,
@@ -1226,21 +1161,15 @@ class MasterWorker(worker_base.Worker):
                 for rpc in self.__model_rpcs
             },
             request_queues={
-                rpc.name: [
-                    asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)
-                ]
+                rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
                 for rpc in self.__model_rpcs
             },
             is_recover_epoch=self.__recover_run,
             used_hash_vals_this_epoch=(
-                self.__recover_info.hash_vals_to_ignore
-                if self.__recover_run
-                else set()
+                self.__recover_info.hash_vals_to_ignore if self.__recover_run else set()
             ),
             hash_vals_to_ignore_in_recover=(
-                self.__recover_info.hash_vals_to_ignore
-                if self.__recover_run
-                else set()
+                self.__recover_info.hash_vals_to_ignore if self.__recover_run else set()
             ),
         )
 
@@ -1344,9 +1273,7 @@ class MasterWorker(worker_base.Worker):
         # Main execution steps. The graph runs under-the-hood in RPC & stream threads.
         # Wait for the finish of the traversal of the execution graph.
         execution_start = time.perf_counter()
-        logger.info(
-            "Master worker is waiting for the finish of the execution graph."
-        )
+        logger.info("Master worker is waiting for the finish of the execution graph.")
         _rpc_dst_cnt = 0
         while _rpc_dst_cnt < self.__n_rpc_dsts:
             try:
@@ -1402,9 +1329,7 @@ class MasterWorker(worker_base.Worker):
         self._global_step += 1
 
         if should_eval:
-            self.__rpc_ctrl.eval_queue.put_nowait(
-                (self._epoch, self._epoch_step)
-            )
+            self.__rpc_ctrl.eval_queue.put_nowait((self._epoch, self._epoch_step))
         if should_save:
             self.__rpc_ctrl.save_queue.put_nowait(
                 (self._epoch, self._epoch_step, self._global_step)
@@ -1430,8 +1355,7 @@ class MasterWorker(worker_base.Worker):
         # calculate flops
         #########################################
         if not all(
-            isinstance(v, ReaLModelConfig)
-            for v in self.__model_configs.values()
+            isinstance(v, ReaLModelConfig) for v in self.__model_configs.values()
         ):
             logger.warning(
                 f"Not all models are ReaLModels. Unable to calculate FLOP/s."
@@ -1482,9 +1406,7 @@ class MasterWorker(worker_base.Worker):
                     vocab_size=real_config.vocab_size,
                 )
             tflops = flops / (e2e_time * (10**12))
-            tflops_per_gpu = flops / (
-                e2e_time * self.config.n_model_workers * (10**12)
-            )
+            tflops_per_gpu = flops / (e2e_time * self.config.n_model_workers * (10**12))
         self.__rpc_ctrl.data_amount.clear()
         #########################################
 
@@ -1499,10 +1421,7 @@ class MasterWorker(worker_base.Worker):
             s += f"Average #tokens per batch is {self.__cur_avg_tokens_per_batch:.0f}. "
         s += f"#End to end# execution time: *{e2e_time:.3f}*s. "
         s += f"Total time consumption: {total_time_consumption:.3f}s. "
-        if (
-            self.__cur_steps_per_epoch is not None
-            and len(self.e2e_time_history) > 2
-        ):
+        if self.__cur_steps_per_epoch is not None and len(self.e2e_time_history) > 2:
             remaining_steps = self.__cur_steps_per_epoch - self._epoch_step
             remaining_epochs = self.__total_train_epochs - self._epoch
             avg_t = np.mean(self.e2e_time_history[2:])
@@ -1520,9 +1439,7 @@ class MasterWorker(worker_base.Worker):
             logger.info(
                 f"Finished benchmark {self.__benchmark_steps}. Total time consumption {total_time_consumption:.3f}"
             )
-            logger.info(
-                f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*"
-            )
+            logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
             for i, level_time_history in self.level_time_history.items():
                 logger.info(
                     f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*"

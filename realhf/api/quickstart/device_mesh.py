@@ -1,7 +1,7 @@
-from typing import List, Optional, Union
 import dataclasses
 import json
 import math
+from typing import List, Optional, Union
 
 import numpy as np
 
@@ -113,9 +113,7 @@ class DeviceMesh:
             )
             n_gpus = min_n_gpus
             while n_gpus < min(self.n_gpus_per_node, np.sum(self.mapping)):
-                for start in range(
-                    np.min(this_cols), self.n_gpus_per_node, n_gpus
-                ):
+                for start in range(np.min(this_cols), self.n_gpus_per_node, n_gpus):
                     # print(row, start, start+n_gpus)
                     sub_mapping = np.zeros(
                         (self.n_nodes, self.n_gpus_per_node), dtype=np.int32
@@ -138,9 +136,7 @@ class DeviceMesh:
                 n_gpus_per_node=self.n_gpus_per_node,
                 mapping=sub_mapping,
                 global_mesh_name=self.global_mesh_name,
-                name=device_mesh_name_from_mapping(
-                    self.global_mesh_name, sub_mapping
-                ),
+                name=device_mesh_name_from_mapping(self.global_mesh_name, sub_mapping),
             )
             for sub_mapping in sub_mappings
         ]
@@ -173,9 +169,7 @@ class DeviceMesh:
             ):
                 raise RuntimeError(f"Invalid mapping sum {self.mapping}")
         if not are_ones_contiguous(self.mapping.flatten()):
-            raise RuntimeError(
-                f"mapping devices are not contiguous {self.mapping}"
-            )
+            raise RuntimeError(f"mapping devices are not contiguous {self.mapping}")
         return True
 
 
@@ -255,9 +249,7 @@ def find_parallel_strategies(
                     num_dp_mp in [1, 2, 4, 8] or num_dp_mp % 8 == 0
                 ) and num_dp_pp % num_pp == 0
                 if valid:
-                    res.append(
-                        ParallelismConfig(num_pp, num_mp, num_dp_pp // num_pp)
-                    )
+                    res.append(ParallelismConfig(num_pp, num_mp, num_dp_pp // num_pp))
                 num_pp += 1
     return res
 
@@ -311,7 +303,5 @@ class AllocationConfig:
     :type device_mesh: str
     """
 
-    parallel: ParallelismConfig = dataclasses.field(
-        default_factory=ParallelismConfig
-    )
+    parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     device_mesh: Optional[str] = None

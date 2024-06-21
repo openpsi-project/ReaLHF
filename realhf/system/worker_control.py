@@ -1,13 +1,13 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
 import pickle
 import socket
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray.util.queue as rq
 import zmq
 
+import realhf.system.worker_base as worker_base
 from realhf.base import logging
 from realhf.system.worker_base import WorkerServerStatus
-import realhf.system.worker_base as worker_base
 
 logger = logging.getLogger("worker-control")
 WORKER_WAIT_FOR_CONTROLLER_SECONDS = 3600
@@ -92,9 +92,7 @@ class ZmqRequester(worker_base.WorkerControlPanelRequester):
             try:
                 r = pickle.loads(self.__socket.recv())
             except zmq.error.Again as e:
-                raise TimeoutError(
-                    f"Waiting for RPC server response timeout: {e}"
-                )
+                raise TimeoutError(f"Waiting for RPC server response timeout: {e}")
             if isinstance(r, Exception):
                 logger.error(f"Error configuring worker {self.__worker_name}")
                 raise r
@@ -169,6 +167,4 @@ def make_control(type_, experiment_name, trial_name, **kwargs):
         requester = RayRequester(**kwargs)
     else:
         raise NotImplementedError(type_)
-    return worker_base.WorkerControlPanel(
-        experiment_name, trial_name, requester
-    )
+    return worker_base.WorkerControlPanel(experiment_name, trial_name, requester)

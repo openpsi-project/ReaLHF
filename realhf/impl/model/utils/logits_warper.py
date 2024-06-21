@@ -1,6 +1,6 @@
-from typing import List, Optional, Tuple
 import dataclasses
 import functools
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -53,9 +53,7 @@ class TopPLogitsWarper(LogitsWarper):
     def __post_init__(self):
         self.top_p = top_p = float(self.top_p)
         if top_p < 0 or top_p > 1.0:
-            raise ValueError(
-                f"`top_p` has to be a float > 0 and < 1, but is {top_p}"
-            )
+            raise ValueError(f"`top_p` has to be a float > 0 and < 1, but is {top_p}")
         if not isinstance(self.min_tokens_to_keep, int) or (
             self.min_tokens_to_keep < 1
         ):
@@ -136,9 +134,7 @@ class EpsilonLogitsWarper(LogitsWarper):
                 f"`eta_cutoff` has to be a float > 0 and < 1, but is {epsilon}"
             )
 
-        self.min_tokens_to_keep = min_tokens_to_keep = int(
-            self.min_tokens_to_keep
-        )
+        self.min_tokens_to_keep = min_tokens_to_keep = int(self.min_tokens_to_keep)
         if min_tokens_to_keep < 1:
             raise ValueError(
                 f"`min_tokens_to_keep` has to be a strictly positive integer, but is {min_tokens_to_keep}"
@@ -153,9 +149,9 @@ class EpsilonLogitsWarper(LogitsWarper):
         # Calculate the adaptive cutoff
         probabilities = logits.softmax(dim=-1)
         entropy = torch.distributions.Categorical(logits).entropy()
-        eta = torch.min(
-            self.epsilon, torch.sqrt(self.epsilon) * torch.exp(-entropy)
-        )[..., None]
+        eta = torch.min(self.epsilon, torch.sqrt(self.epsilon) * torch.exp(-entropy))[
+            ..., None
+        ]
         indices_to_remove = probabilities < eta
 
         # Keep the words with the 'min_tokens_to_keep'-highest probabilities

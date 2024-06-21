@@ -1,4 +1,3 @@
-from typing import Any, Dict, List, Optional, Tuple
 import dataclasses
 import enum
 import getpass
@@ -8,7 +7,9 @@ import re
 import socket
 import threading
 import time
+from typing import Any, Dict, List, Optional, Tuple
 
+import realhf.api.core.system_api as system_api
 from realhf.base import (
     cluster,
     logging,
@@ -19,7 +20,6 @@ from realhf.base import (
     timeutil,
 )
 from realhf.base.gpu_utils import set_cuda_device
-import realhf.api.core.system_api as system_api
 
 logger = logging.getLogger("worker")
 
@@ -128,9 +128,7 @@ class WorkerServer:
         if experiment_name is not None and trial_name is not None:
             key = names.worker(experiment_name, trial_name, worker_name)
             address = f"{host_ip}:{self.__task_queue.port}"
-            name_resolve.add(
-                key, address, keepalive_ttl=10, delete_on_exit=True
-            )
+            name_resolve.add(key, address, keepalive_ttl=10, delete_on_exit=True)
             logger.debug(
                 "Added name_resolve entry %s for worker server at %s",
                 key,
@@ -308,13 +306,9 @@ class WorkerControlPanel:
             try:
                 if timeout is not None:
                     timeout = max(0, deadline - time.monotonic())
-                self.__logger.debug(
-                    f"Connecting to worker {name}, timeout {timeout}"
-                )
+                self.__logger.debug(f"Connecting to worker {name}, timeout {timeout}")
                 server_address = name_resolve.wait(
-                    names.worker(
-                        self.__experiment_name, self.__trial_name, name
-                    ),
+                    names.worker(self.__experiment_name, self.__trial_name, name),
                     timeout=timeout,
                 )
                 self.__logger.debug(f"Connecting to worker {name} done")
@@ -400,9 +394,7 @@ class WorkerControlPanel:
                     name, address, command, wait_response, **kwargs
                 )
                 sub_rs.append(
-                    WorkerControlPanel.Response(
-                        worker_name=name, result=result_fut
-                    )
+                    WorkerControlPanel.Response(worker_name=name, result=result_fut)
                 )
 
             if not wait_response:
@@ -446,9 +438,7 @@ class WorkerControlPanel:
         return status
 
     def pulse(self):
-        return {
-            name: self.get_worker_status(name) for name in self.worker_names
-        }
+        return {name: self.get_worker_status(name) for name in self.worker_names}
 
 
 @dataclasses.dataclass
@@ -552,11 +542,7 @@ class Worker:
                 )
             )
         if r.watch_keys is not None:
-            keys = (
-                [r.watch_keys]
-                if isinstance(r.watch_keys, str)
-                else r.watch_keys
-            )
+            keys = [r.watch_keys] if isinstance(r.watch_keys, str) else r.watch_keys
             self.__watch_keys(
                 [
                     names.worker_key(
@@ -630,9 +616,7 @@ class Worker:
                 wait_seconds = 0.0
                 if self.__last_successful_poll_time is not None:
                     # Account the waiting time since the last successful step.
-                    wait_seconds = (
-                        start_time - self.__last_successful_poll_time
-                    ) / 1e9
+                    wait_seconds = (start_time - self.__last_successful_poll_time) / 1e9
                 self.__last_successful_poll_time = time.monotonic_ns()
 
                 if r.sample_count == r.batch_count == 0:
@@ -644,9 +628,7 @@ class Worker:
                         self.__last_update_ns is not None
                     ):  # Update new stats with 10 seconds frequency.
                         if (now - self.__last_update_ns) / 1e9 >= 10:
-                            duration = (
-                                time.monotonic_ns() - self._start_time_ns
-                            ) / 1e9
+                            duration = (time.monotonic_ns() - self._start_time_ns) / 1e9
                             self.__last_update_ns = now
                     else:
                         self.__last_update_ns = now
@@ -662,9 +644,7 @@ class Worker:
 
     def __host_key(self, key: str):
         self.logger.info(f"Hosting key: {key}")
-        name_resolve.add(
-            key, "up", keepalive_ttl=15, replace=True, delete_on_exit=True
-        )
+        name_resolve.add(key, "up", keepalive_ttl=15, replace=True, delete_on_exit=True)
 
     def __watch_keys(self, keys: List[str]):
         self.logger.info(f"Watching keys: {keys}")

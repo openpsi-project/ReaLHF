@@ -1,4 +1,3 @@
-from typing import Callable, Optional
 import dataclasses
 import datetime
 import functools
@@ -7,19 +6,16 @@ import json
 import os
 import pickle
 import subprocess
+from typing import Callable, Optional
 
-from hydra.core.config_store import ConfigStore
-from omegaconf import MISSING, OmegaConf
 import hydra
 import omegaconf
+from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING, OmegaConf
 
-from realhf.base.constants import (
-    LOG_ROOT,
-    MODEL_SAVE_ROOT,
-    QUICKSTART_EXPR_CACHE_PATH,
-)
-from realhf.base.slurm_utils import check_slurm_availability
 import realhf.api.core.system_api as system_api
+from realhf.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
+from realhf.base.slurm_utils import check_slurm_availability
 
 
 def kind_reminder(config_name, logger, args):
@@ -50,9 +46,7 @@ QUICKSTART_FN = {}
 
 
 def register_quickstart_exp(config_name: str, exp_cls: Callable):
-    usercode_path = os.path.abspath(
-        inspect.getfile(inspect.currentframe().f_back)
-    )
+    usercode_path = os.path.abspath(inspect.getfile(inspect.currentframe().f_back))
 
     @hydra.main(version_base=None, config_name=config_name)
     def run(args):

@@ -1,22 +1,14 @@
 import dataclasses
 
-from realhf.api.core.dfg import (
-    MFCDef,
-    ModelInterface,
-    ModelInterfaceType,
-    OffloadHook,
-)
+import realhf.base.logging as logging
+from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType, OffloadHook
 from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
-from realhf.api.quickstart.model import (
-    get_real_model_config,
-    ModelTrainEvalConfig,
-)
+from realhf.api.quickstart.model import ModelTrainEvalConfig, get_real_model_config
 from realhf.base.topology import PipeModelDataParallelTopology
 from realhf.experiments.common.common import CommonExperimentConfig
-import realhf.base.logging as logging
 
 logger = logging.getLogger("DPO Experiment")
 
@@ -77,16 +69,10 @@ class DPOConfig(CommonExperimentConfig):
     actor: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
-    ref: ModelTrainEvalConfig = dataclasses.field(
-        default_factory=ModelTrainEvalConfig
-    )
+    ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
-    actor_train: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
-    ref_inf: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
+    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
     dataset: PairedComparisonDatasetConfig = dataclasses.field(
         default_factory=PairedComparisonDatasetConfig
@@ -107,9 +93,7 @@ class DPOConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterface(
-            "dpo", args=dict(beta=self.beta, enable_save=True)
-        )
+        interface = ModelInterface("dpo", args=dict(beta=self.beta, enable_save=True))
         ref_interface = ModelInterface(
             "dpo", args=dict(beta=self.beta, enable_save=False)
         )

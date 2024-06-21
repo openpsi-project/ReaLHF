@@ -7,18 +7,18 @@
 
 import contextlib
 
+import torch
 from torch import _C
 from torch.cuda import _lazy_call
 from torch.cuda import device as device_ctx_manager
 from torch.utils.checkpoint import detach_variable
-import torch
 
+import realhf.base.constants as constants
 from realhf.impl.model.parallelism.model_parallel.utils import (
     gather_split_1d_tensor,
     safely_set_viewless_tensor_data,
     split_tensor_into_1d_equal_chunks,
 )
-import realhf.base.constants as constants
 
 # Default name for the model parallel rng tracker.
 _MODEL_PARALLEL_RNG_TRACKER_NAME = "model-parallel-rng"
@@ -171,9 +171,7 @@ def model_parallel_cuda_manual_seed(seed):
     _CUDA_RNG_STATE_TRACKER.reset()
     # Set the default state.
     torch.cuda.manual_seed(data_parallel_seed)
-    _CUDA_RNG_STATE_TRACKER.add(
-        _DATA_PARALLEL_RNG_TRACKER_NAME, data_parallel_seed
-    )
+    _CUDA_RNG_STATE_TRACKER.add(_DATA_PARALLEL_RNG_TRACKER_NAME, data_parallel_seed)
 
     # and model parallel state.
     _CUDA_RNG_STATE_TRACKER.add(
@@ -181,9 +179,7 @@ def model_parallel_cuda_manual_seed(seed):
     )
 
     expert_parallel_seed = seed + 1024 + model_parallel_rank
-    _CUDA_RNG_STATE_TRACKER.add(
-        _EXPERT_PARALLEL_RNG_TRACKER_NAME, expert_parallel_seed
-    )
+    _CUDA_RNG_STATE_TRACKER.add(_EXPERT_PARALLEL_RNG_TRACKER_NAME, expert_parallel_seed)
 
 
 class CheckpointFunction(torch.autograd.Function):
@@ -213,9 +209,7 @@ class CheckpointFunction(torch.autograd.Function):
             ctx.input_0_shape = args[0].data.shape
             safely_set_viewless_tensor_data(
                 args[0],
-                split_tensor_into_1d_equal_chunks(
-                    args[0].data, new_buffer=True
-                ),
+                split_tensor_into_1d_equal_chunks(args[0].data, new_buffer=True),
             )
 
         # Store everything.
@@ -275,6 +269,4 @@ class CheckpointFunction(torch.autograd.Function):
 def checkpoint(function, distribute_saved_activations, *args):
     """Checkpoint a model or part of the model.
     This has been directly copied from torch.utils.checkpoint."""
-    return CheckpointFunction.apply(
-        function, distribute_saved_activations, *args
-    )
+    return CheckpointFunction.apply(function, distribute_saved_activations, *args)

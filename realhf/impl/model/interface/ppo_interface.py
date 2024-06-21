@@ -1,19 +1,23 @@
-from typing import Dict, Optional, Tuple
 import collections
 import dataclasses
 import itertools
 import time
+from typing import Dict, Optional, Tuple
 
-from deepspeed import DeepSpeedEngine
 import torch
 import torch.distributed as dist
+from deepspeed import DeepSpeedEngine
 
+import realhf.api.core.model_api as model_api
+import realhf.base.constants as constants
+import realhf.base.logging as logging
+import realhf.impl.model.utils.ppo_functional as ppo_functional
 from realhf.api.core import data_api
-from realhf.base.namedarray import from_dict, NamedArray, recursive_apply
+from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import (
-    concat_prompt_to_generation_output,
     GenerationConfig,
+    concat_prompt_to_generation_output,
 )
 from realhf.impl.model.utils.functional import (
     apply_logits_mask,
@@ -21,10 +25,6 @@ from realhf.impl.model.utils.functional import (
     masked_normalization,
 )
 from realhf.impl.model.utils.padding import unpad_input
-import realhf.api.core.model_api as model_api
-import realhf.base.constants as constants
-import realhf.base.logging as logging
-import realhf.impl.model.utils.ppo_functional as ppo_functional
 
 logger = logging.getLogger("PackedPPOInterface")
 
@@ -171,9 +171,7 @@ class PPOActorInterface(model_api.ModelInterface):
             elif self.value_norm_type == "ma":
                 self.rms = MovingAverageRunningMeanStd()
             else:
-                raise ValueError(
-                    f"Unknown value_norm_type {self.value_norm_type}"
-                )
+                raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
     def save(self, model: model_api.Model, save_dir: str):
@@ -200,9 +198,7 @@ class PPOActorInterface(model_api.ModelInterface):
             dtype=torch.int32,
             device=packed_prompts.device,
         )
-        prompt_cu_seqlens = torch.nn.functional.pad(
-            prompt_lengths.cumsum(0), (1, 0)
-        )
+        prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
 
         res = module.generate(
             seqlens_cpu=data.metadata["seqlens"],
@@ -251,8 +247,7 @@ class PPOActorInterface(model_api.ModelInterface):
             packed_logprobs=packed_logprobs,
             packed_logits_mask=(
                 packed_logits_mask.bool()
-                if not self.force_no_logits_mask
-                and packed_logits_mask is not None
+                if not self.force_no_logits_mask and packed_logits_mask is not None
                 else None
             ),
             prompt_mask=prompt_mask,
@@ -281,10 +276,7 @@ class PPOActorInterface(model_api.ModelInterface):
             return None
 
         logits /= GenerationConfig(**self.generation_config).temperature
-        if (
-            "packed_logits_mask" in data
-            and data["packed_logits_mask"] is not None
-        ):
+        if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             apply_logits_mask(logits, data["packed_logits_mask"])
         logprobs = gather_packed_shifted_log_probs(
             logits, cu_seqlens, data["packed_seq"]
@@ -423,9 +415,7 @@ class PPOActorInterface(model_api.ModelInterface):
                 dtype=torch.long,
                 device=model.device,
             )
-            dist.all_reduce(
-                n_masked_vocabs, group=constants.data_parallel_group()
-            )
+            dist.all_reduce(n_masked_vocabs, group=constants.data_parallel_group())
             dist.all_reduce(total_vocabs, group=constants.data_parallel_group())
             global_stats["valid_vocab_ratio"] = float(
                 (total_vocabs - n_masked_vocabs) / total_vocabs
@@ -440,9 +430,7 @@ class PPOActorInterface(model_api.ModelInterface):
             cu_seqlens = data["cu_seqlens"]
             input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
             logits_mask = (
-                data["packed_logits_mask"]
-                if "packed_logits_mask" in data
-                else None
+                data["packed_logits_mask"] if "packed_logits_mask" in data else None
             )
             seqlens = batch_seqlens[offset : offset + input_lens.shape[0]]
             offset += input_lens.shape[0]
@@ -478,12 +466,8 @@ class PPOActorInterface(model_api.ModelInterface):
             train_stats = dict(
                 ppo_approx_kl=float(train_stats["ppo_approx_kl"] / _n_tokens),
                 actor_loss=float(train_stats["actor_loss"] / _n_tokens),
-                actor_clip_ratio=float(
-                    train_stats["actor_clip_ratio"] / _n_tokens
-                ),
-                importance_weight=float(
-                    train_stats["importance_weight"] / _n_tokens
-                ),
+                actor_clip_ratio=float(train_stats["actor_clip_ratio"] / _n_tokens),
+                importance_weight=float(train_stats["importance_weight"] / _n_tokens),
             )
             train_stats = dict(**train_stats, **global_stats)
 
@@ -536,10 +520,7 @@ def _ppo_critic_loss_from_model_outputs(
     logging_loss = loss.detach().float() * n_tokens
     clip_ratio = loss_stat["clip_ratio"].float() * n_tokens
     denormalized_values = (
-        torch.where(ppo_loss_mask, denormalized_values, 0.0)
-        .sum()
-        .detach()
-        .float()
+        torch.where(ppo_loss_mask, denormalized_values, 0.0).sum().detach().float()
     )
     dist.all_reduce(n_tokens, group=constants.data_parallel_group())
     dist.all_reduce(mean_ref_kl, group=constants.data_parallel_group())
@@ -600,9 +581,7 @@ class PPOCriticInterface(model_api.ModelInterface):
             elif self.value_norm_type == "ma":
                 self.rms = MovingAverageRunningMeanStd()
             else:
-                raise ValueError(
-                    f"Unknown value_norm_type {self.value_norm_type}"
-                )
+                raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
     def save(self, model: model_api.Model, save_dir: str):
@@ -776,9 +755,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         if train_stats:
             train_stats = dict(
                 value_loss=float(train_stats["value_loss"] / n_tokens),
-                value_clip_ratio=float(
-                    train_stats["value_clip_ratio"] / n_tokens
-                ),
+                value_clip_ratio=float(train_stats["value_clip_ratio"] / n_tokens),
                 denormalized_values=float(
                     train_stats["denormalized_values"] / n_tokens
                 ),

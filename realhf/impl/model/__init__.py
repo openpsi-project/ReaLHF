@@ -4,13 +4,12 @@ import re
 
 import torch
 
+# Import all HuggingFace model implementations.
+import realhf.api.from_hf
 from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY
 from realhf.base.importing import import_module
 from realhf.impl.model.conversion.hf_registry import HFModelRegistry
 from realhf.impl.model.nn.real_llm_api import ReaLModel
-
-# Import all HuggingFace model implementations.
-import realhf.api.from_hf
 
 # Import all model implementations.
 _p = re.compile(r"^(?!.*__init__).*\.py$")
@@ -50,9 +49,7 @@ def _save_to_hf(model: ReaLModel, registry_name, tokenizer, save_dir: str):
     r.save(model, tokenizer, save_dir)
 
 
-def _config_from_hf(
-    registry_name, hf_config=None, model_path=None, is_critic=False
-):
+def _config_from_hf(registry_name, hf_config=None, model_path=None, is_critic=False):
     r = _HF_REGISTRIES[registry_name]
     return r.config_from_hf(hf_config, model_path, is_critic)
 

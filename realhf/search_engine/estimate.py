@@ -1,24 +1,24 @@
 # Estimate a fucntion-call level execution time for device mesh enumerate pruning
 # assume one batch of data passes through all rpcs once
-from collections import defaultdict
-from typing import Optional
 import argparse
 import getpass
 import itertools
 import os
 import pickle
+from collections import defaultdict
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
+import realhf.base.cluster
+import realhf.base.constants as constants
+import realhf.base.logging as logging
 from realhf.api.core.dfg import MFCDef, ModelFamily, ModelInterfaceType
 from realhf.api.core.model_api import ReaLModelConfig
 from realhf.api.quickstart.model import ParallelismConfig
 from realhf.search_engine.param_realloc import estimate_param_realloc_time_cost
 from realhf.search_engine.utils import load_model_config
-import realhf.base.cluster
-import realhf.base.constants as constants
-import realhf.base.logging as logging
 
 logger = logging.getLogger("estimate", "benchmark")
 
@@ -195,9 +195,7 @@ def computation_instruction_time_cost(
     embedding_layer_cost = op_cost["embedding_layer"]
     block_0_cost = op_cost["block_0"]
     head_cost = op_cost["head"]
-    cost = (
-        embedding_layer_cost + num_layers * block_0_cost + head_cost
-    ) / num_pp
+    cost = (embedding_layer_cost + num_layers * block_0_cost + head_cost) / num_pp
     return cost
 
 
@@ -288,9 +286,7 @@ def _estimate_rpc_time_cost(
             num_pp + num_micro_batches - 1
         ) + inst_stats["train_opt"]
         if gradient_checkpointing:
-            compute_cost += inst_stats["train_fwd"] * (
-                num_pp + num_micro_batches - 1
-            )
+            compute_cost += inst_stats["train_fwd"] * (num_pp + num_micro_batches - 1)
         comm_cost = (
             (inst_stats["grad_p2p"] + inst_stats["act_p2p"])
             * (num_pp + num_micro_batches - 2)
@@ -423,17 +419,15 @@ def estimate_rpc_memory_cost(
     # enable sequence parallel
     if interface_type == ModelInterfaceType.TRAIN_STEP:
         # gradient checkpointing is always enabled for flash attn
-        static_mem = (param_mem + grad_mem) // (
-            num_pp * num_mp
-        ) + optimizer_mem // (num_pp * num_dp * num_mp)
+        static_mem = (param_mem + grad_mem) // (num_pp * num_mp) + optimizer_mem // (
+            num_pp * num_dp * num_mp
+        )
         micro_bs = b // (2 * num_pp * num_dp) if num_pp > 0 else b // (num_dp)
         if gradient_checkpointing:
             active_mem = (micro_bs * s * h * num_pp * 2) // (num_pp * num_mp)
         else:
             # FIXME: calculate other memory entries
-            active_mem = (
-                (micro_bs * s * h * num_pp * 2) * 2 * L // (num_pp * num_mp)
-            )
+            active_mem = (micro_bs * s * h * num_pp * 2) * 2 * L // (num_pp * num_mp)
         return static_mem + active_mem, static_mem
     elif interface_type == ModelInterfaceType.INFERENCE:
         static_mem = int(2 * param_mem // (num_pp * num_mp))
@@ -485,9 +479,7 @@ def example(rpcs):
         n_ppo_minibatches=4,
     )
     mem_cost, static_mem = estimate_rpc_memory_cost(rollout, p1, bs, seq_len)
-    print(
-        f"{p1} rpc cost {rpc_cost:.2f} seconds mem cost {mem_cost/(1024**3):.2f} GB"
-    )
+    print(f"{p1} rpc cost {rpc_cost:.2f} seconds mem cost {mem_cost/(1024**3):.2f} GB")
 
 
 if __name__ == "__main__":

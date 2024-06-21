@@ -1,7 +1,6 @@
 # Request-reply stream between model workers and the master worker.
 # The stream is composed of a pair of ZMQ sockets, one PUSH and one PULL, for asynchronous communication,
 # i.e., the model worker can buffer requests from the master and execute them in any order under the hood.
-from typing import Any, Dict, List, Optional, Tuple, Union
 import asyncio
 import dataclasses
 import pickle
@@ -9,11 +8,12 @@ import re
 import socket
 import time
 import uuid
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import zmq
 
-from realhf.base import logging, name_resolve, names
 import realhf.api.core.system_api as system_api
+from realhf.base import logging, name_resolve, names
 
 logger = logging.getLogger("Request-Replay Stream")
 ZMQ_IO_THREADS = 8
@@ -77,9 +77,7 @@ class NameResolvingRequstClient:
             master_send_name = names.request_reply_stream(
                 experiment_name, trial_name, f"master_send_{i}"
             )
-            name_resolve.add(
-                name=master_send_name, value=f"{host_ip}:{send_port}"
-            )
+            name_resolve.add(name=master_send_name, value=f"{host_ip}:{send_port}")
             logger.debug(
                 f"Add master send address {host_ip}:{send_port} as {master_send_name}"
             )
@@ -128,17 +126,13 @@ class NameResolvingRequstClient:
         self.close()
 
     def post(self, payload: Payload) -> uuid.UUID:
-        assert (
-            payload.request_id is not None and payload.handle_name is not None
-        )
+        assert payload.request_id is not None and payload.handle_name is not None
         payload.send_time = time.monotonic()
         idx = self._handler_routing[payload.handler]
         self.send_sockets[idx].send(pickle.dumps(payload))
         return payload.request_id
 
-    def poll(
-        self, pattern: re.Pattern | None = None, block: bool = False
-    ) -> Payload:
+    def poll(self, pattern: re.Pattern | None = None, block: bool = False) -> Payload:
         payloads = self.poll_batch(pattern=pattern, block=block)
         for p in payloads[1:]:
             self._response_buffer[p.request_id] = p
@@ -255,18 +249,14 @@ class NameResolvingReplyServer:
         self.send_socket = send_socket
 
     def post(self, payload: Payload) -> uuid.UUID:
-        assert (
-            payload.request_id is not None and payload.handle_name is not None
-        )
+        assert payload.request_id is not None and payload.handle_name is not None
         payload.send_time = time.monotonic()
         self.send_socket.send(pickle.dumps(payload))
         return payload.request_id
 
     def poll(self, block: bool = False) -> Payload:
         try:
-            payload_bytes = self.recv_socket.recv(
-                flags=0 if block else zmq.NOBLOCK
-            )
+            payload_bytes = self.recv_socket.recv(flags=0 if block else zmq.NOBLOCK)
         except zmq.ZMQError:
             raise NoMessage()
 
