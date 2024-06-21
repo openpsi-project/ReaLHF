@@ -1,6 +1,6 @@
 name: Check Formatting
 
-on: [push, pull_request]
+on: [pull_request]
 
 jobs:
   check_formatting:
@@ -18,10 +18,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install isort black
-      
-      - name: Set up Clang Format
-        run: sudo apt-get install -y clang-format
+          pip install isort black clang-format
 
       - name: Check Python formatting with isort
         run: isort --check-only .
