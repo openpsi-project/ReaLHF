@@ -71,7 +71,7 @@ Install ReaLHF from PyPI:
 
 .. code-block:: console
 
-   $ REAL_CUDA=1 pip install realhf --no-build-isolation
+   $ MAX_JOBS=8 REAL_CUDA=1 pip install realhf --no-build-isolation
 
 The PyPI package allows you to launch existing experiments with the quickstart command.
 If you want to modify the code, you should clone the source code and install it from the source:
@@ -80,6 +80,6 @@ If you want to modify the code, you should clone the source code and install it 
 
    $ git clone https://github.com/openpsi-project/ReaLHF
    $ cd ReaLHF
-   $ REAL_CUDA=1 pip install -e . --no-build-isolation
+   $ MAX_JOBS=8 REAL_CUDA=1 pip install -e . --no-build-isolation
 
 Next, check :doc:`quickstart`` for instructions on running experiments.

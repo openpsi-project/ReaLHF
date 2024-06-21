@@ -291,4 +291,8 @@ setuptools.setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     packages=setuptools.find_packages(),
+    include_package_data=True,
+    package_data={
+        '': ['csrc/**/*.cu', 'csrc/**/*.cuh', 'csrc/**/*.hpp', 'csrc/**/*.cpp',],
+    },
 )
