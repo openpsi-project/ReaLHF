@@ -1,19 +1,19 @@
-from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 import abc
 import copy
 import dataclasses
 import keyword
 import os
+from collections import defaultdict
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import torch
 import torch.utils.data
 import transformers
 
+import realhf.base.logging as logging
 from realhf.api.core import dfg, system_api
 from realhf.api.core.config import ModelFamily, ModelName
 from realhf.base.namedarray import NamedArray
-import realhf.base.logging as logging
 
 logger = logging.getLogger("model")
 
@@ -209,9 +209,7 @@ def null_model(name: ModelName, device: Union[str, torch.device]) -> Model:
 def tokenizer_only_model(
     name: ModelName, device: Union[str, torch.device], tokenizer_path: str
 ) -> Model:
-    return Model(
-        name, torch.nn.Identity(), load_hf_tokenizer(tokenizer_path), device
-    )
+    return Model(name, torch.nn.Identity(), load_hf_tokenizer(tokenizer_path), device)
 
 
 class ModelInterface(abc.ABC):
@@ -315,9 +313,7 @@ def register_hf_family(
     config_from_hf_converter: Callable[
         [transformers.PretrainedConfig], ReaLModelConfig
     ],
-    config_to_hf_converter: Callable[
-        [ReaLModelConfig], transformers.PretrainedConfig
-    ],
+    config_to_hf_converter: Callable[[ReaLModelConfig], transformers.PretrainedConfig],
     sd_from_hf_converter: Callable[[Dict, ReaLModelConfig], Dict],
     sd_to_hf_converter: Callable[[Dict, ReaLModelConfig], Dict],
     embedding_param_names: Callable[[ReaLModelConfig], List[str]],
@@ -327,9 +323,7 @@ def register_hf_family(
     if name in SUPPORTED_MODELS:
         raise ValueError(f"Model {name} is already registered.")
     if not is_valid_function_name(name):
-        raise ValueError(
-            f"Model name {name} is not a valid function name in Python."
-        )
+        raise ValueError(f"Model name {name} is not a valid function name in Python.")
     SUPPORTED_MODELS.append(name)
     HF_MODEL_FAMILY_REGISTRY[name] = dict(
         name=name,

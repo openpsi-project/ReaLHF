@@ -1,5 +1,5 @@
-from typing import *
 import dataclasses
+from typing import *
 
 import realhf.base.topology as topology
 

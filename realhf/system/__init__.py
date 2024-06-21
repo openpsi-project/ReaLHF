@@ -1,7 +1,7 @@
-from typing import Type
 import importlib
 import os
 import traceback
+from typing import Type
 
 import realhf.api.core.system_api
 import realhf.base.logging as logging

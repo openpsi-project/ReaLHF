@@ -1,10 +1,10 @@
-from typing import Dict, List, Optional, Union
 import getpass
 import json
 import os
 import re
 import socket
 import tempfile
+from typing import Dict, List, Optional, Union
 
 CLUSTER_SPEC_PATH = os.environ.get("CLUSTER_SPEC_PATH", "")
 
@@ -37,19 +37,13 @@ class ClusterSpec:
                     fileroot=get_user_tmp(),
                 )
             else:
-                raise FileNotFoundError(
-                    f"Cluster spec file not found: {file_path}"
-                )
+                raise FileNotFoundError(f"Cluster spec file not found: {file_path}")
 
         self.__cluster_type = spec["cluster_type"]
         self.__cluster_name = spec["cluster_name"]
         self.__fileroot = spec["fileroot"]
-        self.__node_type_from_node_name_re = spec.get(
-            "node_type_from_node_name", None
-        )
-        self.__gpu_type_from_node_name_re = spec.get(
-            "gpu_type_from_node_name", None
-        )
+        self.__node_type_from_node_name_re = spec.get("node_type_from_node_name", None)
+        self.__gpu_type_from_node_name_re = spec.get("gpu_type_from_node_name", None)
         self.__default_mount = spec.get("default_mount", None)
         self.__gpu_image = spec.get("gpu_image", None)
         self.__cpu_image = spec.get("cpu_image", None)

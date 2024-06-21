@@ -1,14 +1,14 @@
-from typing import Callable, Optional, Union
 import functools
 import math
+from typing import Callable, Optional, Union
 
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from realhf.base.constants import data_parallel_group
 import realhf.base.logging as logging
+from realhf.base.constants import data_parallel_group
 
 logger = logging.getLogger("Modules")
 
@@ -53,9 +53,7 @@ class ExponentialRunningMeanStd(nn.Module):
         if mask is not None:
             mask = mask.to(self.__dtype)
         if mask is None:
-            factor = torch.tensor(
-                np.prod(x.shape), dtype=self.__dtype, device=x.device
-            )
+            factor = torch.tensor(np.prod(x.shape), dtype=self.__dtype, device=x.device)
         else:
             x = x * mask
             factor = mask.sum()
@@ -63,15 +61,9 @@ class ExponentialRunningMeanStd(nn.Module):
         x_sum = x.sum()
         x_sum_sq = x.square().sum()
         if dist.is_initialized():
-            dist.all_reduce(
-                factor, op=dist.ReduceOp.SUM, group=data_parallel_group()
-            )
-            dist.all_reduce(
-                x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group()
-            )
-            dist.all_reduce(
-                x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group()
-            )
+            dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=data_parallel_group())
+            dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group())
+            dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group())
         batch_mean = x_sum / factor
         batch_sq_mean = x_sum_sq / factor
 
@@ -87,12 +79,8 @@ class ExponentialRunningMeanStd(nn.Module):
 
     @torch.no_grad()
     def mean_std(self):
-        debiased_mean = self.__mean / self.__debiasing_term.clamp(
-            min=self.__eps
-        )
-        debiased_mean_sq = self.__mean_sq / self.__debiasing_term.clamp(
-            min=self.__eps
-        )
+        debiased_mean = self.__mean / self.__debiasing_term.clamp(min=self.__eps)
+        debiased_mean_sq = self.__mean_sq / self.__debiasing_term.clamp(min=self.__eps)
         debiased_var = (debiased_mean_sq - debiased_mean**2).clamp(min=1e-2)
         return debiased_mean, debiased_var.sqrt()
 
@@ -146,9 +134,7 @@ class MovingAverageRunningMeanStd(nn.Module):
         if mask is not None:
             mask = mask.to(self.__dtype)
         if mask is None:
-            factor = torch.tensor(
-                np.prod(x.shape), dtype=self.__dtype, device=x.device
-            )
+            factor = torch.tensor(np.prod(x.shape), dtype=self.__dtype, device=x.device)
         else:
             x = x * mask
             factor = mask.sum()
@@ -156,15 +142,9 @@ class MovingAverageRunningMeanStd(nn.Module):
         x_sum = x.sum()
         x_sum_sq = x.square().sum()
         if dist.is_initialized():
-            dist.all_reduce(
-                factor, op=dist.ReduceOp.SUM, group=data_parallel_group()
-            )
-            dist.all_reduce(
-                x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group()
-            )
-            dist.all_reduce(
-                x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group()
-            )
+            dist.all_reduce(factor, op=dist.ReduceOp.SUM, group=data_parallel_group())
+            dist.all_reduce(x_sum, op=dist.ReduceOp.SUM, group=data_parallel_group())
+            dist.all_reduce(x_sum_sq, op=dist.ReduceOp.SUM, group=data_parallel_group())
 
         self.__mean.data[:] = (
             self.__accum_denominator * self.__mean.data[:] + x_sum
@@ -251,9 +231,7 @@ class PopArtValueHead(nn.Module):
         self.__update_cnt += 1
 
         if self.__update_cnt > self.__burn_in_updates:
-            self.__weight.data[:] = self.__weight * (
-                old_std / new_std
-            ).unsqueeze(-1)
+            self.__weight.data[:] = self.__weight * (old_std / new_std).unsqueeze(-1)
             self.__bias.data[:] = (
                 old_std * self.__bias + old_mean - new_mean
             ) / new_std

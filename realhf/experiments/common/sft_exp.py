@@ -2,20 +2,15 @@ import dataclasses
 
 from omegaconf import MISSING
 
-from realhf.api.core.dfg import (
-    MFCDef,
-    ModelFamily,
-    ModelInterface,
-    ModelInterfaceType,
-)
+from realhf.api.core.dfg import MFCDef, ModelFamily, ModelInterface, ModelInterfaceType
 from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PromptAnswerDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import (
-    get_real_model_config,
     ModelTrainEvalConfig,
     OptimizerConfig,
+    get_real_model_config,
 )
 from realhf.experiments.common.common import CommonExperimentConfig
 
@@ -53,9 +48,7 @@ class SFTConfig(CommonExperimentConfig):
     model: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
-    allocation: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
+    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
     dataset: PromptAnswerDatasetConfig = dataclasses.field(
         default_factory=PromptAnswerDatasetConfig
     )

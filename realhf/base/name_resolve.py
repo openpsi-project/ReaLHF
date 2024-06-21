@@ -1,5 +1,4 @@
 # Implements a simple name resolving service, which can be considered as a distributed key-value dict.
-from typing import Callable, List, Optional
 import dataclasses
 import getpass
 import os
@@ -10,6 +9,7 @@ import socket
 import threading
 import time
 import uuid
+from typing import Callable, List, Optional
 
 from realhf.base import logging, security, timeutil
 from realhf.base.cluster import spec as cluster_spec
@@ -150,9 +150,7 @@ class NameRecordRepository:
             try:
                 q.get_nowait()
             except queue.Empty:
-                logger.info(
-                    f"Key {names} is gone. Executing callback {call_back}"
-                )
+                logger.info(f"Key {names} is gone. Executing callback {call_back}")
                 call_back()
 
         for name in names:
@@ -194,9 +192,7 @@ class MemoryNameRecordRepository(NameRecordRepository):
         if self.__log_events:
             print(f"NameResolve: add {name} {value}")
         if name in self.__store and not replace:
-            raise NameEntryExistsError(
-                f"K={name} V={self.__store[name]} V2={value}"
-            )
+            raise NameEntryExistsError(f"K={name} V={self.__store[name]} V2={value}")
         assert isinstance(value, str)
         self.__store[name] = value
 
@@ -364,9 +360,9 @@ class RedisNameRecordRepository(NameRecordRepository):
         keeper: Optional[timeutil.FrequencyControl] = None
 
     def __init__(self, **kwargs):
+        import redis
         from redis.backoff import ExponentialBackoff
         from redis.retry import Retry
-        import redis
 
         super().__init__()
         self.__lock = threading.Lock()
@@ -391,9 +387,7 @@ class RedisNameRecordRepository(NameRecordRepository):
         self.reset()
         self.__redis.close()
 
-    def add(
-        self, name, value, delete_on_exit=True, keepalive_ttl=10, replace=False
-    ):
+    def add(self, name, value, delete_on_exit=True, keepalive_ttl=10, replace=False):
         # deprecated parameter: delete_on_exit, now every entry has a default keepalive_ttl=10 seconds
         if name.endswith("/"):
             raise ValueError(f"Entry name cannot end with '/': {name}")
@@ -403,13 +397,8 @@ class RedisNameRecordRepository(NameRecordRepository):
             assert (
                 keepalive_ttl > 0
             ), f"keepalive_ttl in milliseconds must >0: {keepalive_ttl}"
-            if (
-                self.__redis.set(name, value, px=keepalive_ttl, nx=not replace)
-                is None
-            ):
-                raise NameEntryExistsError(
-                    f"Cannot set Redis key: K={name} V={value}"
-                )
+            if self.__redis.set(name, value, px=keepalive_ttl, nx=not replace) is None:
+                raise NameEntryExistsError(f"Cannot set Redis key: K={name} V={value}")
 
             # touch every 1/3 of keepalive_ttl to prevent Redis from deleting the key
             # after program exit, redis will automatically delete key in keepalive_ttl
@@ -429,9 +418,7 @@ class RedisNameRecordRepository(NameRecordRepository):
         if name in self.__entries:
             del self.__entries[name]
         if self.__redis.delete(name) == 0:
-            raise NameEntryNotFoundError(
-                f"No such Redis entry to delete: {name}"
-            )
+            raise NameEntryNotFoundError(f"No such Redis entry to delete: {name}")
 
     def clear_subtree(self, name_root):
         with self.__lock:
@@ -484,9 +471,7 @@ class RedisNameRecordRepository(NameRecordRepository):
             with self.__lock:
                 for name, entry in self.__entries.items():
                     if entry.keeper is not None and entry.keeper.check():
-                        r = self.__redis.set(
-                            name, entry.value, px=entry.keepalive_ttl
-                        )
+                        r = self.__redis.set(name, entry.value, px=entry.keepalive_ttl)
                         if r is None:
                             logger.error(
                                 "Failed touching Redis key: K=%s V=%s",

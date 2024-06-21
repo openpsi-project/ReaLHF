@@ -1,15 +1,18 @@
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 import contextlib
 import dataclasses
 import functools
 import json
 import os
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 import transformers
 
+import realhf.base.constants as constants
+import realhf.base.logging as logging
+import realhf.impl.model.parallelism.model_parallel.mappings as tensor_parallel
 from realhf.api.core import model_api
 from realhf.impl.model.modules import (
     CausalSelfAttentionLayer,
@@ -19,14 +22,11 @@ from realhf.impl.model.modules import (
 )
 from realhf.impl.model.parallelism.model_parallel.modules import (
     ColumnParallelLinear,
-    parallel_lm_logits,
     ParallelEmbedding,
     RowParallelLinear,
+    parallel_lm_logits,
 )
 from realhf.impl.model.utils.functional import compute_varlen_position_indices
-import realhf.base.constants as constants
-import realhf.base.logging as logging
-import realhf.impl.model.parallelism.model_parallel.mappings as tensor_parallel
 
 logger = logging.getLogger("ReaLModelBase")
 
@@ -168,9 +168,7 @@ class ReaLModelBlock(nn.Module):
                 device=device,
             )
 
-    def forward(
-        self, x: PipeTransferData, y: PipeCacheData
-    ) -> PipeTransferData:
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         pp_input = x.pp_input
         cu_seqlens = x.cu_seqlens
         k_cache = y.k_cache
@@ -273,9 +271,7 @@ class VocabPositionEmbedding(nn.Module):
             )
         )
 
-    def forward(
-        self, x: PipeTransferData, y: PipeCacheData
-    ) -> PipeTransferData:
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         # Set position ids.
         # if y.packed_position_ids is not None:
         #     raise ValueError("In our use cases, position_ids must be None.")
@@ -320,9 +316,7 @@ class VocabPositionEmbedding(nn.Module):
 
 class OutputHead(nn.Linear):
 
-    def forward(
-        self, x: PipeTransferData, y: PipeCacheData
-    ) -> PipeTransferData:
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         x.pp_output = nn.functional.linear(x.pp_input, self.weight, self.bias)
         return x
 
@@ -332,15 +326,11 @@ class OutputHead(nn.Linear):
 
 class SequenceParallelCriticHead(nn.Linear):
 
-    def forward(
-        self, x: PipeTransferData, y: PipeCacheData
-    ) -> PipeTransferData:
-        all_gather_buffer = (
-            tensor_parallel.gather_from_sequence_parallel_region(x.pp_input)
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
+        all_gather_buffer = tensor_parallel.gather_from_sequence_parallel_region(
+            x.pp_input
         )
-        x.pp_output = nn.functional.linear(
-            all_gather_buffer, self.weight, self.bias
-        )
+        x.pp_output = nn.functional.linear(all_gather_buffer, self.weight, self.bias)
         return x
 
     def _forward(self, x: torch.Tensor):
@@ -350,9 +340,7 @@ class SequenceParallelCriticHead(nn.Linear):
 
 class SequenceParallelActorHead(ColumnParallelLinear):
 
-    def forward(
-        self, x: PipeTransferData, y: PipeCacheData
-    ) -> PipeTransferData:
+    def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         x.pp_output = parallel_lm_logits(
             x.pp_input,
             self.weight,
@@ -392,9 +380,7 @@ def real_model_embedding_param_keys(config: model_api.ReaLModelConfig) -> int:
     return keys
 
 
-def real_model_tblock_param_count(
-    config: model_api.ReaLModelConfig, idx: int
-) -> int:
+def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -> int:
     count = 0
     nq = config.hidden_dim // config.head_dim
 
@@ -409,8 +395,7 @@ def real_model_tblock_param_count(
 
     # layernorm qkv linear
     count += (
-        ln_count
-        + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim
+        ln_count + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim
     )
     if config.use_attention_bias:
         count += config.head_dim * (nq + config.n_kv_heads * 2)

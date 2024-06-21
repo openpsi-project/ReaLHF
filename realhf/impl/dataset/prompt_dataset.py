@@ -1,6 +1,6 @@
-from typing import Callable, Dict, List, Optional, Tuple
 import itertools
 import json
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch.utils.data
@@ -35,9 +35,7 @@ class PromptDataset(torch.utils.data.Dataset):
         """
         self.max_length = max_length
 
-        data = data_api.load_shuffle_split_dataset(
-            util, dataset_path, dataset_builder
-        )
+        data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
         prompts_str = [x["prompt"] for x in data]
         util.tokenizer.padding_side = "left"
@@ -52,9 +50,7 @@ class PromptDataset(torch.utils.data.Dataset):
 
         self.prompt_lengths = prompt_encodings["length"]
         self.prompts = prompt_encodings["input_ids"]
-        assert all(
-            len(x) == l for x, l in zip(self.prompts, self.prompt_lengths)
-        )
+        assert all(len(x) == l for x, l in zip(self.prompts, self.prompt_lengths))
 
         logger.info(f"Number of prompts in the dataset: {len(self.prompts)}")
 

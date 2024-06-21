@@ -1,8 +1,8 @@
-from dataclasses import dataclass, field
-from typing import *
 import asyncio
 import copy
 import time
+from dataclasses import dataclass, field
+from typing import *
 
 import numpy as np
 
@@ -75,33 +75,25 @@ class _TensorDictSequenceBuffer:
         self.__reuses = reuses
 
     def _update_seqlen(self, indices: int):
-        self.__seqlens[indices] = [
-            self.__storage[idx].seqlen for idx in indices
-        ]
+        self.__seqlens[indices] = [self.__storage[idx].seqlen for idx in indices]
 
     def _get_seqlen(self, indices: int) -> np.ndarray:
         return self.__seqlens[indices]
 
     def _update_hash_val(self, indices: int):
-        self.__hash_vals[indices] = [
-            self.__storage[idx].hash_val for idx in indices
-        ]
+        self.__hash_vals[indices] = [self.__storage[idx].hash_val for idx in indices]
 
     def _get_hash_val(self, indices: int) -> np.ndarray:
         return self.__hash_vals[indices]
 
     def _update_has_keys(self, indices: List[int]):
         for idx in indices:
-            self.__has_keys[idx] = [
-                k in self.__storage[idx].keys for k in self.__keys
-            ]
+            self.__has_keys[idx] = [k in self.__storage[idx].keys for k in self.__keys]
 
     def _get_has_keys(self, indices):
         return self.__has_keys[indices, :]
 
-    def put_batch(
-        self, indices: List[int], xs: List[Tuple[List[str], int, int]]
-    ):
+    def put_batch(self, indices: List[int], xs: List[Tuple[List[str], int, int]]):
         assert len(indices) == len(xs)
         # Can be parallelized.
         for idx, x in zip(indices, xs):
@@ -114,16 +106,12 @@ class _TensorDictSequenceBuffer:
                 hash_val=hash_val,
             )
 
-    def amend_batch(
-        self, indices: List[int], new_datas: List[Tuple[List[str], int]]
-    ):
+    def amend_batch(self, indices: List[int], new_datas: List[Tuple[List[str], int]]):
         assert len(indices) == len(new_datas)
         # Can be parallelized.
         for idx, new_data in zip(indices, new_datas):
             new_keys, new_seqlen = new_data
-            assert (
-                len(set(new_keys).intersection(self.__storage[idx].keys)) == 0
-            ), (
+            assert len(set(new_keys).intersection(self.__storage[idx].keys)) == 0, (
                 new_keys,
                 self.__storage[idx].keys,
             )
@@ -196,9 +184,7 @@ class AsyncIOSequenceBuffer:
         # We can efficiently compute whether an RPC is ready using this mask
         self._rpc_key_mask = np.stack(
             [
-                np.array(
-                    [k in rpc.input_data for k in rpc_data_keys], dtype=bool
-                )
+                np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool)
                 for rpc in rpcs
             ],
             axis=1,
@@ -302,9 +288,7 @@ class AsyncIOSequenceBuffer:
 
             self._n_amenders[indices] -= 1
             self._is_being_amended[indices] = self._n_amenders[indices] > 0
-            self._is_idle[indices] = np.logical_not(
-                self._is_being_amended[indices]
-            )
+            self._is_idle[indices] = np.logical_not(self._is_being_amended[indices])
             if self._is_idle[indices].any():
                 self._lock.notify(len(self._rpc_names))
 
@@ -374,9 +358,7 @@ class AsyncIOSequenceBuffer:
         entries = self.__buffer.get_batch(indices)
         assert all([entry.reuses_left >= 0 for entry in entries])
         pop_indices = [
-            idx
-            for idx, entry in zip(indices, entries)
-            if entry.reuses_left == 0
+            idx for idx, entry in zip(indices, entries) if entry.reuses_left == 0
         ]
         # The following call is safe because no more RPC will write to popped data.
         pop_tokens = self.__buffer._get_seqlen(pop_indices).sum()
@@ -400,6 +382,4 @@ class AsyncIOSequenceBuffer:
 
             if self._is_idle[indices].any():
                 self._lock.notify(len(self._rpc_names))
-        return SequenceSample(
-            indices=indices, seqlens=seqlens, hash_vals=hash_vals
-        )
+        return SequenceSample(indices=indices, seqlens=seqlens, hash_vals=hash_vals)

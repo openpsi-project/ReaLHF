@@ -1,10 +1,9 @@
-from typing import Dict, List, Optional
 import argparse
 import getpass
 import os
 import re
+from typing import Dict, List, Optional
 
-from realhf.scheduler.client import JobException, JobState
 import realhf.api.core.system_api as config_package
 import realhf.base.constants as constants
 import realhf.base.logging as logging
@@ -12,6 +11,7 @@ import realhf.base.name_resolve as name_resolve
 import realhf.base.names as names
 import realhf.scheduler.client as sched_client
 import realhf.system as system
+from realhf.scheduler.client import JobException, JobState
 
 logger = logging.getLogger("main", "system")
 
@@ -154,9 +154,7 @@ def main_start(args, recover_count: int = 0):
 
     # setup experiments
     if recover_count == 0:
-        constants.set_experiment_trial_names(
-            args.experiment_name, args.trial_name
-        )
+        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
 
     experiment = config_package.make_experiment(args.experiment_name)
     if args.allocation_mode == "search":
@@ -247,11 +245,7 @@ def main_start(args, recover_count: int = 0):
         )
     except (KeyboardInterrupt, JobException, TimeoutError) as e:
         if os.getenv("REAL_TRACE", "0") != "0" and isinstance(e, TimeoutError):
-            s = (
-                "#" * 30
-                + "  Trace complete. Killing all processes...  "
-                + "#" * 30
-            )
+            s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
             logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
 
         recover_states = [
@@ -269,9 +263,7 @@ def main_start(args, recover_count: int = 0):
             "SIGKILL" if args.mode == "slurm" else "SIGTERM"
         )  # use sigkill to terminate slurm jobs
         sched.stop_all(
-            "SIGINT"
-            if (recover_this or args.recover_mode == "save")
-            else kill_signal
+            "SIGINT" if (recover_this or args.recover_mode == "save") else kill_signal
         )
         if recover_this:
             logger.warning(
@@ -295,9 +287,7 @@ def main_stop(args):
 
 def main_find_config(args):
     exp_names = [
-        x
-        for x in config_package.ALL_EXPERIMENT_CLASSES
-        if re.match(args.regex, x)
+        x for x in config_package.ALL_EXPERIMENT_CLASSES if re.match(args.regex, x)
     ]
     if len(exp_names) == 0:
         print("No matched experiment names.")
@@ -347,8 +337,7 @@ def _main_profile_layers(model_family, model_path):
             mode="slurm", expr_name=expr_name, trial_name=trial_name
         )
         print(
-            f"Profiling {model_family} layers, model path {model_path}, "
-            f"cmd {cmd}"
+            f"Profiling {model_family} layers, model path {model_path}, " f"cmd {cmd}"
         )
         sched.submit_array(
             worker_type="profile_layer",

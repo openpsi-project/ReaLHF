@@ -1,7 +1,7 @@
 # Copied from https://github.com/microsoft/DeepSpeed
-from packaging.version import Version
 import torch
 import torch.distributed as dist
+from packaging.version import Version
 
 import realhf.base.constants as constants
 

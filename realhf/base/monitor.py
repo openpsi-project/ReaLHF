@@ -1,12 +1,12 @@
-from collections import defaultdict
-from statistics import mean
-from typing import Callable, List, Optional, TYPE_CHECKING, Union
 import contextlib
 import dataclasses
 import enum
 import os
 import pickle
 import time
+from collections import defaultdict
+from statistics import mean
+from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import numpy as np
 import psutil
@@ -32,8 +32,8 @@ def process_memory_mb(name):
 
 
 def gpu_memory_mb(name):
-    from deepspeed.accelerator import get_accelerator
     import torch.distributed as dist
+    from deepspeed.accelerator import get_accelerator
 
     logger.debug(
         f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
@@ -166,16 +166,12 @@ def summary_time_points(
     for id_index, identifier in enumerate(identifiers):
         time_sum = {}
         time_list = {}
-        for start_key_idx, (start_key, end_key) in enumerate(
-            zip(start_keys, end_keys)
-        ):
+        for start_key_idx, (start_key, end_key) in enumerate(zip(start_keys, end_keys)):
             # print(start_key, identifier, all_time_points[start_key])
             time_sum[start_key] = 0
             time_list[start_key] = []
             try:
-                start_time_points = np.array(
-                    all_time_points[start_key][identifier]
-                )
+                start_time_points = np.array(all_time_points[start_key][identifier])
                 end_time_points = np.array(all_time_points[end_key][identifier])
             except KeyError:
                 continue
@@ -184,9 +180,7 @@ def summary_time_points(
             if start_time is not None:
                 valid_indices_st = np.where(start_time_points > start_time)
                 valid_indices_et = np.where(start_time_points < end_time)
-                valid_indices = np.intersect1d(
-                    valid_indices_st, valid_indices_et
-                )
+                valid_indices = np.intersect1d(valid_indices_st, valid_indices_et)
                 start_time_points = start_time_points[valid_indices]
                 end_time_points = end_time_points[valid_indices]
 
@@ -253,19 +247,13 @@ def summary_time_points(
             time_perc = round(time_sum[k] / (max_time - min_time) * 100, 2)
             # print time cost percent
             avg_val = (
-                round(mean(time_list[k]) / 10e6, 2)
-                if len(time_list[k]) > 0
-                else "-"
+                round(mean(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
             )
             max_val = (
-                round(max(time_list[k]) / 10e6, 2)
-                if len(time_list[k]) > 0
-                else "-"
+                round(max(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
             )
             min_val = (
-                round(min(time_list[k]) / 10e6, 2)
-                if len(time_list[k]) > 0
-                else "-"
+                round(min(time_list[k]) / 10e6, 2) if len(time_list[k]) > 0 else "-"
             )
 
             bubble_time -= time_perc
@@ -290,9 +278,7 @@ def gpu_utilization_monitor(worker_idx: int, interval: float, ttl: float):
         handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
         utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
         memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        total_memory = memory_info.total / (
-            1024**2
-        )  # Convert bytes to megabytes
+        total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
         used_memory = memory_info.used / (1024**2)
         memory_usage_percentage = (used_memory / total_memory) * 100
         logger.debug(
@@ -416,9 +402,7 @@ def cuda_tmark(name: str, type_: CUDATimeMarkType):
                 torch.cuda.synchronize()
                 tok = time.time_ns()
                 global TIME_MARK_DB
-                TIME_MARK_DB.append(
-                    TimeMarkEntry(name, _model_name, type_, tik, tok)
-                )
+                TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
                 return res
 
             return _wrapped_f
@@ -530,9 +514,7 @@ class CUDAKernelTime:  # in us
             raise NotImplementedError(
                 f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}"
             )
-        return cls(
-            compute=compute_time, comm=comm_time, mem=mem_time, misc=misc_time
-        )
+        return cls(compute=compute_time, comm=comm_time, mem=mem_time, misc=misc_time)
 
     def __add__(self, other):
         return CUDAKernelTime(

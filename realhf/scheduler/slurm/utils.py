@@ -1,8 +1,7 @@
 from __future__ import (
-    annotations,
-)  # python3.7+ feature to allow self-referencing type hints
+    annotations,  # python3.7+ feature to allow self-referencing type hints
+)
 
-from typing import Callable, Dict, List, Literal, Optional, Union
 import collections
 import dataclasses
 import datetime
@@ -12,13 +11,14 @@ import os
 import shutil
 import socket
 import subprocess
+from typing import Callable, Dict, List, Literal, Optional, Union
 
 import pandas as pd
 
-from realhf.base.constants import LOG_ROOT
-from realhf.scheduler.client import JobException, JobInfo, JobState
 import realhf.base.cluster
 import realhf.base.logging as logging
+from realhf.base.constants import LOG_ROOT
+from realhf.scheduler.client import JobException, JobInfo, JobState
 
 logger = logging.getLogger("scheduler.slurm.utils")
 
@@ -251,12 +251,8 @@ class SlurmLaunchInfo:
             self.wprocs_per_jobstep = math.floor(1 / gpu_per_worker)
             self.resource_requirement.cpu *= self.wprocs_per_jobstep
             self.resource_requirement.mem *= self.wprocs_per_jobstep
-            self.n_jobsteps = math.ceil(
-                self.wprocs_in_job / self.wprocs_per_jobstep
-            )
-            logger.info(
-                f"Resolved fractional GPU requirement for {self.slurm_name}"
-            )
+            self.n_jobsteps = math.ceil(self.wprocs_in_job / self.wprocs_per_jobstep)
+            logger.info(f"Resolved fractional GPU requirement for {self.slurm_name}")
             logger.info(
                 f"GPU per worker {gpu_per_worker}, workers per jobstep (process size in `apps.remote`) {self.wprocs_per_jobstep}, "
                 f"number of jobsteps (instance of running `apps.remote`) {self.n_jobsteps}"
@@ -273,9 +269,7 @@ class SlurmLaunchInfo:
 
     @property
     def slurm_name(self) -> str:
-        return (
-            f"{self.run_name}:{self.worker_type}:{self.worker_submission_idx}"
-        )
+        return f"{self.run_name}:{self.worker_type}:{self.worker_submission_idx}"
 
     @property
     def slurm_id(self) -> Optional[str]:
@@ -459,24 +453,13 @@ class SlurmLaunchInfo:
             return pad_s * n_pads + " " + s + " " + pad_s * n_pads
 
         with open(self.log_path, "a") as f:
-            f.write(
-                pad_output_str_to_length("SBATCH SCRIPT BEGIN", "=", 80) + "\n"
-            )
+            f.write(pad_output_str_to_length("SBATCH SCRIPT BEGIN", "=", 80) + "\n")
             f.write(script_strs)
-            f.write(
-                pad_output_str_to_length("SBATCH SCRIPT END", "=", 80) + "\n"
-            )
-            f.write(
-                pad_output_str_to_length("SBATCH JOB INFO BEGIN", "=", 80)
-                + "\n"
-            )
+            f.write(pad_output_str_to_length("SBATCH SCRIPT END", "=", 80) + "\n")
+            f.write(pad_output_str_to_length("SBATCH JOB INFO BEGIN", "=", 80) + "\n")
             f.write(str(self))
-            f.write(
-                pad_output_str_to_length("SBATCH JOB INFO END", "=", 80) + "\n"
-            )
-            f.write(
-                pad_output_str_to_length("JOB OUTPUT BEGIN", "=", 80) + "\n"
-            )
+            f.write(pad_output_str_to_length("SBATCH JOB INFO END", "=", 80) + "\n")
+            f.write(pad_output_str_to_length("JOB OUTPUT BEGIN", "=", 80) + "\n")
         r = (
             subprocess.check_output(
                 ["sbatch", "--parsable"], input=script, env=srun_env
@@ -515,14 +498,12 @@ def query_jobs(
     if slurm_ids is not None:
         cmd += ["-j", ",".join([str(s) for s in slurm_ids])]
     output = (
-        subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
-        .decode("ascii")
-        .strip()
+        subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("ascii").strip()
     )
     rs = []
     for line in output.split("\n")[1:]:
-        job_id, state, submit_time, start_time, slurm_name, nodelist, *_ = (
-            line.split(delimiter)
+        job_id, state, submit_time, start_time, slurm_name, nodelist, *_ = line.split(
+            delimiter
         )
         rs.append(
             JobInfo(
@@ -716,11 +697,7 @@ def get_all_node_resources() -> Dict[str, SlurmResource]:
             l = l.strip("\n").strip()
             if l.startswith("State"):
                 status = _parse_output_status_line(l)
-                if (
-                    "DOWN" in status
-                    or "DRAIN" in status
-                    or "NOT_RESPONDING" in status
-                ):
+                if "DOWN" in status or "DRAIN" in status or "NOT_RESPONDING" in status:
                     break
             if l.startswith("CfgTRES"):
                 ctres = _parse_output_tres_line(l)
@@ -771,9 +748,7 @@ def allocate_resources(
             nodelist=info.nodelist,
             exclude=info.exclude,
         )
-        valid_hostnames = list(
-            filter(lambda x: x in all_resources, valid_hostnames)
-        )
+        valid_hostnames = list(filter(lambda x: x in all_resources, valid_hostnames))
         valid_resources = {hn: all_resources[hn] for hn in valid_hostnames}
         valid_resources = sorted(
             valid_resources.items(), key=lambda x: x[1], reverse=True

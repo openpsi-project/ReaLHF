@@ -1,7 +1,7 @@
-from typing import Optional, Set
 import dataclasses
 import os
 import pickle
+from typing import Optional, Set
 
 import realhf.base.constants as constants
 

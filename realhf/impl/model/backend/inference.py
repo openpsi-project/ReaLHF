@@ -1,14 +1,14 @@
-from typing import *
 import dataclasses
+from typing import *
 
 import torch
 import transformers
 
+import realhf.api.core.model_api as model_api
+import realhf.base.constants as constants
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import GenerationConfig
-import realhf.api.core.model_api as model_api
-import realhf.base.constants as constants
 
 
 class PipelinableInferenceEngine:
@@ -92,9 +92,7 @@ class PipelinableInferenceEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(
-            default_factory=GenerationConfig
-        ),
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:

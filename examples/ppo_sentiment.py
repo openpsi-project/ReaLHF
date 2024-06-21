@@ -1,6 +1,6 @@
-from typing import Dict, List, Optional
 import argparse
 import dataclasses
+from typing import Dict, List, Optional
 
 import colorama
 import torch
@@ -54,16 +54,12 @@ class SentimentScoringInterface(model_api.ModelInterface):
             device=device,
             dtype=torch.long,
         )
-        indices = torch.nonzero(
-            attention_mask.flatten(), as_tuple=False
-        ).flatten()
+        indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
         input_ids[indices] = packed_input_ids
         input_ids = input_ids.view(bs, max_seqlen)
 
         # Re-tokenize.
-        texts = model.tokenizer.batch_decode(
-            input_ids, skip_special_tokens=True
-        )
+        texts = model.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
         encoding = self.score_tokenizer(
             texts, return_tensors="pt", padding=True, truncation=True
         )

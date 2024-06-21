@@ -1,11 +1,8 @@
 from typing import List
 
-from realhf.api.core.dfg import build_graph as build_dfg
 from realhf.api.core.dfg import MFCDef, ModelInterfaceType
-from realhf.api.quickstart.device_mesh import (
-    DeviceMesh,
-    find_parallel_strategies,
-)
+from realhf.api.core.dfg import build_graph as build_dfg
+from realhf.api.quickstart.device_mesh import DeviceMesh, find_parallel_strategies
 from realhf.api.quickstart.search import MFCDef, RPCExecution, RPCInstance
 from realhf.search_engine.estimate import (
     estimate_rpc_memory_cost,
@@ -120,10 +117,7 @@ def build_graph(
             parents = []
             if rpc.is_src and epoch_id >= epoch_dependency_interval:
                 for other in rpcs:
-                    if (
-                        other.is_dst
-                        and other.model_name.role == rpc.model_name.role
-                    ):
+                    if other.is_dst and other.model_name.role == rpc.model_name.role:
                         parents.append(
                             RPCInstance(
                                 rpc,

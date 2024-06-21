@@ -35,9 +35,7 @@ def profile_layer_func(
 
         st = time.monotonic_ns()
         for i in range(warm_up_rounds + profile_rounds):
-            for bs, seq_len in itertools.product(
-                batch_size_range, seq_len_range
-            ):
+            for bs, seq_len in itertools.product(batch_size_range, seq_len_range):
                 profile_layers.fwd_gen(bs, seq_len)
                 profile_layers.fwd_bwd_opt(bs, seq_len)
 

@@ -1,10 +1,10 @@
 # Copyright (c) 2023, Tri Dao.
 
-from typing import Literal, Optional, Tuple, Union
 import math
+from typing import Literal, Optional, Tuple, Union
 
-from einops import rearrange, repeat
 import torch
+from einops import rearrange, repeat
 
 try:
     from flash_attn.ops.triton.rotary import apply_rotary
@@ -208,9 +208,7 @@ class RotaryEmbedding(torch.nn.Module):
                 else:
                     inv_freq = self.inv_freq
             else:
-                t = torch.arange(
-                    seqlen, device=device, dtype=self.inv_freq.dtype
-                )
+                t = torch.arange(seqlen, device=device, dtype=self.inv_freq.dtype)
                 inv_freq = self.inv_freq
             if self.scale_factor is not None:
                 if self.scale_type == "linear":
@@ -222,16 +220,11 @@ class RotaryEmbedding(torch.nn.Module):
                     ) ** (self.dim / (self.dim - 2))
                     inv_freq = 1.0 / (
                         base
-                        ** (
-                            torch.arange(0, self.dim, 2).float().to(device)
-                            / self.dim
-                        )
+                        ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim)
                     )
                     self.register_buffer("inv_freq", inv_freq, persistent=False)
                 else:
-                    raise NotImplementedError(
-                        "Unsupported scale type", self.scale_type
-                    )
+                    raise NotImplementedError("Unsupported scale type", self.scale_type)
             # Don't do einsum, it converts fp32 to fp16 under AMP
             # freqs = torch.einsum("i,j->ij", t, self.inv_freq)
             freqs = torch.outer(t, inv_freq)

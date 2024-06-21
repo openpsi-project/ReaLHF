@@ -1,6 +1,6 @@
-from typing import *
 import dataclasses
 import math
+from typing import *
 
 try:
     from megatron.core.distributed.distributed_data_parallel import (
@@ -85,9 +85,7 @@ class OptimizerParamScheduler(object):
         self.wd_incr_style = wd_incr_style
 
         self.override_opt_param_scheduler = override_opt_param_scheduler
-        self.use_checkpoint_opt_param_scheduler = (
-            use_checkpoint_opt_param_scheduler
-        )
+        self.use_checkpoint_opt_param_scheduler = use_checkpoint_opt_param_scheduler
         if self.override_opt_param_scheduler:
             assert not self.use_checkpoint_opt_param_scheduler, (
                 "both override and " "use-checkpoint are set."
@@ -95,9 +93,7 @@ class OptimizerParamScheduler(object):
 
         # Set the learning rate
         self.step(0)
-        self.log_rank_0(
-            "> learning rate decay style: {}".format(self.lr_decay_style)
-        )
+        self.log_rank_0("> learning rate decay style: {}".format(self.lr_decay_style))
 
     def log_rank_0(self, msg):
         if constants.parallelism_rank() == 0:
@@ -188,9 +184,7 @@ class OptimizerParamScheduler(object):
         for param_group in self.optimizer.param_groups:
             new_lr = self.get_lr(param_group)
             param_group["lr"] = new_lr * param_group.get("lr_mult", 1.0)
-            param_group["weight_decay"] = new_wd * param_group.get(
-                "wd_mult", 1.0
-            )
+            param_group["weight_decay"] = new_wd * param_group.get("wd_mult", 1.0)
 
     def step(self, increment):
         """Set lr for all parameters groups."""
@@ -199,9 +193,7 @@ class OptimizerParamScheduler(object):
         for param_group in self.optimizer.param_groups:
             new_lr = self.get_lr(param_group)
             param_group["lr"] = new_lr * param_group.get("lr_mult", 1.0)
-            param_group["weight_decay"] = new_wd * param_group.get(
-                "wd_mult", 1.0
-            )
+            param_group["weight_decay"] = new_wd * param_group.get("wd_mult", 1.0)
 
     def state_dict(self):
         state_dict = {
@@ -222,9 +214,7 @@ class OptimizerParamScheduler(object):
         """Auxiliary function for checking the values in the checkpoint and
         setting them."""
         if self.override_opt_param_scheduler:
-            self.log_rank_0(
-                " > overriding {} value to {}".format(name, cls_value)
-            )
+            self.log_rank_0(" > overriding {} value to {}".format(name, cls_value))
             return cls_value
 
         if not self.use_checkpoint_opt_param_scheduler:
@@ -232,9 +222,7 @@ class OptimizerParamScheduler(object):
                 f"OptimizerParamScheduler: class input value {cls_value} and checkpoint"
                 f"value {sd_value} for {name} do not match"
             )
-        self.log_rank_0(
-            " > using checkpoint value {} for {}".format(sd_value, name)
-        )
+        self.log_rank_0(" > using checkpoint value {} for {}".format(sd_value, name))
         return sd_value
 
     def load_state_dict(self, sd):

@@ -1,5 +1,5 @@
-from typing import Callable, Dict, List, Optional
 import json
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -34,9 +34,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
         self.util = util
         tokenizer = self.util.tokenizer
 
-        data = data_api.load_shuffle_split_dataset(
-            util, dataset_path, dataset_builder
-        )
+        data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
         seqs = [x["prompt"] + x["answer"] + tokenizer.eos_token for x in data]
         prompts = [x["prompt"] for x in data]
@@ -89,9 +87,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
             "packed_input_ids": torch.tensor(
                 self.tokens["input_ids"][idx], dtype=torch.long
             ),
-            "prompt_mask": torch.tensor(
-                self.prompt_masks[idx], dtype=torch.bool
-            ),
+            "prompt_mask": torch.tensor(self.prompt_masks[idx], dtype=torch.bool),
         }
         assert len(d["packed_input_ids"]) == len(d["prompt_mask"])
         seqlen = len(d["packed_input_ids"])

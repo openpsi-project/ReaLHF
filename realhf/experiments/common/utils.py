@@ -1,19 +1,14 @@
-from typing import *
 import collections
+from typing import *
 
 from realhf.api.core.config import ModelBackend
-from realhf.api.core.dfg import (
-    MFCDef,
-    ModelInterfaceType,
-    OffloadHook,
-    SyncParamHook,
-)
+from realhf.api.core.dfg import MFCDef, ModelInterfaceType, OffloadHook, SyncParamHook
 from realhf.api.core.system_api import ModelName
 from realhf.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from realhf.api.quickstart.model import (
-    get_real_model_config,
     ModelTrainEvalConfig,
     ParallelismConfig,
+    get_real_model_config,
 )
 from realhf.base.topology import PipeModelDataParallelTopology
 
@@ -76,9 +71,7 @@ def make_train_backend_config(
         if model_cfg.optimizer.offload or model_cfg.offload:
             raise ValueError("Offload is not supported in Megatron backend.")
         if model_cfg.zero_stage == 3:
-            raise ValueError(
-                "Zero stage 3 is not supported in Megatron backend."
-            )
+            raise ValueError("Zero stage 3 is not supported in Megatron backend.")
         return ModelBackend(
             "megatron",
             args=dict(
@@ -103,9 +96,7 @@ def make_train_backend_config(
             ),
         )
     else:
-        raise NotImplementedError(
-            f"Backend {model_cfg.backend} is not supported."
-        )
+        raise NotImplementedError(f"Backend {model_cfg.backend} is not supported.")
 
 
 def make_inf_backend_config(
@@ -146,12 +137,8 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                         rpc.model_name.role, role_cnt[rpc.model_name.role] + 1
                     )
                     role_cnt[rpc.model_name.role] += 1
-                    other.rpc.pre_hooks.append(
-                        SyncParamHook(source=rpc.model_name)
-                    )
-                    other.rpc.post_hooks.append(
-                        SyncParamHook(target=rpc.model_name)
-                    )
+                    other.rpc.pre_hooks.append(SyncParamHook(source=rpc.model_name))
+                    other.rpc.post_hooks.append(SyncParamHook(target=rpc.model_name))
 
         # add offload hooks for inference rpcs
         if rpc.interface_type == ModelInterfaceType.INFERENCE:
@@ -160,8 +147,7 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
             for other in rpc_allocs:
                 if (
                     other.rpc.model_name.role == rpc.model_name.role
-                    and other.rpc.interface_type
-                    == ModelInterfaceType.TRAIN_STEP
+                    and other.rpc.interface_type == ModelInterfaceType.TRAIN_STEP
                 ):
                     offload_flag = False
             if offload_flag:

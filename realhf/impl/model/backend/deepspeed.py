@@ -1,8 +1,12 @@
-from typing import *
 import dataclasses
 import functools
 import math
+from typing import *
 
+import deepspeed
+import torch
+import torch.distributed as dist
+import transformers
 from deepspeed.runtime import zero
 from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.config import DeepSpeedConfig
@@ -11,17 +15,13 @@ from deepspeed.runtime.engine import (
     DeepSpeedOptimizerCallable,
     DeepSpeedSchedulerCallable,
 )
-import deepspeed
-import torch
-import torch.distributed as dist
-import transformers
 
-from realhf.impl.model.backend.pipe_runner import PipelineRunner
-from realhf.impl.model.nn.real_llm_api import ReaLModel
-from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
+from realhf.impl.model.backend.pipe_runner import PipelineRunner
+from realhf.impl.model.nn.real_llm_api import ReaLModel
+from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 
 logger = logging.getLogger("DeepSpeed Backend")
 
@@ -55,9 +55,9 @@ class ReaLDeepSpeedEngine:
             num_params = sum([p.numel() for p in model_parameters])
             unique_params = num_params
 
-            params_tensor = torch.LongTensor(
-                data=[num_params, unique_params]
-            ).to(self.device)
+            params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(
+                self.device
+            )
             dist.all_reduce(
                 params_tensor, group=constants.grid().get_model_parallel_group()
             )
@@ -131,9 +131,7 @@ class ReaLDeepSpeedEngine:
                 model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs
             )
             self.ds_engine.backward(loss)
-            lr_kwargs = (
-                {"epoch": version_steps} if version_steps is not None else None
-            )
+            lr_kwargs = {"epoch": version_steps} if version_steps is not None else None
             self.ds_engine.step(lr_kwargs=lr_kwargs)
             return stat
 
@@ -199,9 +197,7 @@ class ReaLDeepSpeedEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(
-            default_factory=GenerationConfig
-        ),
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:
@@ -319,10 +315,7 @@ def get_optimizer_grouped_parameters(
             "params": [
                 p
                 for n, p in model.named_parameters()
-                if (
-                    not any(nd in n for nd in no_decay_name_list)
-                    and p.requires_grad
-                )
+                if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
             ],
             "weight_decay": weight_decay,
         },
@@ -330,10 +323,7 @@ def get_optimizer_grouped_parameters(
             "params": [
                 p
                 for n, p in model.named_parameters()
-                if (
-                    any(nd in n for nd in no_decay_name_list)
-                    and p.requires_grad
-                )
+                if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
             ],
             "weight_decay": 0.0,
         },
@@ -432,9 +422,7 @@ class DeepspeedBackend(model_api.ModelBackend):
                 **self.optimizer_config,
             )
         else:
-            raise NotImplementedError(
-                f"Unsupported optimizer: {self.optimizer_name}."
-            )
+            raise NotImplementedError(f"Unsupported optimizer: {self.optimizer_name}.")
 
         ds_config = get_train_ds_config(
             offload_param=self.offload_param,
@@ -466,9 +454,7 @@ class DeepspeedBackend(model_api.ModelBackend):
             linear_steps = total_steps - warmup_steps
             if step < warmup_steps:
                 return 1.0 / warmup_steps * step
-            return 1.0 - (1.0 - min_lr_ratio) / linear_steps * (
-                step - warmup_steps
-            )
+            return 1.0 - (1.0 - min_lr_ratio) / linear_steps * (step - warmup_steps)
 
         def warmup_then_constant_anneal(
             step, warmup_steps_proportion, total_steps, min_lr_ratio

@@ -6,15 +6,15 @@ import torch.distributed as dist
 import torch.utils.data
 import tqdm
 
-from realhf.base.namedarray import from_dict, NamedArray, recursive_apply
+import realhf.api.core.model_api as model_api
+import realhf.base.constants as constants
+from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 from realhf.impl.model.utils.functional import (
     build_shift_one_indices,
     gather_packed_shifted_log_probs,
 )
-import realhf.api.core.model_api as model_api
-import realhf.base.constants as constants
 
 
 def compute_packed_sft_loss(
@@ -88,12 +88,8 @@ class SFTInterface(model_api.ModelInterface):
 
     def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data[
-            "packed_input_ids"
-        ]  # shape [tot_seqlen]
-        prompt_mask: torch.BoolTensor = data[
-            "prompt_mask"
-        ]  # shape [tot_seqlen]
+        packed_input_ids: torch.Tensor = data["packed_input_ids"]  # shape [tot_seqlen]
+        prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
         module: deepspeed.DeepSpeedEngine = model.module
 
         module.train()
@@ -101,9 +97,7 @@ class SFTInterface(model_api.ModelInterface):
         seqlens_cpu = data.metadata["seqlens"]
         max_seqlen = max(seqlens_cpu)
         cu_seqlens = torch.nn.functional.pad(
-            torch.tensor(
-                seqlens_cpu, dtype=torch.int32, device=model.device
-            ).cumsum(0),
+            torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0),
             (1, 0),
         )
 
@@ -164,9 +158,7 @@ class SFTInterface(model_api.ModelInterface):
             packed_input_ids: torch.Tensor = data[
                 "packed_input_ids"
             ]  # shape [tot_seqlen]
-            prompt_mask: torch.BoolTensor = data[
-                "prompt_mask"
-            ]  # shape [tot_seqlen]
+            prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
 
             max_seqlen = max(seqlens_cpu)
             cu_seqlens = torch.nn.functional.pad(

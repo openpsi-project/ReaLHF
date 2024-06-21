@@ -47,9 +47,7 @@ def tensor_slice_partition_fn(
         splits = [tensor for _ in range(mp_world_size)]
     else:
         assert tensor.shape[dim] % mp_world_size == 0
-        splits = torch.split(
-            tensor, tensor.shape[dim] // mp_world_size, dim=dim
-        )
+        splits = torch.split(tensor, tensor.shape[dim] // mp_world_size, dim=dim)
     if mp_rank is None:
         return [s.contiguous() for s in splits]
     else:
@@ -95,9 +93,9 @@ def intervals_partition_fn(
             assert dim == 1
             col_start = mp_rank * shape[1] // mp_world_size
             col_end = (mp_rank + 1) * shape[1] // mp_world_size
-            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[
-                1
-            ] + np.array([(col_start, col_end)], dtype=np.int64)
+            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[1] + np.array(
+                [(col_start, col_end)], dtype=np.int64
+            )
 
 
 def shape_partition_fn(
@@ -140,11 +138,9 @@ def mp_partition_key(
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif key == f"{config.n_layers + 1}.weight":  # output head
         if (
-            isinstance(tensor_or_shape, torch.Tensor)
-            and tensor_or_shape.shape[0] == 1
+            isinstance(tensor_or_shape, torch.Tensor) and tensor_or_shape.shape[0] == 1
         ) or (
-            not isinstance(tensor_or_shape, torch.Tensor)
-            and tensor_or_shape[0] == 1
+            not isinstance(tensor_or_shape, torch.Tensor) and tensor_or_shape[0] == 1
         ):
             assert config.is_critic
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
@@ -292,9 +288,7 @@ def mp_merge_real_model_state_dict(
 
     new_state_dict = {}
     for k in state_dicts[0].keys():
-        new_state_dict[k] = mp_merge_key(
-            k, [sd[k] for sd in state_dicts], config
-        )
+        new_state_dict[k] = mp_merge_key(k, [sd[k] for sd in state_dicts], config)
 
     return new_state_dict
 
@@ -303,25 +297,18 @@ def partition_pipeline_layers(
     config: model_api.ReaLModelConfig,
     num_stages: int,
     embed_param_counter: Callable[[model_api.ReaLModelConfig], int],
-    transformer_block_param_counter: Callable[
-        [model_api.ReaLModelConfig, int], int
-    ],
+    transformer_block_param_counter: Callable[[model_api.ReaLModelConfig, int], int],
     head_param_counter: Callable[[model_api.ReaLModelConfig], int],
     method: str = "parameters_balanced",
 ) -> Dict[int, Tuple[int, int]]:
     from deepspeed.runtime import utils as ds_utils
 
-    from realhf.base.datapack import (
-        partition_balanced as true_partition_balanced,
-    )
+    from realhf.base.datapack import partition_balanced as true_partition_balanced
 
     # Each stage gets a simple uniform number of layers.
     param_counts = (
         [embed_param_counter(config)]
-        + [
-            transformer_block_param_counter(config, i)
-            for i in range(config.n_layers)
-        ]
+        + [transformer_block_param_counter(config, i) for i in range(config.n_layers)]
         + [head_param_counter(config)]
     )
     parts = None
@@ -330,16 +317,12 @@ def partition_pipeline_layers(
             num_items=config.n_layers + 2, num_parts=num_stages
         )
     elif method == "parameters":
-        parts = ds_utils.partition_balanced(
-            weights=param_counts, num_parts=num_stages
-        )
+        parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
     elif method == "parameters_balanced":
         param_counts = np.array(param_counts)
         parts = true_partition_balanced(nums=param_counts, k=num_stages)
     else:
-        raise NotImplementedError(
-            f"Partitioning method {method} not implemented."
-        )
+        raise NotImplementedError(f"Partitioning method {method} not implemented.")
 
     stage_to_layer_idx = {}
     for stage in range(num_stages):

@@ -1,6 +1,6 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import dataclasses
 import functools
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -13,15 +13,15 @@ import transformers
 from realhf.api.core import model_api
 from realhf.api.core.config import ModelName
 from realhf.base import constants, logging, topology
-from realhf.base.monitor import cuda_tmark, cuda_tmarked, CUDATimeMarkType
+from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.impl.model.comm.global_comm import NCCLProcessGroupInfo
 from realhf.impl.model.comm.param_realloc import (
-    _derive_reparallelize_comm_plan,
-    fetch_trainable_params,
-    is_trainable,
     ReparallelizeReceiverStep,
     ReparallelizeSenderStep,
     ReparallelizeTraget,
+    _derive_reparallelize_comm_plan,
+    fetch_trainable_params,
+    is_trainable,
     store_trainable_params,
 )
 from realhf.impl.model.nn.flatten_param import set_intervals, slice_intervals
@@ -32,15 +32,15 @@ from .real_llm_base import (
     OutputHead,
     PipeCacheData,
     PipeTransferData,
-    real_model_embed_param_count,
-    real_model_head_param_count,
-    real_model_tblock_param_count,
     ReaLModelBlock,
     SequenceParallelActorHead,
     SequenceParallelCriticHead,
     VocabPositionEmbedding,
+    real_model_embed_param_count,
+    real_model_head_param_count,
+    real_model_tblock_param_count,
 )
-from .real_llm_generate import generate, GenerationConfig
+from .real_llm_generate import GenerationConfig, generate
 from .real_llm_parallel import partition_pipeline_layers
 
 logger = logging.getLogger("ReaLModel Interface")
@@ -99,12 +99,8 @@ class ReaLModel(nn.Module):
             real_model_tblock_param_count,
             real_model_head_param_count,
         )
-        self.layer_idx_start = self.layer_mapping[
-            constants.pipe_parallel_rank()
-        ][0]
-        self.layer_idx_end = self.layer_mapping[constants.pipe_parallel_rank()][
-            1
-        ]
+        self.layer_idx_start = self.layer_mapping[constants.pipe_parallel_rank()][0]
+        self.layer_idx_end = self.layer_mapping[constants.pipe_parallel_rank()][1]
         self.num_stages = constants.pipe_parallel_world_size()
 
         self.layers = nn.ModuleList()
@@ -138,20 +134,14 @@ class ReaLModel(nn.Module):
         # A workaround to make Megatron-LM backend happy.
         if constants.pipe_parallel_rank() == 0:
             return self.layers[0]
-        elif (
-            constants.pipe_parallel_rank()
-            == constants.pipe_parallel_world_size() - 1
-        ):
+        elif constants.pipe_parallel_rank() == constants.pipe_parallel_world_size() - 1:
             return self.layers[-1]
         return None
 
     @property
     def post_process(self):
         # A workaround to make Megatron-LM backend happy.
-        if (
-            constants.pipe_parallel_rank()
-            == constants.pipe_parallel_world_size() - 1
-        ):
+        if constants.pipe_parallel_rank() == constants.pipe_parallel_world_size() - 1:
             return self.layers[-1]
         return None
 
@@ -197,9 +187,7 @@ class ReaLModel(nn.Module):
     def is_critic(self):
         return self.config.is_critic
 
-    def _build_layer(
-        self, idx: int, config: model_api.ReaLModelConfig
-    ) -> nn.Module:
+    def _build_layer(self, idx: int, config: model_api.ReaLModelConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
         if idx == 0:
@@ -216,9 +204,7 @@ class ReaLModel(nn.Module):
             )
         return l
 
-    def _build_output_head(
-        self, config: model_api.ReaLModelConfig
-    ) -> nn.Module:
+    def _build_output_head(self, config: model_api.ReaLModelConfig) -> nn.Module:
         dtype = self.dtype
         device = self.device
         if config.is_critic and constants.sequence_parallel():
@@ -315,9 +301,9 @@ class ReaLModel(nn.Module):
                 for k, v in l.named_parameters():
                     spec = self._param_spec[f"{layer_idx}.{k}"]
                     v.data.copy_(
-                        self._offload_buffer[
-                            spec.start_idx : spec.end_idx
-                        ].view(spec.shape),
+                        self._offload_buffer[spec.start_idx : spec.end_idx].view(
+                            spec.shape
+                        ),
                         non_blocking=True,
                     )
                 e: torch.cuda.Event
@@ -356,9 +342,7 @@ class ReaLModel(nn.Module):
     ) -> Tuple[PipeTransferData, List[PipeCacheData]]:
         if x.max_seqlen is not None and not isinstance(x.max_seqlen, int):
             x.max_seqlen = int(x.max_seqlen)
-        if x.cu_seqlens is not None and not isinstance(
-            x.cu_seqlens, torch.IntTensor
-        ):
+        if x.cu_seqlens is not None and not isinstance(x.cu_seqlens, torch.IntTensor):
             x.cu_seqlens = x.cu_seqlens.int()
 
         # Copy input tensor to a pinned buffer.
@@ -492,16 +476,12 @@ class ReaLModel(nn.Module):
             new_state_dict[f"{local_idx + self.layer_idx_start}.{name}"] = v
         return new_state_dict
 
-    def load_state_dict(
-        self, state_dict, strict: bool = True, assign: bool = False
-    ):
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
         new_state_dict = {}
         for k, v in state_dict.items():
             name = k.split(".", 1)[1]
             global_idx = int(k.split(".")[0])
-            new_state_dict[
-                f"layers.{global_idx - self.layer_idx_start}.{name}"
-            ] = v
+            new_state_dict[f"layers.{global_idx - self.layer_idx_start}.{name}"] = v
         return super().load_state_dict(
             new_state_dict,
             strict=strict,
@@ -541,9 +521,7 @@ class ReaLModel(nn.Module):
                 for _to_layer_idx in to_layer_indices:
                     l = self._build_layer(_to_layer_idx, to_model_config)
                     for v in l.parameters():
-                        v.data = torch.tensor(
-                            (), dtype=self.dtype, device=self.device
-                        )
+                        v.data = torch.tensor((), dtype=self.dtype, device=self.device)
                     to_layers_handle_dict[_to_layer_idx] = l
         to_param_spec, to_param_size = build_param_spec(
             to_layer_indices,
@@ -593,9 +571,7 @@ class ReaLModel(nn.Module):
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
         """Trigger the parameter realloaction from the source model to the target model."""
 
-        assert not (
-            is_trainable(from_model_name) and is_trainable(to_model_name)
-        )
+        assert not (is_trainable(from_model_name) and is_trainable(to_model_name))
 
         if (from_model_name, to_model_name) not in self._reparallelize_targets:
             self.build_reparallelization_plan(
@@ -714,9 +690,7 @@ class ReaLModel(nn.Module):
                     e = torch.cuda.Event()
                     if step.rank != step.src:
                         buf = recv_buf_specs[recv_buf_cnt]["src"]
-                        torch.distributed.broadcast(
-                            buf, src=step.src, group=step.group
-                        )
+                        torch.distributed.broadcast(buf, src=step.src, group=step.group)
                     e.record(s)
                     recv_events.append(e)
                     recv_buf_cnt += 1
@@ -764,15 +738,9 @@ def generate_helper(
     packed_input_ids: Optional[torch.Tensor] = None,
     cu_seqlens: Optional[torch.Tensor] = None,
     max_seqlen: Optional[int] = None,
-    gconfig: GenerationConfig = dataclasses.field(
-        default_factory=GenerationConfig
-    ),
+    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
 ) -> DuckGenerationOutput:
-    assert (
-        (packed_input_ids is None)
-        == (cu_seqlens is None)
-        == (max_seqlen is None)
-    )
+    assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
     if attention_mask is None and input_ids is not None:
         attention_mask = torch.ones_like(input_ids)
     if packed_input_ids is None and attention_mask is not None:
@@ -802,11 +770,7 @@ def forward_helper(
     cu_seqlens: Optional[torch.Tensor] = None,
     max_seqlen: Optional[int] = None,
 ) -> DuckModelOutput:
-    assert (
-        (packed_input_ids is None)
-        == (cu_seqlens is None)
-        == (max_seqlen is None)
-    )
+    assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
     build_packed = False
     if attention_mask is None and input_ids is not None:
         attention_mask = torch.ones_like(input_ids)

@@ -1,31 +1,26 @@
-from collections import defaultdict
-from typing import *
 import contextlib
 import dataclasses
 import functools
+from collections import defaultdict
+from typing import *
 
-from omegaconf import MISSING
 import numpy as np
+from omegaconf import MISSING
 
+import realhf.base.logging as logging
 from realhf.api.core.config import Dataset
-from realhf.api.core.dfg import (
-    MFCDef,
-    ModelInterfaceType,
-    OffloadHook,
-    SyncParamHook,
-)
+from realhf.api.core.dfg import MFCDef, ModelInterfaceType, OffloadHook, SyncParamHook
 from realhf.api.core.system_api import *
 from realhf.api.quickstart.device_mesh import (
     AllocationConfig,
     DeviceMesh,
-    make_device_mesh_from_name,
     RPCAllocation,
+    make_device_mesh_from_name,
 )
 from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.check import *
 from realhf.experiments.common.utils import *
 from realhf.search_engine.search import search_rpc_allocations
-import realhf.base.logging as logging
 
 logger = logging.getLogger("CommonExperimentConfig", "colored")
 
@@ -130,15 +125,11 @@ class CommonExperimentConfig(Experiment):
 
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
-        raise NotImplementedError(
-            f"models is not implemented in {self.__class__}"
-        )
+        raise NotImplementedError(f"models is not implemented in {self.__class__}")
 
     @property
     def rpcs(self) -> Dict[str, MFCDef]:
-        raise NotImplementedError(
-            f"rpcs is not implemented in {self.__class__}"
-        )
+        raise NotImplementedError(f"rpcs is not implemented in {self.__class__}")
 
     @property
     def datasets(self) -> List[Dataset]:
@@ -160,9 +151,7 @@ class CommonExperimentConfig(Experiment):
 
     @property
     def exp_ctrl(self) -> ExperimentSaveEvalControl:
-        raise NotImplementedError(
-            f"expr_ctrl is not implemented in {self.__class__}"
-        )
+        raise NotImplementedError(f"expr_ctrl is not implemented in {self.__class__}")
 
     @property
     def max_prompt_len(self) -> int:
@@ -181,9 +170,7 @@ class CommonExperimentConfig(Experiment):
         return DeviceMesh(
             n_nodes=self.n_nodes,
             n_gpus_per_node=self.n_gpus_per_node,
-            mapping=np.ones(
-                (self.n_nodes, self.n_gpus_per_node), dtype=np.int32
-            ),
+            mapping=np.ones((self.n_nodes, self.n_gpus_per_node), dtype=np.int32),
             global_mesh_name=self.nodelist,
             name=self.nodelist,
         )
@@ -255,8 +242,7 @@ class CommonExperimentConfig(Experiment):
                 else:
                     raise ValueError(f"RPC {rpc_alloc.rpc} not found in rpcs.")
         elif (
-            self.allocation_mode == "pipe_data"
-            or self.allocation_mode == "pipe_model"
+            self.allocation_mode == "pipe_data" or self.allocation_mode == "pipe_model"
         ):
             rpc_allocs: List[RPCAllocation] = [
                 RPCAllocation(
@@ -304,22 +290,18 @@ class CommonExperimentConfig(Experiment):
             raise NotImplementedError()
 
         shard_counter = defaultdict(lambda: 0)
-        resolve_rpc_hooks(
-            rpc_allocs
-        )  # inplace modify MFCDefs in rpc allocations
+        resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
         import pprint
 
         pprint.pprint(rpc_allocs)
 
-        model_name_to_rpc_allocs: Dict[ModelName, List[RPCAllocation]] = (
-            defaultdict(list)
+        model_name_to_rpc_allocs: Dict[ModelName, List[RPCAllocation]] = defaultdict(
+            list
         )
         for rpc_alloc in rpc_allocs:
             model_name_to_rpc_allocs[rpc_alloc.rpc.model_name].append(rpc_alloc)
 
-        for i, j in itertools.product(
-            range(self.n_nodes), range(self.n_gpus_per_node)
-        ):
+        for i, j in itertools.product(range(self.n_nodes), range(self.n_gpus_per_node)):
             mw = ModelWorker(
                 seed=self.seed,
                 shards=[],
@@ -339,12 +321,8 @@ class CommonExperimentConfig(Experiment):
                 model_cfg = self.models[model_name.role]
                 model = make_model_config(model_cfg)
                 mapping = rpc_alloc.device_mesh.mapping
-                gradient_checkpointing = (
-                    model_cfg.gradient_checkpointing
-                    and any(
-                        rpc.interface_type == ModelInterfaceType.TRAIN_STEP
-                        for rpc in rpcs
-                    )
+                gradient_checkpointing = model_cfg.gradient_checkpointing and any(
+                    rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs
                 )
 
                 topo = get_topo(
@@ -361,16 +339,11 @@ class CommonExperimentConfig(Experiment):
                 )
 
                 if any(
-                    rpc.interface_type == ModelInterfaceType.TRAIN_STEP
-                    for rpc in rpcs
+                    rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs
                 ):
-                    backend = make_train_backend_config(
-                        model_cfg, rpc_alloc.parallel
-                    )
+                    backend = make_train_backend_config(model_cfg, rpc_alloc.parallel)
                 else:
-                    backend = make_inf_backend_config(
-                        model_cfg, rpc_alloc.parallel
-                    )
+                    backend = make_inf_backend_config(model_cfg, rpc_alloc.parallel)
 
                 # print(f"model name {model_name}, device mesh name {rpc_alloc.device_mesh.name},"
                 #       f"mapping {mapping}")
@@ -428,10 +401,7 @@ class CommonExperimentConfig(Experiment):
                     f"RPC {rpc.name} interface is not a realhf native implementation. "
                     f"Search and heuristic allocation mode are not available."
                 )
-            if (
-                self.allocation_mode == "manual"
-                and rpc_name not in self.allocations
-            ):
+            if self.allocation_mode == "manual" and rpc_name not in self.allocations:
                 if rpc_name not in self.allocations:
                     raise ValueError(
                         f"RPC {rpc_name} is not in allocations, please implement "
