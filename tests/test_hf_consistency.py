@@ -83,7 +83,7 @@ def hf_config_factory(model_family_name: str):
         return get_qwen2_hf_config()
     elif model_family_name == "gemma":
         return get_gemma_hf_config()
-    elif model_family_name == "gpt":
+    elif model_family_name == "gpt2":
         return get_gpt_config()
     else:
         raise NotImplementedError(model_family_name)
@@ -105,7 +105,7 @@ testing.init_global_constants(
 assert dist.get_world_size() == 1, dist.get_world_size()
 
 
-@pytest.mark.parametrize("model_family_name", ["qwen2", "llama", "gemma"])
+@pytest.mark.parametrize("model_family_name", ["qwen2", "llama", "gemma", "gpt2"])
 @torch.no_grad()
 def test_consistency(tmp_path, model_family_name: str):
     # NOTE: import here to avoid initializing CUDA context in the main process
@@ -157,8 +157,8 @@ def test_consistency(tmp_path, model_family_name: str):
         input_ids = torch.randint(
             0, mconfig.vocab_size, (bs, max_seqlen), dtype=torch.long
         )
-        # input_lens = torch.randint(1, max_seqlen, (bs,), dtype=torch.int32)
-        input_lens = torch.full((bs,), max_seqlen, dtype=torch.int32)
+        input_lens = torch.randint(1, max_seqlen, (bs,), dtype=torch.int32)
+        # input_lens = torch.full((bs,), max_seqlen, dtype=torch.int32)
         attention_mask = torch.arange(max_seqlen)[None, :] < input_lens[:, None]
 
         hf_model.eval()

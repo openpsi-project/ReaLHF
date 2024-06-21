@@ -7,7 +7,7 @@ import transformers
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
 
 
-def sd_from_gpt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
+def sd_from_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     if any(k.startswith("transformer.") for k in state_dict.keys()):
         new_sd = {k.replace("transformer.", ""): v for k, v in state_dict.items()}
         head_w = new_sd.pop("lm_head.weight")
@@ -53,7 +53,7 @@ def sd_from_gpt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     return new_sd
 
 
-def sd_to_gpt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
+def sd_to_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     max_positions = config.n_positions
     bias = torch.tril(
         torch.ones((max_positions, max_positions), dtype=torch.bool)
@@ -101,11 +101,11 @@ def sd_to_gpt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
 
 
 # param name is used to load directly from huggingface checkpoints
-def gpt_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
+def gpt2_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
     return ["wte.weight", "wpe.weight"]
 
 
-def gpt_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
+def gpt2_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
     names = [
         f"h.{idx}.ln_1.weight",
         f"h.{idx}.ln_1.bias",
@@ -126,11 +126,11 @@ def gpt_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[
     return names
 
 
-def gpt_output_head_param_name(config: ReaLModelConfig) -> List[str]:
+def gpt2_output_head_param_name(config: ReaLModelConfig) -> List[str]:
     return ["wte.weight"]
 
 
-def convert_config_gpt(
+def convert_config_gpt2(
     hf_config: transformers.GPT2Config,
 ) -> ReaLModelConfig:
     return ReaLModelConfig(
@@ -156,7 +156,7 @@ def convert_config_gpt(
     )
 
 
-def to_gpt_config(config: ReaLModelConfig) -> transformers.GPT2Config:
+def to_gpt2_config(config: ReaLModelConfig) -> transformers.GPT2Config:
     return transformers.GPT2Config(
         vocab_size=config.vocab_size,
         n_positions=config.n_positions,
@@ -175,13 +175,13 @@ def to_gpt_config(config: ReaLModelConfig) -> transformers.GPT2Config:
 
 
 register_hf_family(
-    name="gpt",
+    name="gpt2",
     hf_cls_name="GPT2LMHeadModel",
-    config_from_hf_converter=convert_config_gpt,
-    config_to_hf_converter=to_gpt_config,
-    sd_from_hf_converter=sd_from_gpt,
-    sd_to_hf_converter=sd_to_gpt,
-    embedding_param_names=gpt_embedding_layer_names,
-    tblock_param_names=gpt_transformer_block_param_name,
-    head_param_names=gpt_output_head_param_name,
+    config_from_hf_converter=convert_config_gpt2,
+    config_to_hf_converter=to_gpt2_config,
+    sd_from_hf_converter=sd_from_gpt2,
+    sd_to_hf_converter=sd_to_gpt2,
+    embedding_param_names=gpt2_embedding_layer_names,
+    tblock_param_names=gpt2_transformer_block_param_name,
+    head_param_names=gpt2_output_head_param_name,
 )
