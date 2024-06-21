@@ -6,7 +6,7 @@ import torch
 
 from realhf.api.core import model_api
 from realhf.api.core.config import ModelName
-from realhf.base import logging
+from realhf.base import constants, logging
 
 try:
     import realhf._C.interval_op_cuda as interval_op_cuda
@@ -17,11 +17,6 @@ except ImportError:
     )
 
 from .real_llm_base import (
-    OutputHead,
-    ReaLModelBlock,
-    SequenceParallelActorHead,
-    SequenceParallelCriticHead,
-    VocabPositionEmbedding,
     real_model_embed_param_count,
     real_model_embedding_param_keys,
     real_model_head_param_count,
@@ -149,10 +144,19 @@ def build_param_spec(
     param_size = 0
     for k in sd_keys:
         shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
+        if (
+            config.share_embeddings_and_output_weights
+            and constants.pipe_parallel_world_size() == 1
+            and k == f"0.wte.weight"
+        ):
+            param_spec[k] = param_spec[f"{config.n_layers + 1}.weight"]
+            continue
+
         param_spec[k] = ContiguousParamSpec(
             param_size, param_size + int(np.prod(shape)), shape
         )
         param_size += int(np.prod(shape))
+
     return param_spec, param_size
 
 

@@ -16,6 +16,7 @@ import realhf.impl.model.parallelism.model_parallel.mappings as tensor_parallel
 from realhf.api.core import model_api
 from realhf.impl.model.modules import (
     CausalSelfAttentionLayer,
+    GemmaRMSNorm,
     LayerNormMLP,
     LlamaLayerNormMLP,
     LlamaRMSNorm,
@@ -151,6 +152,7 @@ class ReaLModelBlock(nn.Module):
                 intermediate_dim=config.intermediate_dim,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
+                layer_norm_type=config.layer_norm_type,
                 model_parallel=constants.model_parallel_world_size() > 1,
                 gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
@@ -162,6 +164,8 @@ class ReaLModelBlock(nn.Module):
                 layer_norm_fn = nn.LayerNorm
             elif config.layer_norm_type == "rms":
                 layer_norm_fn = LlamaRMSNorm
+            elif config.layer_norm_type == "gemma":
+                layer_norm_fn = GemmaRMSNorm
             self.ln_f = layer_norm_fn(
                 config.hidden_dim,
                 eps=config.layer_norm_epsilon,
@@ -242,6 +246,7 @@ class VocabPositionEmbedding(nn.Module):
     ):
         super().__init__()
         self.n_positions = config.n_positions
+        self.hidden_dim = config.hidden_dim
 
         model_parallel = constants.model_parallel_world_size() > 1
         if model_parallel:
@@ -262,6 +267,7 @@ class VocabPositionEmbedding(nn.Module):
                 device=device,
             )
 
+        self.normalize_embed = config.normalize_embed
         self.embed_drop = nn.Dropout(config.embd_pdrop)
 
         self.self_attention_mask = torch.tril(
@@ -300,6 +306,9 @@ class VocabPositionEmbedding(nn.Module):
         inputs_embeds = self.wte(input_ids)
         if self.apply_abs_pos_embed:
             inputs_embeds = inputs_embeds + self.wpe(position_ids)
+        if self.normalize_embed:
+            normalizer = torch.tensor(self.hidden_dim**0.5, dtype=inputs_embeds.dtype)
+            inputs_embeds = inputs_embeds * normalizer
         if constants.sequence_parallel():
             inputs_embeds = tensor_parallel.scatter_to_sequence_parallel_region(
                 inputs_embeds
@@ -339,7 +348,7 @@ class SequenceParallelCriticHead(nn.Linear):
         return super().forward(x)
 
 
-class SequenceParallelActorHead(ColumnParallelLinear):
+class ParallelActorHead(ColumnParallelLinear):
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         x.pp_output = parallel_lm_logits(
@@ -388,7 +397,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
     if config.layer_norm_type is None:
         # nn.LayerNorm
         ln_count = 2 * config.hidden_dim
-    elif config.layer_norm_type == "rms":
+    elif config.layer_norm_type in ["gemma", "rms"]:
         # Llama RMSNorm
         ln_count = config.hidden_dim
     else:

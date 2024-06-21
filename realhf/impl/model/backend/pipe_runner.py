@@ -1,22 +1,11 @@
 import dataclasses
 from typing import *
 
-from deepspeed.runtime.engine import MEMORY_OPT_ALLREDUCE_SIZE, DeepSpeedEngine
-from deepspeed.runtime.zero.config import ZeroStageEnum
-
-try:
-    from megatron.core.distributed.distributed_data_parallel import (
-        DistributedDataParallel as MegatronDDP,
-    )
-    from megatron.core.distributed.finalize_model_grads import finalize_model_grads
-    from megatron.core.optimizer.distrib_optimizer import (
-        DistributedOptimizer as MegatronDistOptim,
-    )
-except ImportError or ModuleNotFoundError:
-    pass
 import torch
 import torch.distributed as dist
 import transformers
+from deepspeed.runtime.engine import MEMORY_OPT_ALLREDUCE_SIZE, DeepSpeedEngine
+from deepspeed.runtime.zero.config import ZeroStageEnum
 
 import realhf.base.constants as constants
 import realhf.base.logging as logging
@@ -25,7 +14,7 @@ import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedu
 from realhf.api.core import data_api
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.base.namedarray import NamedArray
-from realhf.impl.model.backend.utils import MegatronEngine
+from realhf.impl.model.backend.utils import MegatronEngine, finalize_grads_megatron
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.nn.real_llm_generate import (
@@ -908,7 +897,7 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
         step_id: int,
     ):
         # self.engine.ddp.start_grad_sync()
-        finalize_model_grads([self.engine.ddp])
+        finalize_grads_megatron(self.engine)
 
     def _exec_optimizer_step(
         self,

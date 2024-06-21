@@ -48,6 +48,8 @@ class HFModelRegistry:
             )
         config = self.config_from_hf_converter(hf_config)
         config.is_critic = is_critic
+        if config.is_critic:
+            config.share_embeddings_and_output_weights = False
         return config
 
     def config_to_hf(

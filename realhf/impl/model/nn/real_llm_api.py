@@ -30,10 +30,10 @@ from realhf.impl.model.utils.padding import pad_input, unpad_input
 from .flatten_param import build_param_spec, map_param_to_contigous_memory
 from .real_llm_base import (
     OutputHead,
+    ParallelActorHead,
     PipeCacheData,
     PipeTransferData,
     ReaLModelBlock,
-    SequenceParallelActorHead,
     SequenceParallelCriticHead,
     VocabPositionEmbedding,
     real_model_embed_param_count,
@@ -56,6 +56,27 @@ class DuckGenerationOutput:
     sequences: torch.Tensor
     scores: Optional[torch.Tensor] = None
     logits_mask: Optional[torch.Tensor] = None
+
+
+def _sync_embedding_and_output_weights(layers: nn.ModuleList):
+    pp_size = constants.pipe_parallel_world_size()
+    pp_rank = constants.pipe_parallel_rank()
+    if pp_size == 1:
+        old_head_w = layers[-1].weight.data
+        layers[-1].weight = layers[0].wte.weight
+        del old_head_w
+        return
+
+    if pp_rank != 0 and pp_rank != pp_size - 1:
+        return
+
+    if pp_rank == 0:
+        weight = layers[0].wte.weight
+    else:
+        weight = layers[-1].weight
+        weight.fill_(0.0)
+    group = constants.grid().embedding_proc_group
+    torch.distributed.all_reduce(weight.data, group=group)
 
 
 class ReaLModel(nn.Module):
@@ -159,8 +180,10 @@ class ReaLModel(nn.Module):
         layers = []
         for idx in range(self.layer_idx_start, self.layer_idx_end):
             layers.append(self._build_layer(idx, self.config))
-
         self.layers = nn.ModuleList(layers)
+
+        if self.config.share_embeddings_and_output_weights:
+            _sync_embedding_and_output_weights(self.layers)
 
         self.contiguous_param = torch.empty(
             self._param_size, dtype=self.dtype, device=self.device
@@ -216,7 +239,7 @@ class ReaLModel(nn.Module):
                 dtype=dtype,
             )
         elif not config.is_critic and constants.model_parallel_world_size() > 1:
-            l = SequenceParallelActorHead(
+            l = ParallelActorHead(
                 config.hidden_dim,
                 config.vocab_size,
                 bias=False,
@@ -456,7 +479,7 @@ class ReaLModel(nn.Module):
                 (
                     OutputHead,
                     SequenceParallelCriticHead,
-                    SequenceParallelActorHead,
+                    ParallelActorHead,
                 ),
             ):
                 h = l._forward(h)

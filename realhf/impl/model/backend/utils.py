@@ -2,23 +2,19 @@ import dataclasses
 import math
 from typing import *
 
-try:
-    from megatron.core.distributed.distributed_data_parallel import (
-        DistributedDataParallel as MegatronDDP,
-    )
-    from megatron.core.optimizer.distrib_optimizer import (
-        DistributedOptimizer as MegatronDistOptim,
-    )
-except ImportError or ModuleNotFoundError:
-    # dummy class for type hint, due to missing files in megatron CPU installation
-    class MegatronDDP:
-        pass
-
-    class MegatronDistOptim:
-        pass
-
+import torch
+import torch.distributed as dist
+from megatron.core.distributed.distributed_data_parallel import (
+    DistributedDataParallel as MegatronDDP,
+)
+from megatron.core.optimizer.distrib_optimizer import (
+    DistributedOptimizer as MegatronDistOptim,
+)
 
 from realhf.base import constants, logging
+
+if TYPE_CHECKING:
+    from realhf.impl.model.nn.real_llm_api import ReaLModel, ReaLModelBlock
 
 logger = logging.getLogger("Model Backend Utils")
 
@@ -288,3 +284,94 @@ class OptimizerParamScheduler(object):
                 sd["wd_incr_style"],
                 "weight decay incr style",
             )
+
+
+def _flatten_dense_tensors(tensors):
+    """Flatten dense tensors into a contiguous 1D buffer. Assume tensors are of
+    same dense type.
+
+    Since inputs are dense, the resulting tensor will be a concatenated 1D
+    buffer. Element-wise operation on this buffer will be equivalent to
+    operating individually.
+
+    Args:
+        tensors (Iterable[Tensor]): dense tensors to flatten.
+
+    Returns:
+        A contiguous 1D buffer containing input tensors.
+    """
+    return torch._C._nn.flatten_dense_tensors(tensors)
+
+
+def _unflatten_dense_tensors(flat, tensors):
+    """View a flat buffer using the sizes of tensors. Assume that tensors are of
+    same dense type, and that flat is given by _flatten_dense_tensors.
+
+    Args:
+        flat (Tensor): flattened dense tensors to unflatten.
+        tensors (Iterable[Tensor]): dense tensors whose sizes will be used to
+          unflatten flat.
+
+    Returns:
+        Unflattened dense tensors with sizes same as tensors and values from
+        flat.
+    """
+    return torch._C._nn.unflatten_dense_tensors(flat, tensors)
+
+
+def megatron_all_reduce_layernorm_grads(engine: MegatronEngine):
+    if not (
+        constants.sequence_parallel() and constants.model_parallel_world_size() > 1
+    ):
+        return
+    real_model: ReaLModel = engine.ddp.module
+    grads = []
+    for i in range(real_model.layer_idx_start, real_model.layer_idx_end):
+        if i == 0:
+            continue
+        elif i == real_model.config.n_layers + 1:
+            continue
+        else:
+            assert 0 < i < real_model.config.n_layers + 1
+            layer: ReaLModelBlock = real_model.layers[i]
+            grads.append(layer.attn.c_attn.ln.weight.main_grad)
+            if layer.attn.c_attn.ln.bias is not None:
+                grads.append(layer.attn.c_attn.ln.bias.main_grad)
+            grads.append(layer.mlp.ln.weight.main_grad)
+            if layer.mlp.ln.bias is not None:
+                grads.append(layer.mlp.ln.bias.main_grad)
+            if i == real_model.config.n_layers:
+                grads.append(layer.ln_f.weight.main_grad)
+                if layer.ln_f.bias is not None:
+                    grads.append(layer.ln_f.bias.main_grad)
+
+    assert all(x is not None for x in grads)
+    coalesced = _flatten_dense_tensors(grads)
+    dist.all_reduce(coalesced, group=constants.model_parallel_group())
+    for buf, synced in zip(grads, _unflatten_dense_tensors(coalesced, grads)):
+        buf.copy_(synced)
+
+
+def megatron_all_reduce_word_embedding_grads(engine: MegatronEngine):
+    pp_size = constants.pipe_parallel_world_size()
+    pp_rank = constants.pipe_parallel_rank()
+    if pp_size == 1:
+        return
+    if pp_rank not in [0, pp_size - 1]:
+        return
+    real_model: ReaLModel = engine.ddp.module
+    if not real_model.share_embeddings_and_output_weights:
+        return
+
+    if pp_rank == 0:
+        grad = real_model.layers[-1].weight.main_grad
+    else:
+        grad = real_model.layers[0].wte.weight.main_grad
+
+    dist.all_reduce(grad, group=constants.grid().embedding_proc_group)
+
+
+def finalize_grads_megatron(engine: MegatronEngine):
+    engine.ddp.finish_grad_sync()
+    megatron_all_reduce_layernorm_grads(engine)
+    megatron_all_reduce_word_embedding_grads(engine)

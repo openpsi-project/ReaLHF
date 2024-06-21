@@ -2,33 +2,28 @@ import dataclasses
 from contextlib import contextmanager
 from typing import *
 
-try:
-    from megatron.core import parallel_state
-    from megatron.core.distributed.distributed_data_parallel import (
-        DistributedDataParallel,
-    )
-    from megatron.core.distributed.finalize_model_grads import finalize_model_grads
-    from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
-    from megatron.core.optimizer import get_megatron_optimizer
-    from megatron.core.optimizer.optimizer_config import OptimizerConfig
-    from megatron.core.transformer.transformer_config import TransformerConfig
-except ImportError or ModuleNotFoundError:
-    # dummy class for type hint, due to missing files in megatron CPU installation
-    class TransformerConfig:
-        pass
-
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import transformers
+from megatron.core import parallel_state
+from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
+from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
+from megatron.core.optimizer import get_megatron_optimizer
+from megatron.core.optimizer.optimizer_config import OptimizerConfig
+from megatron.core.transformer.transformer_config import TransformerConfig
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
-from realhf.impl.model.backend.utils import MegatronEngine, OptimizerParamScheduler
+from realhf.impl.model.backend.utils import (
+    MegatronEngine,
+    OptimizerParamScheduler,
+    finalize_grads_megatron,
+)
 from realhf.impl.model.modules.mlp import get_activation_fn
 from realhf.impl.model.nn.real_llm_api import ReaLModel
+from realhf.impl.model.nn.real_llm_base import ReaLModelBlock
 from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 
 WITHIN_MEGATRON_CONTEXT = False
@@ -228,7 +223,9 @@ class ReaLMegatronEngine:
                     model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs
                 )
                 self.engine.optim.scale_loss(loss).backward()
-                finalize_model_grads([self.engine.ddp])
+
+                finalize_grads_megatron(self.engine)
+
                 update_successful, grad_norm, _ = self.engine.optim.step()
                 if update_successful:
                     self.engine.lr_scheduler.step_absolute(version_steps)

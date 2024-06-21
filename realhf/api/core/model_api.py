@@ -104,17 +104,19 @@ class ReaLModelConfig:
     rotary_interleaved: bool = False
     rotary_scaling: Optional[float] = None
     rotary_scaling_type: Optional[str] = None
+    # for gemma
+    normalize_embed: bool = False
+    # Tied embedding
+    share_embeddings_and_output_weights: bool = False
     # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False
 
     ### Running configurations. ###
     gradient_accumulation_fusion: bool = False
 
-    # Placeholder, not implemented
-    share_embeddings_and_output_weights: bool = False
-
     def __post_init__(self):
-        assert not self.share_embeddings_and_output_weights
+        if self.is_critic and self.share_embeddings_and_output_weights:
+            raise ValueError("Critic model cannot share embeddings and output weights.")
 
 
 def load_hf_tokenizer(
