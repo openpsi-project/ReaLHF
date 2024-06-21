@@ -122,6 +122,7 @@ class ReaLModelBlock(nn.Module):
             scale_attn_by_inverse_layer_idx=config.scale_attn_by_inverse_layer_idx,
             layer_norm_type=config.layer_norm_type,
             use_attention_bias=config.use_attention_bias,
+            use_attn_proj_bias=config.use_attn_proj_bias,
             apply_rotary=config.apply_rotary,
             rotary_base=config.rotary_base,
             rotary_interleaved=config.rotary_interleaved,
@@ -402,7 +403,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
 
     # attention projection
     count += config.hidden_dim * config.hidden_dim
-    if config.use_attention_bias:
+    if config.use_attn_proj_bias:
         count += config.hidden_dim
     # NOTE: we ignore the parameters of RotoaryEmbedding here
 
@@ -438,7 +439,7 @@ def real_model_tblock_param_keys(
             f"{idx + 1}.attn.c_attn.v_attn.bias",
         ]
     keys += [f"{idx + 1}.attn.c_proj.weight"]
-    if config.use_attention_bias:
+    if config.use_attn_proj_bias:
         keys += [f"{idx + 1}.attn.c_proj.bias"]
     keys += [f"{idx + 1}.mlp.ln.weight"]
     if config.layer_norm_type is None:

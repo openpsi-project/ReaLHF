@@ -224,7 +224,8 @@ class HFModelRegistry:
         # Save tokenizer and huggingface model config.
         if pp_rank == 0 and dp_rank == 0 and mp_rank == 0:
             hf_config.save_pretrained(save_dir)
-            tokenizer.save_pretrained(save_dir)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(save_dir)
 
         # Dump parameters to disk.
         if len(pp_stage_n_shards) == 1 and pp_stage_n_shards[0] == 1:

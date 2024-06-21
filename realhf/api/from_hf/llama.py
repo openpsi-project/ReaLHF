@@ -132,6 +132,20 @@ def to_llama_state_dict(
             new_sd[f"model.layers.{i-1}.self_attn.v_proj.weight"] = state_dict[
                 f"{i}.attn.c_attn.v_attn.weight"
             ]
+            if config.use_attention_bias:
+                new_sd[f"model.layers.{i-1}.self_attn.q_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.q_attn.bias"
+                ]
+                new_sd[f"model.layers.{i-1}.self_attn.k_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.k_attn.bias"
+                ]
+                new_sd[f"model.layers.{i-1}.self_attn.v_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.v_attn.bias"
+                ]
+            if config.use_attn_proj_bias:
+                new_sd[f"model.layers.{i-1}.self_attn.o_proj.bias"] = state_dict[
+                    f"{i}.attn.c_proj.bias"
+                ]
             new_sd[f"model.layers.{i-1}.self_attn.rotary_emb.inv_freq"] = 1.0 / (
                 config.rotary_base
                 ** (
@@ -198,6 +212,7 @@ def convert_config_llama(
         layer_norm_epsilon=hf_config.rms_norm_eps,
         activation_function=hf_config.hidden_act,
         use_attention_bias=hf_config.attention_bias,
+        use_attn_proj_bias=hf_config.attention_bias,
         scale_attn_by_inverse_layer_idx=False,
         layer_norm_type="rms",
         mlp_type="llama",

@@ -95,6 +95,7 @@ class ReaLModelConfig:
     scale_attn_by_inverse_layer_idx: bool = True
     # llama does not use attention bias and uses special MLP/LayerNorm layers
     use_attention_bias: bool = True
+    use_attn_proj_bias: bool = True
     layer_norm_type: Optional[str] = None
     mlp_type: Optional[str] = None
     # rotary embedding
