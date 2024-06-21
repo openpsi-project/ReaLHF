@@ -41,6 +41,7 @@ class CausalSelfAttentionLayer(nn.Module):
         layer_norm_epsilon: float,
         # gpt2 does not scale attn by inverse layer idx, in contrast to starcoder
         scale_attn_by_inverse_layer_idx: bool,
+        scale_attn_weights: bool,
         # llama does not require attention bias
         use_attention_bias: bool,
         use_attn_proj_bias: bool,
@@ -130,6 +131,7 @@ class CausalSelfAttentionLayer(nn.Module):
         self.layer_index = layer_index
 
         self.scale_attn_by_inverse_layer_idx = scale_attn_by_inverse_layer_idx
+        self.scale_attn_weights = scale_attn_weights
 
     def train(self, mode: bool):
         if not mode:
@@ -163,7 +165,8 @@ class CausalSelfAttentionLayer(nn.Module):
         else:
             unscale = 1.0
             scale_factor = 1
-        scale_factor /= self.d**0.5
+        if self.scale_attn_weights:
+            scale_factor /= self.d**0.5
 
         q, k, v = self.c_attn(hidden_states)
 

@@ -64,6 +64,18 @@ def get_gemma_hf_config():
     )
 
 
+def get_gpt_config():
+    return transformers.GPT2Config(
+        vocab_size=200,
+        n_positions=200,
+        n_embd=128,
+        n_layer=2,
+        n_head=8,
+        n_inner=200,
+        activation_function="gelu",
+    )
+
+
 def hf_config_factory(model_family_name: str):
     if model_family_name == "llama":
         return get_llama_hf_config()
@@ -71,6 +83,8 @@ def hf_config_factory(model_family_name: str):
         return get_qwen2_hf_config()
     elif model_family_name == "gemma":
         return get_gemma_hf_config()
+    elif model_family_name == "gpt":
+        return get_gpt_config()
     else:
         raise NotImplementedError(model_family_name)
 
@@ -109,7 +123,9 @@ def test_consistency(tmp_path, model_family_name: str):
         )(hf_config)
 
         # convert back to HF config
-        hf_config = getattr(ReaLModel, f"config_to_{model_family_name}")(mconfig)
+        hf_config = getattr(ReaLModel, f"config_to_{model_family_name}")(
+            mconfig
+        )
 
         # initialize model
         model = ReaLModel(mconfig, dtype=torch.float32, device="cpu")
@@ -118,11 +134,15 @@ def test_consistency(tmp_path, model_family_name: str):
 
         real_sd = model.state_dict()
 
-        hf_sd = _HF_REGISTRIES[model_family_name].sd_to_hf_converter(real_sd, mconfig)
-        hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
+        save_dir = tmp_path / "model"
+        if os.path.exists(save_dir):
+            shutil.rmtree(save_dir)
+        getattr(ReaLModel, f"to_{model_family_name}")(model, None, save_dir)
 
-        # 1. test ReaL -> HF state dict conversion
-        hf_model.load_state_dict(hf_sd, strict=False)
+        hf_sd = _HF_REGISTRIES[model_family_name].sd_to_hf_converter(
+            real_sd, mconfig
+        )
+        hf_model = transformers.AutoModelForCausalLM.from_pretrained(save_dir)
 
         # 2. test HF -> ReaL state dict conversion
         real_sd_ = _HF_REGISTRIES[model_family_name].sd_from_hf_converter(
@@ -159,19 +179,10 @@ def test_consistency(tmp_path, model_family_name: str):
             (logits1 - logits2).abs().max(),
         )
 
-        # 4. test save and load
-        save_dir = tmp_path / "model"
-        getattr(ReaLModel, f"to_{model_family_name}")(model, None, save_dir)
-
-        load_hf_model = transformers.AutoModelForCausalLM.from_pretrained(save_dir)
-        load_hf_sd = load_hf_model.state_dict()
-        for k, v in load_hf_sd.items():
-            assert torch.allclose(v, hf_sd[k], atol=1e-5), k
-
         print("Passed", model_family_name)
 
 
 if __name__ == "__main__":
     from pathlib import Path
 
-    test_consistency(Path("/tmp"), "gemma")
+    test_consistency(Path("/tmp"), "gpt")

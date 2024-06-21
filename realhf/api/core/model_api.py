@@ -93,6 +93,7 @@ class ReaLModelConfig:
     layer_norm_epsilon: float = 1e-5
     activation_function: str = "gelu"
     scale_attn_by_inverse_layer_idx: bool = True
+    scale_attn_weights: bool = True
     # llama does not use attention bias and uses special MLP/LayerNorm layers
     use_attention_bias: bool = True
     use_attn_proj_bias: bool = True

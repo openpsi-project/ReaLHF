@@ -121,6 +121,7 @@ class ReaLModelBlock(nn.Module):
             layer_index=layer_index,
             layer_norm_epsilon=config.layer_norm_epsilon,
             scale_attn_by_inverse_layer_idx=config.scale_attn_by_inverse_layer_idx,
+            scale_attn_weights=config.scale_attn_weights,
             layer_norm_type=config.layer_norm_type,
             use_attention_bias=config.use_attention_bias,
             use_attn_proj_bias=config.use_attn_proj_bias,
