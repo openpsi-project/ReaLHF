@@ -123,9 +123,7 @@ def test_consistency(tmp_path, model_family_name: str):
         )(hf_config)
 
         # convert back to HF config
-        hf_config = getattr(ReaLModel, f"config_to_{model_family_name}")(
-            mconfig
-        )
+        hf_config = getattr(ReaLModel, f"config_to_{model_family_name}")(mconfig)
 
         # initialize model
         model = ReaLModel(mconfig, dtype=torch.float32, device="cpu")
@@ -139,9 +137,7 @@ def test_consistency(tmp_path, model_family_name: str):
             shutil.rmtree(save_dir)
         getattr(ReaLModel, f"to_{model_family_name}")(model, None, save_dir)
 
-        hf_sd = _HF_REGISTRIES[model_family_name].sd_to_hf_converter(
-            real_sd, mconfig
-        )
+        hf_sd = _HF_REGISTRIES[model_family_name].sd_to_hf_converter(real_sd, mconfig)
         hf_model = transformers.AutoModelForCausalLM.from_pretrained(save_dir)
 
         # 2. test HF -> ReaL state dict conversion

@@ -11,45 +11,45 @@ def sd_from_gpt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     if any(k.startswith("transformer.") for k in state_dict.keys()):
         new_sd = {k.replace("transformer.", ""): v for k, v in state_dict.items()}
         head_w = new_sd.pop("lm_head.weight")
-        assert torch.allclose(head_w, new_sd['wte.weight'])
+        assert torch.allclose(head_w, new_sd["wte.weight"])
         state_dict = new_sd
 
     new_sd = {}
-    new_sd['0.wte.weight'] = state_dict['wte.weight']
-    new_sd['0.wpe.weight'] = state_dict['wpe.weight']
-    new_sd[f'{config.n_layers + 1}.weight'] = state_dict['wte.weight']
-    new_sd[f'{config.n_layers}.ln_f.weight'] = state_dict['ln_f.weight']
-    new_sd[f'{config.n_layers}.ln_f.bias'] = state_dict['ln_f.bias']
+    new_sd["0.wte.weight"] = state_dict["wte.weight"]
+    new_sd["0.wpe.weight"] = state_dict["wpe.weight"]
+    new_sd[f"{config.n_layers + 1}.weight"] = state_dict["wte.weight"]
+    new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict["ln_f.weight"]
+    new_sd[f"{config.n_layers}.ln_f.bias"] = state_dict["ln_f.bias"]
     for i in range(config.n_layers):
-        new_sd[f'{i+1}.attn.c_attn.ln.weight'] = state_dict[
-            f'h.{i}.ln_1.weight'
-        ]
-        new_sd[f'{i+1}.attn.c_attn.ln.bias'] = state_dict[f'h.{i}.ln_1.bias']
+        new_sd[f"{i+1}.attn.c_attn.ln.weight"] = state_dict[f"h.{i}.ln_1.weight"]
+        new_sd[f"{i+1}.attn.c_attn.ln.bias"] = state_dict[f"h.{i}.ln_1.bias"]
 
-        attn_w = state_dict[f'h.{i}.attn.c_attn.weight']
-        attn_bias = state_dict[f'h.{i}.attn.c_attn.bias']
+        attn_w = state_dict[f"h.{i}.attn.c_attn.weight"]
+        attn_bias = state_dict[f"h.{i}.attn.c_attn.bias"]
         qw, kw, vw = torch.chunk(attn_w, 3, dim=1)
         qb, kb, vb = torch.chunk(attn_bias, 3, dim=0)
-        new_sd[f'{i+1}.attn.c_attn.q_attn.weight'] = qw.transpose(0,1)
-        new_sd[f'{i+1}.attn.c_attn.k_attn.weight'] = kw.transpose(0,1)
-        new_sd[f'{i+1}.attn.c_attn.v_attn.weight'] = vw.transpose(0,1)
-        new_sd[f'{i+1}.attn.c_attn.q_attn.bias'] = qb
-        new_sd[f'{i+1}.attn.c_attn.k_attn.bias'] = kb
-        new_sd[f'{i+1}.attn.c_attn.v_attn.bias'] = vb
+        new_sd[f"{i+1}.attn.c_attn.q_attn.weight"] = qw.transpose(0, 1)
+        new_sd[f"{i+1}.attn.c_attn.k_attn.weight"] = kw.transpose(0, 1)
+        new_sd[f"{i+1}.attn.c_attn.v_attn.weight"] = vw.transpose(0, 1)
+        new_sd[f"{i+1}.attn.c_attn.q_attn.bias"] = qb
+        new_sd[f"{i+1}.attn.c_attn.k_attn.bias"] = kb
+        new_sd[f"{i+1}.attn.c_attn.v_attn.bias"] = vb
 
-        new_sd[f'{i+1}.attn.c_proj.weight'] = state_dict[
+        new_sd[f"{i+1}.attn.c_proj.weight"] = state_dict[
             f"h.{i}.attn.c_proj.weight"
         ].transpose(0, 1)
-        new_sd[f'{i+1}.attn.c_proj.bias'] = state_dict[
-            f"h.{i}.attn.c_proj.bias"
-        ]
+        new_sd[f"{i+1}.attn.c_proj.bias"] = state_dict[f"h.{i}.attn.c_proj.bias"]
 
-        new_sd[f'{i+1}.mlp.ln.weight'] = state_dict[f"h.{i}.ln_2.weight"]
-        new_sd[f'{i+1}.mlp.ln.bias'] = state_dict[f"h.{i}.ln_2.bias"]
-        new_sd[f'{i+1}.mlp.c_fc.weight'] = state_dict[f"h.{i}.mlp.c_fc.weight"].transpose(0, 1)
-        new_sd[f'{i+1}.mlp.c_fc.bias'] = state_dict[f"h.{i}.mlp.c_fc.bias"]
-        new_sd[f'{i+1}.mlp.c_proj.weight'] = state_dict[f"h.{i}.mlp.c_proj.weight"].transpose(0, 1)
-        new_sd[f'{i+1}.mlp.c_proj.bias'] = state_dict[f"h.{i}.mlp.c_proj.bias"]
+        new_sd[f"{i+1}.mlp.ln.weight"] = state_dict[f"h.{i}.ln_2.weight"]
+        new_sd[f"{i+1}.mlp.ln.bias"] = state_dict[f"h.{i}.ln_2.bias"]
+        new_sd[f"{i+1}.mlp.c_fc.weight"] = state_dict[
+            f"h.{i}.mlp.c_fc.weight"
+        ].transpose(0, 1)
+        new_sd[f"{i+1}.mlp.c_fc.bias"] = state_dict[f"h.{i}.mlp.c_fc.bias"]
+        new_sd[f"{i+1}.mlp.c_proj.weight"] = state_dict[
+            f"h.{i}.mlp.c_proj.weight"
+        ].transpose(0, 1)
+        new_sd[f"{i+1}.mlp.c_proj.bias"] = state_dict[f"h.{i}.mlp.c_proj.bias"]
     return new_sd
 
 
@@ -60,71 +60,69 @@ def sd_to_gpt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     ).view(1, 1, max_positions, max_positions)
 
     new_sd = {}
-    new_sd['wte.weight'] = state_dict['0.wte.weight']
-    new_sd['wpe.weight'] = state_dict['0.wpe.weight']
-    new_sd['ln_f.weight'] = state_dict[f'{config.n_layers}.ln_f.weight']
-    new_sd['ln_f.bias'] = state_dict[f'{config.n_layers}.ln_f.bias']
+    new_sd["wte.weight"] = state_dict["0.wte.weight"]
+    new_sd["wpe.weight"] = state_dict["0.wpe.weight"]
+    new_sd["ln_f.weight"] = state_dict[f"{config.n_layers}.ln_f.weight"]
+    new_sd["ln_f.bias"] = state_dict[f"{config.n_layers}.ln_f.bias"]
     for i in range(config.n_layers):
         if not any(k.startswith(f"{i+1}.") for k in state_dict):
             continue
-        new_sd[f'h.{i}.ln_1.weight'] = state_dict[
-            f'{i+1}.attn.c_attn.ln.weight'
-        ]
-        new_sd[f'h.{i}.ln_1.bias'] = state_dict[f'{i+1}.attn.c_attn.ln.bias']
+        new_sd[f"h.{i}.ln_1.weight"] = state_dict[f"{i+1}.attn.c_attn.ln.weight"]
+        new_sd[f"h.{i}.ln_1.bias"] = state_dict[f"{i+1}.attn.c_attn.ln.bias"]
 
-        qw = state_dict[f'{i+1}.attn.c_attn.q_attn.weight'].transpose(0,1)
-        kw = state_dict[f'{i+1}.attn.c_attn.k_attn.weight'].transpose(0,1)
-        vw = state_dict[f'{i+1}.attn.c_attn.v_attn.weight'].transpose(0,1)
-        qb = state_dict[f'{i+1}.attn.c_attn.q_attn.bias']
-        kb = state_dict[f'{i+1}.attn.c_attn.k_attn.bias']
-        vb = state_dict[f'{i+1}.attn.c_attn.v_attn.bias']
+        qw = state_dict[f"{i+1}.attn.c_attn.q_attn.weight"].transpose(0, 1)
+        kw = state_dict[f"{i+1}.attn.c_attn.k_attn.weight"].transpose(0, 1)
+        vw = state_dict[f"{i+1}.attn.c_attn.v_attn.weight"].transpose(0, 1)
+        qb = state_dict[f"{i+1}.attn.c_attn.q_attn.bias"]
+        kb = state_dict[f"{i+1}.attn.c_attn.k_attn.bias"]
+        vb = state_dict[f"{i+1}.attn.c_attn.v_attn.bias"]
         attn_w = torch.cat([qw, kw, vw], dim=1)
         attn_bias = torch.cat([qb, kb, vb], dim=0)
-        new_sd[f'h.{i}.attn.c_attn.weight'] = attn_w
-        new_sd[f'h.{i}.attn.c_attn.bias'] = attn_bias
+        new_sd[f"h.{i}.attn.c_attn.weight"] = attn_w
+        new_sd[f"h.{i}.attn.c_attn.bias"] = attn_bias
 
         new_sd[f"h.{i}.attn.c_proj.weight"] = state_dict[
-            f'{i+1}.attn.c_proj.weight'
+            f"{i+1}.attn.c_proj.weight"
         ].transpose(0, 1)
-        new_sd[f"h.{i}.attn.c_proj.bias"] = state_dict[
-            f'{i+1}.attn.c_proj.bias'
-        ]
+        new_sd[f"h.{i}.attn.c_proj.bias"] = state_dict[f"{i+1}.attn.c_proj.bias"]
 
-        new_sd[f'h.{i}.ln_2.weight'] = state_dict[f'{i+1}.mlp.ln.weight']
-        new_sd[f'h.{i}.ln_2.bias'] = state_dict[f'{i+1}.mlp.ln.bias']
-        new_sd[f'h.{i}.mlp.c_fc.weight'] = state_dict[f'{i+1}.mlp.c_fc.weight'].transpose(0, 1)
-        new_sd[f'h.{i}.mlp.c_fc.bias'] = state_dict[f'{i+1}.mlp.c_fc.bias']
-        new_sd[f'h.{i}.mlp.c_proj.weight'] = state_dict[f'{i+1}.mlp.c_proj.weight'].transpose(0, 1)
-        new_sd[f'h.{i}.mlp.c_proj.bias'] = state_dict[f'{i+1}.mlp.c_proj.bias']
-        new_sd[f'h.{i}.attn.bias'] = bias
+        new_sd[f"h.{i}.ln_2.weight"] = state_dict[f"{i+1}.mlp.ln.weight"]
+        new_sd[f"h.{i}.ln_2.bias"] = state_dict[f"{i+1}.mlp.ln.bias"]
+        new_sd[f"h.{i}.mlp.c_fc.weight"] = state_dict[
+            f"{i+1}.mlp.c_fc.weight"
+        ].transpose(0, 1)
+        new_sd[f"h.{i}.mlp.c_fc.bias"] = state_dict[f"{i+1}.mlp.c_fc.bias"]
+        new_sd[f"h.{i}.mlp.c_proj.weight"] = state_dict[
+            f"{i+1}.mlp.c_proj.weight"
+        ].transpose(0, 1)
+        new_sd[f"h.{i}.mlp.c_proj.bias"] = state_dict[f"{i+1}.mlp.c_proj.bias"]
+        new_sd[f"h.{i}.attn.bias"] = bias
     return new_sd
 
 
 # param name is used to load directly from huggingface checkpoints
 def gpt_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
-    return ['wte.weight', 'wpe.weight']
+    return ["wte.weight", "wpe.weight"]
 
 
-def gpt_transformer_block_param_name(
-    config: ReaLModelConfig, idx: int
-) -> List[str]:
+def gpt_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
     names = [
-        f'h.{idx}.ln_1.weight',
-        f'h.{idx}.ln_1.bias',
+        f"h.{idx}.ln_1.weight",
+        f"h.{idx}.ln_1.bias",
         # f'h.{idx}.attn.bias',
-        f'h.{idx}.attn.c_attn.weight',
-        f'h.{idx}.attn.c_attn.bias',
-        f'h.{idx}.attn.c_proj.weight',
-        f'h.{idx}.attn.c_proj.bias',
-        f'h.{idx}.ln_2.weight',
-        f'h.{idx}.ln_2.bias',
-        f'h.{idx}.mlp.c_fc.weight',
-        f'h.{idx}.mlp.c_fc.bias',
-        f'h.{idx}.mlp.c_proj.weight',
-        f'h.{idx}.mlp.c_proj.bias',
+        f"h.{idx}.attn.c_attn.weight",
+        f"h.{idx}.attn.c_attn.bias",
+        f"h.{idx}.attn.c_proj.weight",
+        f"h.{idx}.attn.c_proj.bias",
+        f"h.{idx}.ln_2.weight",
+        f"h.{idx}.ln_2.bias",
+        f"h.{idx}.mlp.c_fc.weight",
+        f"h.{idx}.mlp.c_fc.bias",
+        f"h.{idx}.mlp.c_proj.weight",
+        f"h.{idx}.mlp.c_proj.bias",
     ]
     if idx == config.n_layers - 1:
-        names += ['ln_f.weight', 'ln_f.bias']
+        names += ["ln_f.weight", "ln_f.bias"]
     return names
 
 
@@ -141,9 +139,7 @@ def convert_config_gpt(
         hidden_dim=hf_config.n_embd,
         head_dim=hf_config.n_embd // hf_config.n_head,
         intermediate_dim=(
-            hf_config.n_inner
-            if hf_config.n_inner is not None
-            else 4 * hf_config.n_embd
+            hf_config.n_inner if hf_config.n_inner is not None else 4 * hf_config.n_embd
         ),
         vocab_size=hf_config.vocab_size,
         n_positions=hf_config.n_positions,
