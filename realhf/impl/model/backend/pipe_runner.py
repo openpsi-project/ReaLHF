@@ -253,7 +253,6 @@ def _exec_pipe_schedule(
                 elif not is_last_stage and type(cmd) != schedule.SendActivation:
                     continue
 
-            print(f"rank {constants.parallelism_rank()} exec cmd {cmd}")
             try:
                 instr_map[type(cmd)](module, tensor_buffer, *cmd.args)
             except Exception as e:
@@ -263,7 +262,6 @@ def _exec_pipe_schedule(
                     f"Exception in cmd: {cmd}"
                 )
                 raise e
-            print(f"rank {constants.parallelism_rank()} exec cmd {cmd} done")
         step_count += 1
 
         if will_break:

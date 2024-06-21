@@ -91,10 +91,8 @@ def capture_func(
                 CUDA_GRAPH_OUTPUT_BUFFER[name],
             )
 
-    print(f"initializing ca")
     if not custom_all_reduce.is_initialized():
         custom_all_reduce.init_custom_ar()
-    print(f"initialized ca")
     assert (
         custom_all_reduce.is_initialized()
         or constants.model_parallel_world_size() == 1
@@ -104,13 +102,12 @@ def capture_func(
     maybe_no_grad = nullcontext() if not no_grad else torch.no_grad()
     st = time.monotonic()
     with custom_all_reduce.graph_capture(), maybe_no_grad:
-        print(f"rank {torch.distributed.get_rank()}: Warmup for capture {name}")
-        func(**input_buffer)
-        torch.cuda.synchronize()
-
         print(
             f"rank {torch.distributed.get_rank()}: Capturing CUDA graph for {name}"
         )
+        func(**input_buffer)
+        torch.cuda.synchronize()
+
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             output = func(**input_buffer)
