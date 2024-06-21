@@ -34,7 +34,6 @@ PROMPT_DATASET_PATH = (
     "/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl"
 )
 TMP_SAVE_DIR = "profile_result/generate/"
-USE_CUDA_GRAPH = True
 
 
 @torch.no_grad()
@@ -47,9 +46,11 @@ def real_model_parallel_generate(
     max_new_tokens: int = 128,
     save_result: bool = False,
     max_num_batches: int = 10,
+    use_cuda_graph: bool = True,
 ):
     import os
 
+    os.environ["USE_CUDA_GRAPH"] = "1" if use_cuda_graph else "0"
     from realhf.base.namedarray import NamedArray
     from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 
@@ -120,137 +121,28 @@ def real_model_parallel_generate(
                     f"Batch {i} rank {dist.get_rank()} generated shape = {gen_tokens.shape}, "
                     f"logprobs shape = {logprobs.shape}"
                 )
-
+                if if_save and res is not None:
+                    to_save.append(gen_tokens)
             logger.info(f"Batch {i} rank {dist.get_rank()} time = {t:.2f}s")
 
-            if if_save and res is not None:
-                to_save.append(gen_tokens)
-
-        if if_save:
+        if (
+            if_save
+            and constants.model_parallel_rank() == 0
+            and len(to_save) > 0
+        ):
+            to_save = torch.cat(to_save, dim=0)
+            print("saving", to_save.shape)
+            identifier = "realcuda"
+            identifier += f"dp{parallel.data_parallel_size}"
+            identifier += f"mp{parallel.model_parallel_size}"
+            identifier += f"pp{parallel.pipeline_parallel_size}"
+            identifier += f"G" if use_cuda_graph else ""
             testing.save_test_result(
                 to_save,
                 TMP_SAVE_DIR,
                 model_family,
                 constants.data_parallel_rank(),
-                "realcuda",
-            )
-
-
-@torch.no_grad()
-def real_model_generate_simple(
-    model_family: ModelFamily,
-    max_prompt_len: int = 256,
-    batch_size: int = 32,
-    min_new_tokens: int = 128,
-    max_new_tokens: int = 128,
-    save_result: bool = False,
-    device: str = "cuda",
-    max_num_batches: int = 10,
-    shrink_model: bool = False,
-):
-    if device == "cpu":
-        assert (
-            shrink_model
-        ), "CPU test must shrink model, otherwise may takes a very long time."
-    from realhf.impl.model.nn.real_llm_api import ReaLModel
-    from realhf.impl.model.nn.real_llm_generate import GenerationConfig
-    import realhf.impl.dataset
-
-    model_path = MODEL_FAMILY_TO_PATH[model_family]
-    # NOTE: we run CPU float32 test instead of GPU test, because GPU inherently has non-deterministic behavior
-    testing.init_global_constants(
-        num_dp=1,
-        num_mp=1,
-        num_pp=1,
-        sequence_parallel=False,
-        max_prompt_len=max_prompt_len + max_new_tokens,
-    )
-    dataset_config = system_api.Dataset(
-        "prompt",
-        args=dict(
-            dataset_path=PROMPT_DATASET_PATH,
-            max_length=max_prompt_len,
-            pad_to_max_length=False,
-        ),
-    )
-    dataset = data_api.make_dataset(
-        dataset_config,
-        seed=1,
-        ddp_rank=0,
-        world_size=1,
-        tokenizer_or_tokenizer_name=model_path,
-        experiment_name=testing._DEFAULT_EXPR_NAME,
-        trial_name=testing._DEFAULT_TRIAL_NAME,
-    )
-    data_batches = testing.make_packed_input_batches(dataset, batch_size)
-
-    from transformers import AutoConfig
-
-    tokenizer = model_api.load_hf_tokenizer(model_path)
-    hf_config = AutoConfig.from_pretrained(model_path)
-
-    mconfig: model_api.ReaLModelConfig = getattr(
-        ReaLModel, f"config_from_{model_family._class}"
-    )(hf_config)
-    if shrink_model:
-        mconfig = testing.shrink_mconfig(mconfig)
-        model_family.size = 0
-    gconfig_dict = dict(
-        min_new_tokens=min_new_tokens,
-        max_new_tokens=max_new_tokens,
-        greedy=True,
-    )
-
-    from realhf.impl.model.nn.real_llm_api import add_helper_functions
-
-    with constants.model_scope(testing.MODEL_NAME):
-        # initialize model
-        dtype = torch.float32 if device == "cpu" else torch.float16
-        model = ReaLModel(mconfig, dtype=dtype, device=device)
-        if not shrink_model:
-            model._instantiation_hooks.append(
-                lambda: getattr(model, f"from_{model_family._class}")(
-                    load_dir=model_path, init_critic_from_actor=False
-                )
-            )
-        add_helper_functions(model)
-        model.instantiate()
-        model.eval()
-
-        # from realhf.impl.model.parallelism.model_parallel.custom_all_reduce import init_custom_ar
-        # init_custom_ar()
-
-        to_save = []
-        for i, data in enumerate(data_batches[:max_num_batches]):
-            packed_input_ids = data["packed_prompts"].to(device)
-            prompt_lengths = torch.tensor(
-                data.metadata["seqlens"],
-                dtype=torch.int32,
-                device=packed_input_ids.device,
-            )
-            cu_seqlens = torch.nn.functional.pad(
-                prompt_lengths.cumsum(0), (1, 0)
-            )
-            max_seqlen = int(prompt_lengths.max())
-
-            st = time.monotonic()
-            res = model.generate(
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-                tokenizer=tokenizer,
-                gconfig=GenerationConfig(**gconfig_dict),
-            )
-            t = time.monotonic() - st
-            logger.info(
-                f"Batch {i} generated shape = {res.sequences.shape}, logprobs shape = {res.scores.shape}"
-            )
-            logger.info(f"Batch {i} time = {t:.2f}s")
-            to_save.append(res.sequences)
-
-        if save_result:
-            testing.save_test_result(
-                to_save, TMP_SAVE_DIR, model_family, 0, f"real{device}"
+                identifier,
             )
 
 
@@ -309,6 +201,7 @@ def huggingface_model_generate_simple(
         to_save.append(res["sequences"][:, prompt_len:])
 
     if save_result:
+        to_save = torch.cat(to_save, dim=0)
         testing.save_test_result(
             to_save, TMP_SAVE_DIR, model_family, 0, f"huggingface{device}"
         )
@@ -317,27 +210,39 @@ def huggingface_model_generate_simple(
 if __name__ == "__main__":
     model_family = ModelFamily("llama", 7, is_critic=False)
     # os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
-    os.environ["USE_CUDA_GRAPH"] = "1" if USE_CUDA_GRAPH else "0"
-    real_test = testing.LocalMultiProcessTest(
-        8,
+    num_mp, num_pp, num_dp = 1, 1, 1
+    n_gpus = num_mp * num_pp * num_dp
+    testing.remove_file_cache(TMP_SAVE_DIR)
+
+    test1 = testing.LocalMultiProcessTest(
+        n_gpus,
         real_model_parallel_generate,
         model_family,
-        ParallelismConfig(4, 2, 1, False),
+        ParallelismConfig(num_mp, num_pp, num_dp, False),
         256,
-        32,
+        64,
         128,
         128,
-        False,
+        True,
         3,
+        True,
     )
-    real_test.launch()
+    test1.launch()
 
-    # real_gpu_test = testing.LocalMultiProcessTest(
-    #     1, real_model_generate_simple,
-    #     model_family,
-    #     256, 32, 128, 128, True, "cuda", 3
-    # )
-    # real_gpu_test.launch()
+    test2 = testing.LocalMultiProcessTest(
+        n_gpus,
+        real_model_parallel_generate,
+        model_family,
+        ParallelismConfig(num_mp, num_pp, num_dp, False),
+        256,
+        64,
+        128,
+        128,
+        True,
+        3,
+        False,
+    )
+    test2.launch()
 
     # hf_test = testing.LocalMultiProcessTest(
     #     1, huggingface_model_generate_simple,
@@ -345,4 +250,8 @@ if __name__ == "__main__":
     #     256, 32, 128, 128, True, "cuda", 16
     # )
     # hf_test.launch()
-    # testing.check_generation_consistency(TMP_SAVE_DIR, model_family, ["realcuda", "huggingfacecuda"])
+    non_cudagraph = "realcuda" + f"dp{num_dp}" + f"mp{num_mp}" + f"pp{num_pp}"
+    cuda_graph = non_cudagraph + "G"
+    testing.check_generation_consistency(
+        TMP_SAVE_DIR, model_family, [cuda_graph, non_cudagraph]
+    )

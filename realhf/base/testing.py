@@ -392,6 +392,33 @@ def shrink_mconfig(mconfig: model_api.ReaLModelConfig):
     return mconfig
 
 
+def remove_file_cache(path: str):
+    for f in os.listdir(path):
+        if f.endswith(".pkl"):
+            os.remove(os.path.join(path, f))
+
+
+def test_result_file_name(
+    identifier: str,
+    model_family: model_api.ModelFamily,
+    dp_rank: int,
+):
+    assert "-" not in identifier and "-" not in model_family._class
+    return (
+        f"{identifier}-{model_family._class}-{model_family.size}-{dp_rank}.pkl"
+    )
+
+
+def info_from_file_name(file_name: str):
+    parts = file_name.split("-")
+    assert len(parts) == 4
+    identifier = parts[0]
+    model_class = parts[1]
+    model_size = int(parts[2])
+    dp_rank = int(parts[3].split(".")[0])
+    return identifier, model_class, model_size, dp_rank
+
+
 def save_test_result(
     result: Any,
     path: str,
@@ -401,8 +428,7 @@ def save_test_result(
 ):
     os.makedirs(path, exist_ok=True)
     save_path = os.path.join(
-        path,
-        f"{identifier}-{model_family._class}-{model_family.size}-{dp_rank}.pkl",
+        path, test_result_file_name(identifier, model_family, dp_rank)
     )
     import pickle
 
@@ -415,62 +441,47 @@ def check_generation_consistency(
 ):
     import pickle
 
-    prefixs = {
-        identifier: os.path.join(
-            path, f"{identifier}-{model_family._class}-{model_family.size}"
-        )
-        for identifier in identifiers
-    }
-    paths = {identifier: [] for identifier in identifiers}
+    dp_rank_counter = {identifier: 0 for identifier in identifiers}
     for f in os.listdir(path):
         if not f.endswith(".pkl"):
             continue
-        for identifier, prefix in prefixs.items():
-            if f.startswith(prefix):
-                paths[identifier].append(f)
+        identifier, _, _, _ = info_from_file_name(f)
+        if identifier in identifiers:
+            dp_rank_counter[identifier] += 1
 
-    results = {
-        identifier: pickle.load(open(path, "rb"))
-        for identifier, path in paths.items()
-    }
+    results = {}
+    for identifier in identifiers:
+        tmp = []
+        for i in range(dp_rank_counter[identifier]):
+            p = test_result_file_name(identifier, model_family, i)
+            load_path = os.path.join(path, p)
+            t = pickle.load(open(load_path, "rb"))
+            tmp.append(t)
+        res = torch.cat(tmp, dim=0)
+        print(identifier, res.shape)
+        results[identifier] = res
+
     baseline_result = results[identifiers[0]]
     for identifier, result in results.items():
         if identifier == identifiers[0]:
             continue
-        for i, (a, b) in enumerate(zip(baseline_result, result)):
+        matched_seqs = 0
+        matched_tokens = 0
+        for i in range(len(baseline_result)):
+            a = baseline_result[i]
+            b = result[i]
             assert torch.is_tensor(a) and torch.is_tensor(b)
-            assert a.shape == b.shape and a.dim() == 2
-            bs, gen_len = a.shape
-            matched_seqs = 0
-            matched_tokens = 0
-            for j in range(bs):
-                for k in range(gen_len):
-                    if a[j, k] != b[j, k]:
-                        print(
-                            f"Mismatch at batch {i}, position {k} in {j}th sequence"
-                        )
-                        break
-                    matched_tokens += 1
-                else:
-                    # print(f"Batch {i} sequence {j} check passed")
-                    matched_seqs += 1
-            print(
-                f"Batch {i} matched {matched_seqs}/{bs} sequences and {matched_tokens}/{bs*gen_len} tokens"
-            )
-
-
-# FIXME: DEBUG
-def shape_if_not_none(t):
-    if torch.is_tensor(t):
-        return t.shape
-    return str(t)
-
-
-def print_dict(d):
-    if constants.model_parallel_rank() == 0:
-        for k, v in d.items():
-            if isinstance(v, list):
-                for i, vv in enumerate(v):
-                    print(f"{k} {i}: {shape_if_not_none(vv)}")
+            assert a.shape == b.shape and a.dim() == 1, (a.shape, b.shape)
+            gen_len = a.shape[0]
+            for j in range(gen_len):
+                if a[j] != b[j]:
+                    print(f"Mismatch at sequence {i} position {j}")
+                    break
+                matched_tokens += 1
             else:
-                print(f"{k}: {shape_if_not_none(v)}")
+                # print(f"Batch {i} sequence {j} check passed")
+                matched_seqs += 1
+        print(
+            f"{identifiers[0]} and {identifier} Matched {matched_seqs}/{len(baseline_result)} "
+            f"sequences and {matched_tokens}/{len(baseline_result) * gen_len} tokens"
+        )

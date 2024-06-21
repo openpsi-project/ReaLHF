@@ -415,6 +415,7 @@ def generate(
     while not terminate:
         # the next round of inference
         if graph is not None:
+            print("use graph")
             input_buffers["input_ids"][:bs].copy_(
                 next_tokens, non_blocking=True
             )
@@ -429,6 +430,7 @@ def generate(
             logits = output_buffers["output"][:bs].squeeze(1)
             cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
         else:
+            print("no use graph")
             ys[0].packed_input_ids = next_tokens
             ys[0].packed_position_ids = None
             x.cu_seqlens = torch.arange(

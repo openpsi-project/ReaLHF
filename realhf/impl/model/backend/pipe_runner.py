@@ -22,8 +22,6 @@ import realhf.base.constants as constants
 import realhf.base.logging as logging
 import realhf.impl.model.parallelism.pipeline_parallel.p2p as p2p
 import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
-import realhf.impl.model.parallelism.pipeline_parallel.p2p as p2p
-import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
 import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import data_api
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
@@ -38,10 +36,6 @@ from realhf.impl.model.nn.real_llm_generate import (
     genstep,
     init_kv_cache,
 )
-from realhf.impl.model.parallelism.pipeline_parallel.instruction import PipeInstruction
-from realhf.impl.model.parallelism.pipeline_parallel.static_schedule import PipeSchedule
-from realhf.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
-from realhf.impl.model.utils.padding import pad_sequence_parallel_input
 
 logger = logging.getLogger("Pipeline Runner", "benchmark")
 
