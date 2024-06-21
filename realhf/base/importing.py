@@ -1,9 +1,9 @@
-from pathlib import Path
 import importlib
 import importlib.util
 import os
 import re
 import sys
+from pathlib import Path
 
 from .logging import getLogger
 

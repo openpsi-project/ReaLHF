@@ -1,6 +1,3 @@
-from dataclasses import asdict
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
 import copy
 import dataclasses
 import enum
@@ -9,15 +6,18 @@ import json
 import os
 import time
 import traceback
+from dataclasses import asdict
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 import ray
 import ray.util.queue as rq
 
+import realhf.api.core.system_api as system_api
 from realhf.base import logging, name_resolve, names
 from realhf.base.cluster import spec as cluster_spec
-from realhf.system import load_worker, worker_base, worker_control, WORKER_TYPES
+from realhf.system import WORKER_TYPES, load_worker, worker_base, worker_control
 from realhf.system.worker_base import WorkerServerStatus as Wss
-import realhf.api.core.system_api as system_api
 
 CONNECTION_RETRY_AFTER_SECONDS = 360
 
@@ -28,9 +28,7 @@ logger = logging.getLogger("controller")
 class TrialStatus:
     experiment_name: str
     trial_name: str
-    running_workers: Dict[str, List[str]] = dataclasses.field(
-        default_factory=dict
-    )
+    running_workers: Dict[str, List[str]] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
@@ -73,9 +71,7 @@ class Controller:
         """Automatically reconnect to workers. And list all jobs to scheduler."""
         self.__control.auto_connect()
 
-    def start(
-        self, experiment: system_api.Experiment, ignore_worker_error=False
-    ):
+    def start(self, experiment: system_api.Experiment, ignore_worker_error=False):
         if ignore_worker_error:
             check_worker_status = ()
             remove_worker_status = (
@@ -88,9 +84,7 @@ class Controller:
             check_worker_status = (Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
             remove_worker_status = (Wss.COMPLETED,)
 
-        scheduling: system_api.ExperimentScheduling = (
-            experiment.scheduling_setup()
-        )
+        scheduling: system_api.ExperimentScheduling = experiment.scheduling_setup()
         setup = experiment.initial_setup()
         setup.set_worker_information(
             experiment_name=self.experiment_name, trial_name=self.trial_name
@@ -214,9 +208,7 @@ class Controller:
         left = set(self.__control.worker_names)
         num_jobs_left = len(left)
         logger.info(f"Waiting for {num_jobs_left} jobs.")
-        current_status = {
-            name: Wss.UNKNOWN for name in self.__control.worker_names
-        }
+        current_status = {name: Wss.UNKNOWN for name in self.__control.worker_names}
         while len(left) > 0:
             logger.debug(
                 f"JOBS LEFT: {[str(len([l for l in left if job_type in l])) + ' ' + job_type for job_type in set([job_id.split('/')[0] for job_id in left])]}"
@@ -275,9 +267,7 @@ class Controller:
                 ),
             )
         except TimeoutError:
-            raise RuntimeError(
-                f"Fail to interrupt workers, timeout={wait_timeout}."
-            )
+            raise RuntimeError(f"Fail to interrupt workers, timeout={wait_timeout}.")
 
 
 def run_ray_worker(
@@ -347,10 +337,7 @@ class RayController:
                     s_.count = 1
                     all_schedules.append(s_)
             assert len(all_schedules) == len(config)
-            comms = [
-                (rq.Queue(maxsize=8), rq.Queue(maxsize=8))
-                for _ in all_schedules
-            ]
+            comms = [(rq.Queue(maxsize=8), rq.Queue(maxsize=8)) for _ in all_schedules]
             jobs = [
                 ray.remote(
                     num_cpus=sch.scheduling.cpu,
@@ -385,12 +372,8 @@ class RayController:
         )
         logger.info("All Ray workers are lauched.")
 
-    def start(
-        self, experiment: system_api.Experiment, ignore_worker_error=False
-    ):
-        scheduling: system_api.ExperimentScheduling = (
-            experiment.scheduling_setup()
-        )
+    def start(self, experiment: system_api.Experiment, ignore_worker_error=False):
+        scheduling: system_api.ExperimentScheduling = experiment.scheduling_setup()
         setup = experiment.initial_setup()
         setup.set_worker_information(
             experiment_name=self.__experiment_name, trial_name=self.__trial_name
@@ -440,9 +423,7 @@ class RayController:
                     timeout=300,
                 )
             except TimeoutError:
-                raise RuntimeError(
-                    "Timeout waiting for ray cluster head address."
-                )
+                raise RuntimeError("Timeout waiting for ray cluster head address.")
             ray.init(address=ray_head_addr)
 
         logger.info("Ray initialized! Ready to run workers.")

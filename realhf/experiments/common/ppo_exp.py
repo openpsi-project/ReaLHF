@@ -1,11 +1,7 @@
 import torch
 
-from realhf.api.core.dfg import (
-    MFCDef,
-    ModelFamily,
-    ModelInterface,
-    ModelInterfaceType,
-)
+import realhf.base.logging as logging
+from realhf.api.core.dfg import MFCDef, ModelFamily, ModelInterface, ModelInterfaceType
 from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import (
@@ -15,14 +11,13 @@ from realhf.api.quickstart.device_mesh import (
 )
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import (
-    get_real_model_config,
     ModelTrainEvalConfig,
     ParallelismConfig,
+    get_real_model_config,
 )
 from realhf.base.topology import PipeModelDataParallelTopology
 from realhf.experiments.common.common import CommonExperimentConfig
 from realhf.experiments.common.utils import *
-import realhf.base.logging as logging
 
 logger = logging.getLogger("PPO exp", "colored")
 
@@ -244,40 +239,22 @@ class PPOConfig(CommonExperimentConfig):
     critic: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
-    ref: ModelTrainEvalConfig = dataclasses.field(
-        default_factory=ModelTrainEvalConfig
-    )
-    rew: ModelTrainEvalConfig = dataclasses.field(
-        default_factory=ModelTrainEvalConfig
-    )
+    ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
     # for manual allocation only
-    actor_train: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
-    critic_train: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
-    actor_gen: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
-    critic_inf: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
-    rew_inf: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
-    ref_inf: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
+    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    critic_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    critic_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
     )
 
-    ppo: PPOHyperparameters = dataclasses.field(
-        default_factory=PPOHyperparameters
-    )
+    ppo: PPOHyperparameters = dataclasses.field(default_factory=PPOHyperparameters)
 
     def __post_init__(self):
         if self.is_sft_lora or self.sft_lora_path is not None:
@@ -555,9 +532,7 @@ class PPOConfig(CommonExperimentConfig):
                 device_mesh=DeviceMesh(
                     n_nodes=1,
                     n_gpus_per_node=8,
-                    mapping=np.array(
-                        [[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32
-                    ),
+                    mapping=np.array([[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32),
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(
@@ -572,9 +547,7 @@ class PPOConfig(CommonExperimentConfig):
                 device_mesh=DeviceMesh(
                     n_nodes=1,
                     n_gpus_per_node=8,
-                    mapping=np.array(
-                        [[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32
-                    ),
+                    mapping=np.array([[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32),
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(
@@ -586,9 +559,7 @@ class PPOConfig(CommonExperimentConfig):
             )
         else:
             actor_train_n_nodes = min(
-                math.ceil(
-                    self.n_nodes * actor_size / (actor_size + critic_size)
-                ),
+                math.ceil(self.n_nodes * actor_size / (actor_size + critic_size)),
                 self.n_nodes - 1,
             )
             critic_train_n_nodes = self.n_nodes - actor_train_n_nodes
@@ -651,9 +622,7 @@ class PPOConfig(CommonExperimentConfig):
                 device_mesh=DeviceMesh(
                     n_nodes=1,
                     n_gpus_per_node=8,
-                    mapping=np.array(
-                        [[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32
-                    ),
+                    mapping=np.array([[1, 1, 1, 1, 0, 0, 0, 0]], dtype=np.int32),
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(
@@ -668,9 +637,7 @@ class PPOConfig(CommonExperimentConfig):
                 device_mesh=DeviceMesh(
                     n_nodes=1,
                     n_gpus_per_node=8,
-                    mapping=np.array(
-                        [[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32
-                    ),
+                    mapping=np.array([[0, 0, 0, 0, 1, 1, 1, 1]], dtype=np.int32),
                     global_mesh_name=self.nodelist,
                 ),
                 parallel=ParallelismConfig(

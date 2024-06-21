@@ -45,9 +45,7 @@ def copy_tensor_model_parallel_attributes(destination_tensor, source_tensor):
 
     def maybe_copy(attribute):
         if hasattr(source_tensor, attribute):
-            setattr(
-                destination_tensor, attribute, getattr(source_tensor, attribute)
-            )
+            setattr(destination_tensor, attribute, getattr(source_tensor, attribute))
 
     for attribute in _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS:
         maybe_copy(attribute)
@@ -201,9 +199,7 @@ def gather_split_1d_tensor(tensor):
     # as opposed to torch.distributed.all_gather for efficiency reasons.
     # This API calls directly NCCL all-gather versus the former does
     # internal copies and can potentially cause slow down.
-    torch.distributed._all_gather_base(
-        gathered, tensor, group=model_parallel_group()
-    )
+    torch.distributed._all_gather_base(gathered, tensor, group=model_parallel_group())
     return gathered
 
 

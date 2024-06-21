@@ -1,8 +1,8 @@
-from asyncio.base_events import _run_until_complete_cb
 import asyncio
 import dataclasses
 import sys
 import threading
+from asyncio.base_events import _run_until_complete_cb
 
 
 @dataclasses.dataclass
@@ -38,9 +38,7 @@ def setup_run_until_complete(
         finalizer=loop._asyncgen_finalizer_hook,
     )
     asyncio.events._set_running_loop(loop)
-    return AsyncRunUntilCompleteContext(
-        loop=loop, future=future, new_task=new_task
-    )
+    return AsyncRunUntilCompleteContext(loop=loop, future=future, new_task=new_task)
 
 
 def teardown_run_util_complete(ctx: AsyncRunUntilCompleteContext):

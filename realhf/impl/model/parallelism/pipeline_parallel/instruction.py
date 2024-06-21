@@ -1,5 +1,5 @@
-from typing import *
 import sys
+from typing import *
 
 
 class PipeInstruction:

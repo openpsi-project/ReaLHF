@@ -1,22 +1,15 @@
-from collections import defaultdict
-from typing import *
 import dataclasses
 import itertools
 import os
 import socket
+from collections import defaultdict
+from typing import *
 
 import torch.distributed
 
 from realhf.api.core import system_api
 from realhf.api.core.config import ModelName
-from realhf.base import (
-    constants,
-    gpu_utils,
-    name_resolve,
-    names,
-    network,
-    topology,
-)
+from realhf.base import constants, gpu_utils, name_resolve, names, network, topology
 
 
 @dataclasses.dataclass
@@ -37,18 +30,14 @@ def filter_match_mwids(
     if len(conditions) == 0:
         mwids_this_model = [
             msid2mwid[
-                system_api.ModelShardID.from_parallelism_rank(
-                    model_name, topo, j
-                )
+                system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)
             ]
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
             msid2mwid[
-                system_api.ModelShardID.from_parallelism_rank(
-                    model_name, topo, j
-                )
+                system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)
             ]
             for j in topo.filter_match(**conditions)
         ]
@@ -61,9 +50,7 @@ def setup_global_comm(
     expr_name: str,
     trial_name: str,
     worker_index: int,
-    model_topos: Optional[
-        Dict[str, topology.PipeModelDataParallelTopology]
-    ] = None,
+    model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
     msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
     world_size: Optional[int] = None,  # for testing only
     global_rank: Optional[int] = None,  # for testing only
@@ -94,9 +81,7 @@ def setup_global_comm(
     if model_topos is not None:
         assert msid2mwid is not None
         for model_name, topo in model_topos.items():
-            mw_ranks[model_name] = filter_match_mwids(
-                model_name, topo, msid2mwid
-            )
+            mw_ranks[model_name] = filter_match_mwids(model_name, topo, msid2mwid)
 
     if (
         "GPU_DEVICES_ISOLATED" not in os.environ
@@ -134,9 +119,7 @@ def setup_global_comm(
         init_method=ddp_init_address,
         backend="nccl",
     )
-    torch.cuda.set_device(
-        0
-    )  # initialize CUDA here with only a single visible device
+    torch.cuda.set_device(0)  # initialize CUDA here with only a single visible device
     # This environment variable is used by DeepSpeed.
     os.environ["LOCAL_RANK"] = "0"
 
@@ -146,12 +129,8 @@ def setup_global_comm(
 
     model_groups = {}
     for model_name, ranks in mw_ranks.items():
-        model_groups[model_name] = topology.new_or_get_group(
-            ranks, backend="nccl"
-        )
-        constants.set_parallelism_group(
-            model_name, model_groups[model_name], ranks
-        )
+        model_groups[model_name] = topology.new_or_get_group(ranks, backend="nccl")
+        constants.set_parallelism_group(model_name, model_groups[model_name], ranks)
 
     self_group = None
     for i in range(world_size):

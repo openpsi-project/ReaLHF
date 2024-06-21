@@ -1,9 +1,9 @@
-from abc import ABC
-from typing import Callable, List
 import dataclasses
 import math
 import threading
 import time
+from abc import ABC
+from typing import Callable, List
 
 INFINITE_DURATION = 60 * 60 * 24 * 365 * 1000
 
@@ -200,10 +200,7 @@ class ChainedScheduler:
         for i in range(len(self.schedulers) - 1):
             # Float point err 1e-8.
             if (
-                abs(
-                    self.schedulers[i + 1].get(0)
-                    - self.schedulers[i].final_value
-                )
+                abs(self.schedulers[i + 1].get(0) - self.schedulers[i].final_value)
                 > 1e-8
             ):
                 raise ValueError(

@@ -8,8 +8,8 @@ import re
 import socket
 import subprocess
 
-from omegaconf import OmegaConf
 import torch
+from omegaconf import OmegaConf
 
 multiprocessing.set_start_method("spawn", force=True)
 
@@ -17,14 +17,7 @@ from realhf.api.quickstart.entrypoint import (
     QUICKSTART_CONFIG_CLASSES,
     QUICKSTART_EXPR_CACHE_PATH,
 )
-from realhf.base import (
-    cluster,
-    gpu_utils,
-    importing,
-    logging,
-    name_resolve,
-    names,
-)
+from realhf.base import cluster, gpu_utils, importing, logging, name_resolve, names
 
 RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
@@ -38,9 +31,7 @@ def _patch_external_impl(exp_name, trial_name):
             target_cache_name = f"{exp_name}_{trial_name}.json"
             if exp_cache != target_cache_name:
                 continue
-            cache_file = os.path.join(
-                QUICKSTART_EXPR_CACHE_PATH, target_cache_name
-            )
+            cache_file = os.path.join(QUICKSTART_EXPR_CACHE_PATH, target_cache_name)
             with open(cache_file, "r") as f:
                 cache = json.load(f)
             usercode_path = cache["usercode_path"]
@@ -61,9 +52,7 @@ def main_worker(args):
     constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
     _patch_external_impl(args.experiment_name, args.trial_name)
 
-    worker_index_start = (
-        args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
-    )
+    worker_index_start = args.jobstep_id * args.wprocs_per_jobstep + args.wproc_offset
     worker_index_end = min(
         worker_index_start + args.wprocs_per_jobstep,
         args.wprocs_in_job + args.wproc_offset,
@@ -88,9 +77,7 @@ def main_worker(args):
         args.trial_name,
     )
     if os.environ.get("CUDA_VISIBLE_DEVICES", None):
-        logger.debug(
-            "CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"]
-        )
+        logger.debug("CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"])
 
     # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
     # profiler.import_profiler_registers()
@@ -183,9 +170,7 @@ def main_controller(args):
             addr = match.group(1)
             logger.info("Found ray address: '%s'", addr)
         else:
-            raise RuntimeError(
-                f"Address not found in ray start output: {output}."
-            )
+            raise RuntimeError(f"Address not found in ray start output: {output}.")
         ray_addr_name = names.ray_cluster(
             args.experiment_name, args.trial_name, "address"
         )
@@ -212,9 +197,7 @@ def main_controller(args):
 
 
 def main_ray(args):
-    ray_addr_name = names.ray_cluster(
-        args.experiment_name, args.trial_name, "address"
-    )
+    ray_addr_name = names.ray_cluster(args.experiment_name, args.trial_name, "address")
     try:
         address = name_resolve.wait(ray_addr_name, timeout=RAY_HEAD_WAIT_TIME)
     except TimeoutError:
@@ -223,9 +206,7 @@ def main_ray(args):
 
     cmd = f"ray start {' '.join(ray_flags)}"
     _ = subprocess.check_output(cmd, shell=True).decode("ascii")
-    logger.info(
-        f"Successfully launched nodes for {args.worker_type} in Ray cluster."
-    )
+    logger.info(f"Successfully launched nodes for {args.worker_type} in Ray cluster.")
 
     host_ip = socket.gethostbyname(socket.gethostname())
     name_resolve.add(

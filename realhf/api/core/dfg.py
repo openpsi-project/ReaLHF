@@ -1,23 +1,14 @@
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
 import collections
 import dataclasses
 import enum
 import itertools
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from realhf.api.core.config import ModelBackend, ModelFamily, ModelName
 import realhf.base.logging as logging
 import realhf.base.namedarray as namedarray
+from realhf.api.core.config import ModelBackend, ModelFamily, ModelName
 
 logger = logging.getLogger("DataFlowGraph", "benchmark")
 
@@ -116,13 +107,9 @@ class MFCDef:
     max_n_seqs: int
 
     input_data: List[str] = dataclasses.field(default_factory=lambda: [])
-    input_key_remap: Dict[str, str] = dataclasses.field(
-        default_factory=lambda: {}
-    )
+    input_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
     output_data: List[str] = dataclasses.field(default_factory=lambda: [])
-    output_key_remap: Dict[str, str] = dataclasses.field(
-        default_factory=lambda: {}
-    )
+    output_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
     log_return_value: bool = False
 
     min_n_seqs_per_dp: int = 1
@@ -141,14 +128,10 @@ class MFCDef:
     children: List[str] = dataclasses.field(default_factory=lambda: [])
 
     parent_rpcs: List["MFCDef"] = dataclasses.field(default_factory=lambda: [])
-    children_rpcs: List["MFCDef"] = dataclasses.field(
-        default_factory=lambda: []
-    )
+    children_rpcs: List["MFCDef"] = dataclasses.field(default_factory=lambda: [])
 
     # data key -> model name
-    data_producers: Dict[str, ModelName] = dataclasses.field(
-        default_factory=lambda: {}
-    )
+    data_producers: Dict[str, ModelName] = dataclasses.field(default_factory=lambda: {})
     # data key -> rpc names
     data2required_rpc_names: Dict[str, List[str]] = dataclasses.field(
         default_factory=lambda: {}
@@ -277,9 +260,7 @@ def build_graph(
             logger.info(
                 f"Dependency: {rpc.name} <- { {x.name: deps for x, deps in zip(rpcs, edges[i]) if deps} }."
             )
-    for rpc, p, c, pr, cr in zip(
-        rpcs, parents, children, parent_rpcs, children_rpcs
-    ):
+    for rpc, p, c, pr, cr in zip(rpcs, parents, children, parent_rpcs, children_rpcs):
         rpc.parents = p
         rpc.children = c
         rpc.parent_rpcs = pr
@@ -287,11 +268,7 @@ def build_graph(
 
     for rpc in rpcs:
         rpc.max_min_flow_seqs = max(
-            [
-                r.min_n_seqs
-                for r in rpcs
-                if r.model_name.role == rpc.model_name.role
-            ]
+            [r.min_n_seqs for r in rpcs if r.model_name.role == rpc.model_name.role]
         )
         rpc.data_producers = data_producers
         rpc.data2required_rpc_names = data2required_rpc_names

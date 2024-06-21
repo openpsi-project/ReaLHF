@@ -1,7 +1,7 @@
-from collections import defaultdict
-from typing import *
 import dataclasses
 import itertools
+from collections import defaultdict
+from typing import *
 
 import torch.distributed
 
@@ -29,9 +29,7 @@ class DataTransferInfo:
 
 
 def setup_data_transfer(
-    model_topos: Optional[
-        Dict[str, topology.PipeModelDataParallelTopology]
-    ] = None,
+    model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
     msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
     data_transfer_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
 ) -> DataTransferInfo:
@@ -126,9 +124,7 @@ def derive_data_transfer_plan(
         producer_mapping = producer_mappings[(producer_name, k)]
 
         # partition mapping starts from zero, which is different from buffer indices
-        repart_strat = pipeline_repartition_strategy(
-            producer_mapping, consumer_mapping
-        )
+        repart_strat = pipeline_repartition_strategy(producer_mapping, consumer_mapping)
 
         for (dp_i, dp_j), comm_slots in repart_strat.items():
             if len(comm_slots) == 0:

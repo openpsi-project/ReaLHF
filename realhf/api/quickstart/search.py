@@ -1,5 +1,5 @@
-from typing import List, Optional
 import dataclasses
+from typing import List, Optional
 
 from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.device_mesh import DeviceMesh

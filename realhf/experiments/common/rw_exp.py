@@ -1,5 +1,5 @@
-from typing import List
 import dataclasses
+from typing import List
 
 from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
 from realhf.api.core.system_api import *
@@ -7,9 +7,9 @@ from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import (
-    get_real_model_config,
     ModelTrainEvalConfig,
     OptimizerConfig,
+    get_real_model_config,
 )
 from realhf.experiments.common.common import CommonExperimentConfig
 
@@ -57,9 +57,7 @@ class RWConfig(CommonExperimentConfig):
     model: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
-    allocation: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
+    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
     dataset: PairedComparisonDatasetConfig = dataclasses.field(
         default_factory=PairedComparisonDatasetConfig

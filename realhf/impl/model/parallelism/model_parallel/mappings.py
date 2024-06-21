@@ -278,12 +278,8 @@ def scatter_to_sequence_parallel_region(input_):
     return _ScatterToSequenceParallelRegion.apply(input_)
 
 
-def gather_from_sequence_parallel_region(
-    input_, model_parallel_output_grad=True
-):
-    return _GatherFromSequenceParallelRegion.apply(
-        input_, model_parallel_output_grad
-    )
+def gather_from_sequence_parallel_region(input_, model_parallel_output_grad=True):
+    return _GatherFromSequenceParallelRegion.apply(input_, model_parallel_output_grad)
 
 
 def reduce_scatter_to_sequence_parallel_region(input_):

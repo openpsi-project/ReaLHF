@@ -1,17 +1,17 @@
 # Copied from Megatron-LM: https://github.com/NVIDIA/Megatron-LM
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
-from typing import Callable, List, Optional, Tuple, Union
 import itertools
 import os
 import warnings
+from typing import Callable, List, Optional, Tuple, Union
 
-from torch.cuda.amp import custom_bwd, custom_fwd
-from torch.nn.parameter import Parameter
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
+from torch.cuda.amp import custom_bwd, custom_fwd
+from torch.nn.parameter import Parameter
 
 from realhf.base import constants
 
@@ -24,10 +24,10 @@ from .mappings import (
     scatter_to_tensor_model_parallel_region,
 )
 from .utils import (
+    VocabUtility,
     _initialize_affine_weight_gpu,
     divide,
     set_tensor_model_parallel_attributes,
-    VocabUtility,
 )
 
 _grad_accum_fusion_available = True
@@ -51,9 +51,7 @@ def get_activation_fn(activation_function: str) -> Callable:
     elif activation_function == "silu":
         return nn.SiLU()
     else:
-        raise NotImplementedError(
-            'Only "gelu" activation function is available.'
-        )
+        raise NotImplementedError('Only "gelu" activation function is available.')
 
 
 class ParallelEmbedding(torch.nn.Module):
@@ -490,9 +488,7 @@ def linear_with_grad_accumulation_and_async_allreduce(
 linear_with_grad_accumulation_and_async_allreduce.warned = False
 
 
-class MergedLinearWithGradAccumulationAndAsyncCommunication(
-    torch.autograd.Function
-):
+class MergedLinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
 
     @staticmethod
     @custom_fwd
@@ -661,9 +657,7 @@ class MergedLinearWithGradAccumulationAndAsyncCommunication(
             gws = []
             for w, g in zip(weights, grads):
                 gws.append(g.t().matmul(total_input))
-        gbs = [
-            g.sum(dim=0) if use_bias[i] else None for i, g in enumerate(grads)
-        ]
+        gbs = [g.sum(dim=0) if use_bias[i] else None for i, g in enumerate(grads)]
 
         if ctx.sequence_parallel:
             handle.wait()
@@ -717,9 +711,7 @@ def merged_linear_with_grad_accumulation_and_async_allreduce(
                     "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
                     "maximum speedup"
                 )
-                merged_linear_with_grad_accumulation_and_async_allreduce.warned = (
-                    True
-                )
+                merged_linear_with_grad_accumulation_and_async_allreduce.warned = True
 
             if async_grad_allreduce:
                 warnings.warn(
@@ -727,9 +719,7 @@ def merged_linear_with_grad_accumulation_and_async_allreduce(
                     "environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1 for "
                     "maximum speedup"
                 )
-                merged_linear_with_grad_accumulation_and_async_allreduce.warned = (
-                    True
-                )
+                merged_linear_with_grad_accumulation_and_async_allreduce.warned = True
 
     return MergedLinearWithGradAccumulationAndAsyncCommunication.apply(*args)
 
@@ -815,9 +805,7 @@ class ColumnParallelLinear(torch.nn.Module):
 
         if bias:
             self.bias = Parameter(
-                torch.empty(
-                    self.output_size_per_partition, device=device, dtype=dtype
-                )
+                torch.empty(self.output_size_per_partition, device=device, dtype=dtype)
             )
             set_tensor_model_parallel_attributes(self.bias, True, 0, stride)
             # Always initialize bias to zero.
@@ -854,19 +842,13 @@ class ColumnParallelLinear(torch.nn.Module):
             - bias
         """
         bias = self.bias if not self.skip_bias_add else None
-        if (
-            self.async_tensor_model_parallel_allreduce
-            and constants.sequence_parallel()
-        ):
+        if self.async_tensor_model_parallel_allreduce and constants.sequence_parallel():
             raise RuntimeError(
                 "`async_tensor_model_parallel_allreduce` and `sequence_parallel` "
                 "cannot be enabled at the same time."
             )
 
-        if (
-            self.async_tensor_model_parallel_allreduce
-            or constants.sequence_parallel()
-        ):
+        if self.async_tensor_model_parallel_allreduce or constants.sequence_parallel():
             input_parallel = input_
         else:
             input_parallel = copy_to_tensor_model_parallel_region(input_)
@@ -1020,9 +1002,7 @@ class RowParallelLinear(torch.nn.Module):
 
         # All-reduce across all the partitions.
         if constants.sequence_parallel():
-            output_ = reduce_scatter_to_sequence_parallel_region(
-                output_parallel
-            )
+            output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
         else:
             output_ = reduce_from_tensor_model_parallel_region(output_parallel)
         output = output_ + self.bias if self.bias is not None else output_
@@ -1081,9 +1061,7 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
             group=constants.model_parallel_group(),
         )
         # Subtract the maximum value.
-        vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(
-            dim=-1
-        )
+        vocab_parallel_logits = vocab_parallel_logits - logits_max.unsqueeze(dim=-1)
 
         # Get the partition's vocab indecies
         get_vocab_range = VocabUtility.vocab_range_from_per_partition_vocab_size
@@ -1173,17 +1151,13 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
         grad_2d = grad_input.view(-1, partition_vocab_size)
 
         # Add the gradient from matching classes.
-        arange_1d = torch.arange(
-            start=0, end=grad_2d.size()[0], device=grad_2d.device
-        )
+        arange_1d = torch.arange(start=0, end=grad_2d.size()[0], device=grad_2d.device)
 
         softmax_update = 1.0 - target_mask.view(-1).float()
 
         if label_smoothing > 0:
             smoothing = label_smoothing * vocab_size / (vocab_size - 1)
-            grad_2d[arange_1d, masked_target_1d] -= (
-                1.0 - smoothing
-            ) * softmax_update
+            grad_2d[arange_1d, masked_target_1d] -= (1.0 - smoothing) * softmax_update
             average_grad = 1 / vocab_size
             grad_2d[arange_1d, :] -= smoothing * average_grad
         else:
@@ -1195,9 +1169,7 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
         return grad_input, None, None
 
 
-def vocab_parallel_cross_entropy(
-    vocab_parallel_logits, target, label_smoothing=0.0
-):
+def vocab_parallel_cross_entropy(vocab_parallel_logits, target, label_smoothing=0.0):
     """
     Performs cross entropy loss when logits are split across tensor parallel ranks
 

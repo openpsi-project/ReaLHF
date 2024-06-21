@@ -1,25 +1,20 @@
-from collections import defaultdict
-from typing import Dict, List, Literal, Optional, Tuple
 import fcntl
 import re
 import subprocess
 import time
+from collections import defaultdict
+from typing import Dict, List, Literal, Optional, Tuple
 
+import realhf.base.logging as logging
 from realhf.base.cluster import spec as cluster_spec
 from realhf.base.constants import SLURM_LOCK_FILE_NAME as LOCK_FILE_NAME
-from realhf.scheduler.client import (
-    JobException,
-    JobInfo,
-    JobState,
-    SchedulerClient,
-)
+from realhf.scheduler.client import JobException, JobInfo, JobState, SchedulerClient
 from realhf.scheduler.slurm.utils import (
-    allocate_resources,
     SlurmLaunchInfo,
     SlurmResource,
     SlurmResourceNotEnoughException,
+    allocate_resources,
 )
-import realhf.base.logging as logging
 
 logger = logging.getLogger("Slurm-scheduler")
 
@@ -93,9 +88,7 @@ class SlurmSchedulerClient(SchedulerClient):
             launch_info.slurm_name in self.__pending_jobs
             or launch_info.slurm_name in self.__committed_jobs
         ):
-            raise ValueError(
-                f"job name {launch_info.slurm_name} already existed."
-            )
+            raise ValueError(f"job name {launch_info.slurm_name} already existed.")
 
         if launch_info.multiprog:
             launch_info = self.__resolve_multiprog_file(launch_info)
@@ -104,9 +97,7 @@ class SlurmSchedulerClient(SchedulerClient):
         self.__wprocs_counter[worker_type] += count
 
         self.__pending_jobs[launch_info.slurm_name] = launch_info
-        logger.info(
-            f"Registered Slurm job {launch_info.slurm_name} to scheduler."
-        )
+        logger.info(f"Registered Slurm job {launch_info.slurm_name} to scheduler.")
 
     def __resolve_multiprog_file(self, launch_info: SlurmLaunchInfo):
         worker_type = launch_info.worker_type
@@ -118,9 +109,7 @@ class SlurmSchedulerClient(SchedulerClient):
             wprocs_in_job=launch_info.wprocs_in_job,
             wproc_offset=self.__wprocs_counter[worker_type],
         )
-        launch_info.multiprog_content = (
-            f"0-{launch_info.n_jobsteps - 1} {cmd}\n"
-        )
+        launch_info.multiprog_content = f"0-{launch_info.n_jobsteps - 1} {cmd}\n"
         return launch_info
 
     def __allocate_and_commit_pending_jobs(self):
@@ -149,10 +138,7 @@ class SlurmSchedulerClient(SchedulerClient):
                 )
                 fcntl.flock(fp, fcntl.LOCK_UN)
                 time.sleep(SCHEDULING_RETRY_INTERVAL_SECONDS)
-                if (
-                    time.monotonic() - start_time
-                    > SCHEDULING_TIMEOUT_MAX_SECONDS
-                ):
+                if time.monotonic() - start_time > SCHEDULING_TIMEOUT_MAX_SECONDS:
                     raise TimeoutError(
                         f"Timeout waiting for {self.run_name} to schedule."
                     )

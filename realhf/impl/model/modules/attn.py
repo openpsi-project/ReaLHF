@@ -4,15 +4,13 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 
-from realhf.impl.model.parallelism.model_parallel.modules import (
-    RowParallelLinear,
-)
+import realhf.base.logging as logging
+from realhf.impl.model.parallelism.model_parallel.modules import RowParallelLinear
 from realhf.impl.model.utils.functional import (
     apply_rotary_varlen,
     compute_varlen_position_indices,
     torch_attn_func,
 )
-import realhf.base.logging as logging
 
 from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
@@ -154,9 +152,7 @@ class CausalSelfAttentionLayer(nn.Module):
         # NOTE: we must ensure the passed-in argument is an interger
         # if we convert the argument to implicitly when calling rotary embedding or flash-attn,
         # aten::item will be called, which will cause a device-host sync and slow down performance.
-        assert max_seqlen is None or isinstance(max_seqlen, int), type(
-            max_seqlen
-        )
+        assert max_seqlen is None or isinstance(max_seqlen, int), type(max_seqlen)
         assert cu_seqlens is None or cu_seqlens.dtype == torch.int32
 
         # default upcast, scale
@@ -175,12 +171,8 @@ class CausalSelfAttentionLayer(nn.Module):
             rotary_cache_len = max_seqlen
             if k_cache is not None and str(q.device) == "cpu":
                 rotary_cache_len = k_cache.shape[1]
-            self.rotary_emb._update_cos_sin_cache(
-                rotary_cache_len, q.device, q.dtype
-            )
-            rotary_indices = compute_varlen_position_indices(
-                q.shape[0], cu_seqlens
-            )
+            self.rotary_emb._update_cos_sin_cache(rotary_cache_len, q.device, q.dtype)
+            rotary_indices = compute_varlen_position_indices(q.shape[0], cu_seqlens)
             qk = apply_rotary_varlen(
                 torch.cat([q, k], dim=-2),
                 cos=self.rotary_emb._cos_cached,

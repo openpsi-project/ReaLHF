@@ -1,5 +1,5 @@
-from contextlib import closing
 import socket
+from contextlib import closing
 
 
 def find_free_port():

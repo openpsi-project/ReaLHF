@@ -1,4 +1,3 @@
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 import collections
 import dataclasses
 import functools
@@ -6,6 +5,7 @@ import inspect
 import json
 import os
 import time
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import torch.utils.data
@@ -73,9 +73,7 @@ def load_shuffle_split_dataset(
             with open(dataset_path, "r") as f:
                 data = json.load(f)
         else:
-            raise NotImplementedError(
-                f"Unkown dataset extension: {dataset_path}"
-            )
+            raise NotImplementedError(f"Unkown dataset extension: {dataset_path}")
     else:
         assert dataset_builder is not None
         data = dataset_builder()
@@ -85,9 +83,7 @@ def load_shuffle_split_dataset(
         util.seed, datasize_per_rank * util.world_size
     )
     subset_indices = shuffle_indices[
-        util.ddp_rank
-        * datasize_per_rank : (util.ddp_rank + 1)
-        * datasize_per_rank
+        util.ddp_rank * datasize_per_rank : (util.ddp_rank + 1) * datasize_per_rank
     ]
     data: List[Dict[str, str]] = [data[i] for i in subset_indices]
 
@@ -113,9 +109,7 @@ def make_dataset(
     seed: int,
     ddp_rank: int,
     world_size: int,
-    tokenizer_or_tokenizer_name: Union[
-        transformers.PreTrainedTokenizerFast, str
-    ],
+    tokenizer_or_tokenizer_name: Union[transformers.PreTrainedTokenizerFast, str],
     experiment_name: str,
     trial_name: str,
     cache_root: Optional[str] = None,
@@ -141,9 +135,9 @@ def make_dataset(
         return dataset_cls(util=util, **cfg.args)
 
     # Create and check cache path.
-    if not cache_root.startswith(
-        cluster_spec.fileroot
-    ) and not cache_root.startswith("/home"):
+    if not cache_root.startswith(cluster_spec.fileroot) and not cache_root.startswith(
+        "/home"
+    ):
         raise ValueError(
             f"Data cache path {cache_root} should be /home or under {cluster_spec.fileroot}."
         )
@@ -166,19 +160,13 @@ def make_dataset(
 
     tik = time.perf_counter()
     if not cache_found:
-        logger.info(
-            f"No data cache found for rank {ddp_rank}. Create it from scratch."
-        )
-        dataset = ALL_DATASET_CLASSES[cfg.type_](
-            seed, ddp_rank, world_size, **cfg.args
-        )
+        logger.info(f"No data cache found for rank {ddp_rank}. Create it from scratch.")
+        dataset = ALL_DATASET_CLASSES[cfg.type_](seed, ddp_rank, world_size, **cfg.args)
         torch.save(dataset, os.path.join(output_path, fname))
     else:
         logger.info(f"Rank {ddp_rank} find existing data cache, load it.")
         dataset = torch.load(os.path.join(output_path, fname))
-    logger.info(
-        f"Dataset creation/loading time: {time.perf_counter() - tik:.3f}s"
-    )
+    logger.info(f"Dataset creation/loading time: {time.perf_counter() - tik:.3f}s")
 
     return dataset
 
@@ -237,9 +225,7 @@ def split_sequences(
 ) -> List[namedarray.NamedArray]:
     # FIXME: remove cu_seqlens here
     if src.metadata.get("seqlens", None) is None:
-        raise ValueError(
-            "seqlens must be in the metadata of the input namedarray."
-        )
+        raise ValueError("seqlens must be in the metadata of the input namedarray.")
 
     seqlens = src.metadata["seqlens"]
 
@@ -308,9 +294,7 @@ def split_sequences(
                 "kl_rewards",
                 "returns",
             ]:
-                sp[k] = v[
-                    short1offsets[i] : short1offsets[i] + short1batch_seqlens[i]
-                ]
+                sp[k] = v[short1offsets[i] : short1offsets[i] + short1batch_seqlens[i]]
             elif not torch.is_tensor(src[k]):
                 # for constant, preserve value for each splitted instance
                 sp[k] = src[k]
@@ -327,14 +311,10 @@ def split_sequences(
                 dtype=torch.int32,
                 device=src["cu_seqlens"].device,
             )
-            x["cu_seqlens"] = torch.nn.functional.pad(
-                slens.cumsum(dim=0), (1, 0)
-            ).int()
+            x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
 
     if "prompt_cu_seqlens" in src.keys():
-        raw_prompt_lens = (
-            src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
-        )
+        raw_prompt_lens = src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
         all_prompt_lens: List[torch.IntTensor] = [
             raw_prompt_lens[start:end].int() for start, end in partitions
         ]
@@ -363,9 +343,7 @@ def gather_sequences(src: List[namedarray.NamedArray]) -> namedarray.NamedArray:
     seqlens = []
     for x in src:
         if x.metadata.get("seqlens", None) is None:
-            raise ValueError(
-                "seqlens must be in the metadata of the input namedarray."
-            )
+            raise ValueError("seqlens must be in the metadata of the input namedarray.")
         seqlens += x.metadata["seqlens"]
 
     res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
@@ -374,16 +352,11 @@ def gather_sequences(src: List[namedarray.NamedArray]) -> namedarray.NamedArray:
         slens = torch.cat(
             [x["cu_seqlens"][1:] - x["cu_seqlens"][:-1] for x in src], dim=0
         )
-        res["cu_seqlens"] = torch.nn.functional.pad(
-            slens.cumsum(dim=0), (1, 0)
-        ).int()
+        res["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
 
     if "prompt_cu_seqlens" in src[0]:
         slens = torch.cat(
-            [
-                x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1]
-                for x in src
-            ],
+            [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src],
             dim=0,
         )
         res["prompt_cu_seqlens"] = torch.nn.functional.pad(

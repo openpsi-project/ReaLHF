@@ -1,18 +1,18 @@
-from collections import defaultdict
-from typing import *
 import dataclasses
 import itertools
 import json
 import time
+from collections import defaultdict
+from typing import *
 
 import torch
 import torch.distributed
 
-from realhf.api.core.config import ModelFamily, ModelName
-from realhf.api.core.model_api import ReaLModelConfig
 import realhf.api.core.system_api as system_api
 import realhf.base.constants as constants
 import realhf.base.topology as topology
+from realhf.api.core.config import ModelFamily, ModelName
+from realhf.api.core.model_api import ReaLModelConfig
 
 
 def bcast_cost(
@@ -41,11 +41,11 @@ def compute_cost(
     set_interval_cost: float,
 ) -> int:
     from realhf.impl.model.comm.param_realloc import (
-        _create_param_realloc_groups,
-        _derive_reparallelize_comm_plan,
         ParamReallocInfo,
         ReparallelizeReceiverStep,
         ReparallelizeSenderStep,
+        _create_param_realloc_groups,
+        _derive_reparallelize_comm_plan,
     )
 
     param_sync_groups = {}
@@ -54,15 +54,11 @@ def compute_cost(
     msid2mwid = {}
     for i in range(from_topo.world_size()):
         msid2mwid[
-            system_api.ModelShardID.from_parallelism_rank(
-                from_model_name, from_topo, i
-            )
+            system_api.ModelShardID.from_parallelism_rank(from_model_name, from_topo, i)
         ] = i
     for i in range(to_topo.world_size()):
         msid2mwid[
-            system_api.ModelShardID.from_parallelism_rank(
-                to_model_name, to_topo, i
-            )
+            system_api.ModelShardID.from_parallelism_rank(to_model_name, to_topo, i)
         ] = (i + world_size - to_topo.world_size())
     _create_param_realloc_groups(
         from_topo,
@@ -94,22 +90,15 @@ def compute_cost(
     for _rank in range(world_size):
         cost = comm_volume = bcast_cnt = 0
         for step in comm_plan:
-            if (
-                isinstance(step, ReparallelizeReceiverStep)
-                and step.rank == _rank
-            ):
+            if isinstance(step, ReparallelizeReceiverStep) and step.rank == _rank:
                 if step.rank != step.src:
-                    cost += bcast_cost(
-                        step.param_size, bw, step.src, step.dst_ranks
-                    )
+                    cost += bcast_cost(step.param_size, bw, step.src, step.dst_ranks)
                     comm_volume += step.param_size
                     bcast_cnt += 1
                 cost += set_interval_cost
             if isinstance(step, ReparallelizeSenderStep) and step.rank == _rank:
                 if step.group is not None:
-                    cost += bcast_cost(
-                        step.param_size, bw, step.rank, step.dst_ranks
-                    )
+                    cost += bcast_cost(step.param_size, bw, step.rank, step.dst_ranks)
                     bcast_cnt += 1
         max_cost = max(max_cost, cost)
         max_comm_volume = max(max_comm_volume, comm_volume)
@@ -156,12 +145,8 @@ def dump_table(
                 decompose_to_three_factors(a), decompose_to_three_factors(b)
             )
         )
-        all_configs = list(
-            filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs)
-        )
-        all_configs = list(
-            filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs)
-        )
+        all_configs = list(filter(lambda x: x[0][1] <= 8 and x[1][1] <= 8, all_configs))
+        all_configs = list(filter(lambda x: x[0][2] <= 8 and x[1][2] <= 8, all_configs))
         all_configs = list(
             filter(
                 lambda x: x[0][1] in [1, 2, 4, 8] and x[1][1] in [1, 2, 4, 8],
@@ -185,9 +170,7 @@ def dump_table(
             from_topo = topology.PipeModelDataParallelTopology(
                 *from_pp_mp_dp, False, False
             )
-            to_topo = topology.PipeModelDataParallelTopology(
-                *to_pp_mp_dp, False, False
-            )
+            to_topo = topology.PipeModelDataParallelTopology(*to_pp_mp_dp, False, False)
             assert world_size >= from_topo.world_size()
             assert world_size >= to_topo.world_size()
 
@@ -211,9 +194,7 @@ def dump_table(
             #     time.perf_counter() - tik,
             # )
             res[
-                hash_tuple_into_str(
-                    (model_family.size, *from_pp_mp_dp, *to_pp_mp_dp)
-                )
+                hash_tuple_into_str((model_family.size, *from_pp_mp_dp, *to_pp_mp_dp))
             ] = int(cost * 1000 * 1000)
         print(
             f"Time for model size {model_family.size} {a} -> {b} {rank}/{parallel}: "
@@ -231,9 +212,7 @@ def dump_table(
         os.makedirs(dump_path, exist_ok=True)
     with open(os.path.join(dump_path, fn), "wb") as f:
         pickle.dump(res, f)
-    print(
-        f"dumped table with {len(res)} entries to {model_family}-{rank}-{parallel}."
-    )
+    print(f"dumped table with {len(res)} entries to {model_family}-{rank}-{parallel}.")
 
 
 def dump_table_parallel(
@@ -292,9 +271,7 @@ def merge_tables(
             )
         with open(os.path.join(res_path, f"{prefix}.pkl"), "wb") as f:
             pickle.dump(r, f)
-        print(
-            f"merged parallel tables into {prefix}.pkl, total entries {len(r)}"
-        )
+        print(f"merged parallel tables into {prefix}.pkl, total entries {len(r)}")
 
 
 def estimate_param_realloc_time_cost(

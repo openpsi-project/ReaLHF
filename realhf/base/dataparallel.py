@@ -1,6 +1,6 @@
-from typing import Dict, List, Optional, Tuple, Union
 import abc
 import collections
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -49,9 +49,7 @@ class ParallelDataBroker:
                     ],
                     dim=0,
                 )
-            res = namedarray.recursive_aggregate(
-                src, lambda x: torch.cat(x, dim=0)
-            )
+            res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
             if "cu_seqlens" in src[0] and len(src[0]["cu_seqlens"].shape) == 1:
                 res["cu_seqlens"] = torch.cat(
                     [input_lens.new_zeros(1), torch.cumsum(input_lens, dim=0)]
@@ -120,8 +118,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
                     raw_input_lens = src["prompt_lens"]
                 else:
                     raw_input_lens = (
-                        src["prompt_cu_seqlens"][1:]
-                        - src["prompt_cu_seqlens"][:-1]
+                        src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
                     )
             else:
                 raise RuntimeError(
@@ -144,9 +141,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
             seqlens_cpu = raw_input_lens.cpu().numpy().astype(np.int64)
 
         if partitions is None:
-            partitions = datapack.min_abs_diff_partition(
-                seqlens_cpu, n_dp, min_size
-            )
+            partitions = datapack.min_abs_diff_partition(seqlens_cpu, n_dp, min_size)
 
         input_lens: List[torch.IntTensor] = [
             raw_input_lens[start:end].int() for start, end in partitions
@@ -159,13 +154,10 @@ class PackedParallelDataBroker(ParallelDataBroker):
 
         # These are used by log probabilities, which are one-step shorter than packed inputed ids.
         # We use numpy/list for indexing to avoid host-device synchronization
-        batch_seqlens = [
-            sum(seqlens_cpu[start:end]) for start, end in partitions
-        ]
+        batch_seqlens = [sum(seqlens_cpu[start:end]) for start, end in partitions]
         offsets = [0] + np.cumsum(batch_seqlens).tolist()[:-1]
         short1batch_seqlens = [
-            sum(seqlens_cpu[start:end]) - (end - start)
-            for start, end in partitions
+            sum(seqlens_cpu[start:end]) - (end - start) for start, end in partitions
         ]
         short1offsets = [0] + np.cumsum(short1batch_seqlens).tolist()[:-1]
 
@@ -216,8 +208,7 @@ class PackedParallelDataBroker(ParallelDataBroker):
                     "returns",
                 ]:
                     sp[k] = v[
-                        short1offsets[i] : short1offsets[i]
-                        + short1batch_seqlens[i]
+                        short1offsets[i] : short1offsets[i] + short1batch_seqlens[i]
                     ]
                 elif not torch.is_tensor(src[k]):
                     # for constant, preserve value for each splitted instance

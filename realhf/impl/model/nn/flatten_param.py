@@ -1,5 +1,5 @@
-from typing import *
 import dataclasses
+from typing import *
 
 import numpy as np
 import torch
@@ -18,16 +18,16 @@ except ImportError:
 
 from .real_llm_base import (
     OutputHead,
+    ReaLModelBlock,
+    SequenceParallelActorHead,
+    SequenceParallelCriticHead,
+    VocabPositionEmbedding,
     real_model_embed_param_count,
     real_model_embedding_param_keys,
     real_model_head_param_count,
     real_model_head_param_keys,
     real_model_tblock_param_count,
     real_model_tblock_param_keys,
-    ReaLModelBlock,
-    SequenceParallelActorHead,
-    SequenceParallelCriticHead,
-    VocabPositionEmbedding,
 )
 from .real_llm_parallel import (
     get_real_model_param_shape,
@@ -84,9 +84,7 @@ def slice_intervals(
         return torch.cat([tensor[start:end] for start, end in intervals_cpu])
 
     interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(
-        interval_sizes.cumsum(0)[:-1], (1, 0), value=0
-    )
+    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
     assert tensor.dtype == torch.half
     return interval_op_cuda.slice_intervals_cuda_half(
         tensor,
@@ -114,9 +112,7 @@ def set_intervals(
         assert offset == src.shape[0]
         return
     interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(
-        interval_sizes.cumsum(0)[:-1], (1, 0), value=0
-    )
+    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
     interval_op_cuda.set_intervals_cuda_half(
         src,
         dst,
@@ -152,9 +148,7 @@ def build_param_spec(
     param_spec = {}
     param_size = 0
     for k in sd_keys:
-        shape = get_real_model_param_shape(
-            k, config, mp_size, sequence_parallel
-        )
+        shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
         param_spec[k] = ContiguousParamSpec(
             param_size, param_size + int(np.prod(shape)), shape
         )
@@ -192,9 +186,7 @@ def param_intervals_from_keys(
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
-                get_real_model_param_shape(
-                    k, config, mp_size, sequence_parallel
-                ),
+                get_real_model_param_shape(k, config, mp_size, sequence_parallel),
                 portion_rank,
                 portion_size,
                 config,

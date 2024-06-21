@@ -1,10 +1,10 @@
-from typing import Any, Dict, List, Literal, Optional
 import argparse
 import functools
 import json
 import os
 import pickle
 import re
+from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 
@@ -13,12 +13,12 @@ try:
 except ModuleNotFoundError:
     mdm_search = None
 
+import realhf.base.constants as constants
 from realhf.api.core.dfg import MFCDef, ModelInterfaceType
 from realhf.api.core.model_api import ModelFamily
 from realhf.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.api.quickstart.search import RPCExecution
-import realhf.base.constants as constants
 
 
 def search_rpc_allocations(
@@ -70,12 +70,8 @@ def search_rpc_allocations(
     n_nodes = device_mesh.n_nodes
     table = {}
     for rpc in rpcs:
-        print(
-            f"Getting param realloc stats for {rpc.model_type} at {rpc.model_path}"
-        )
-        t = get_param_realloc_stats(
-            rpc.model_type, rpc.model_path, n_nodes, True
-        )
+        print(f"Getting param realloc stats for {rpc.model_type} at {rpc.model_path}")
+        t = get_param_realloc_stats(rpc.model_type, rpc.model_path, n_nodes, True)
         table.update(t)
 
     rpc_exe_list = make_rpc_exe_list(
@@ -149,9 +145,7 @@ def search_rpc_allocations(
 
     if not from_file:
         with open(dump_dir, "w") as f:
-            json.dump(
-                [rpc_alloc.to_dict() for rpc_alloc in rpc_allocs], f, indent=4
-            )
+            json.dump([rpc_alloc.to_dict() for rpc_alloc in rpc_allocs], f, indent=4)
         with open(log_dir, "w") as f:
             import pprint
 
@@ -219,9 +213,7 @@ def make_rpc_exe_list(
     return rpc_exe_list
 
 
-def make_model_size_dict(
-    rpcs: List[MFCDef], if_print: bool = False
-) -> Dict[str, int]:
+def make_model_size_dict(rpcs: List[MFCDef], if_print: bool = False) -> Dict[str, int]:
     model_size_dict = {}
 
     for rpc in rpcs:

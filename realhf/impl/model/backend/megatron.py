@@ -1,18 +1,14 @@
+import dataclasses
 from contextlib import contextmanager
 from typing import *
-import dataclasses
 
 try:
     from megatron.core import parallel_state
     from megatron.core.distributed.distributed_data_parallel import (
         DistributedDataParallel,
     )
-    from megatron.core.distributed.finalize_model_grads import (
-        finalize_model_grads,
-    )
-    from megatron.core.distributed.param_and_grad_buffer import (
-        ParamAndGradBuffer,
-    )
+    from megatron.core.distributed.finalize_model_grads import finalize_model_grads
+    from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
     from megatron.core.optimizer import get_megatron_optimizer
     from megatron.core.optimizer.optimizer_config import OptimizerConfig
     from megatron.core.transformer.transformer_config import TransformerConfig
@@ -30,10 +26,7 @@ import transformers
 from realhf.api.core import model_api
 from realhf.base import constants, logging
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
-from realhf.impl.model.backend.utils import (
-    MegatronEngine,
-    OptimizerParamScheduler,
-)
+from realhf.impl.model.backend.utils import MegatronEngine, OptimizerParamScheduler
 from realhf.impl.model.modules.mlp import get_activation_fn
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import GenerationConfig
@@ -47,9 +40,7 @@ logger = logging.getLogger("Megatron Backend", "benchmark")
 def megatron_ctx():
     global WITHIN_MEGATRON_CONTEXT
     if WITHIN_MEGATRON_CONTEXT:
-        raise RuntimeError(
-            "Megatron context is already set up. Destroy it first."
-        )
+        raise RuntimeError("Megatron context is already set up. Destroy it first.")
 
     WITHIN_MEGATRON_CONTEXT = True
 
@@ -60,17 +51,13 @@ def megatron_ctx():
     # Build the data-parallel groups.
     g = constants.data_parallel_group()
     parallel_state._DATA_PARALLEL_GROUP = g
-    parallel_state._DATA_PARALLEL_GROUP_GLOO = (
-        grid.get_data_parallel_group_gloo()
-    )
+    parallel_state._DATA_PARALLEL_GROUP_GLOO = grid.get_data_parallel_group_gloo()
     parallel_state._DATA_PARALLEL_GLOBAL_RANKS = dist.get_process_group_ranks(g)
     parallel_state._DATA_PARALLEL_GROUP_WITH_CP = g
     parallel_state._DATA_PARALLEL_GROUP_WITH_CP_GLOO = (
         grid.get_data_parallel_group_gloo()
     )
-    parallel_state._DATA_PARALLEL_GLOBAL_RANKS_WITH_CP = (
-        dist.get_process_group_ranks(g)
-    )
+    parallel_state._DATA_PARALLEL_GLOBAL_RANKS_WITH_CP = dist.get_process_group_ranks(g)
 
     # Build the context-parallel groups.
     parallel_state._CONTEXT_PARALLEL_GROUP = constants.self_group()
@@ -94,9 +81,7 @@ def megatron_ctx():
         if grid.embedding_proc_group is not None
         else list(range(dist.get_world_size()))
     )
-    parallel_state._POSITION_EMBEDDING_GROUP = (
-        grid.position_embedding_proc_group
-    )
+    parallel_state._POSITION_EMBEDDING_GROUP = grid.position_embedding_proc_group
     parallel_state._POSITION_EMBEDDING_GLOBAL_RANKS = (
         dist.get_process_group_ranks(grid.position_embedding_proc_group)
         if grid.position_embedding_proc_group is not None
@@ -105,15 +90,11 @@ def megatron_ctx():
 
     # Build the tensor + data parallel groups.
     parallel_state._TENSOR_AND_DATA_PARALLEL_GROUP = grid.tp_dp_proc_group
-    parallel_state._TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP = (
-        grid.tp_dp_proc_group
-    )
+    parallel_state._TENSOR_AND_DATA_PARALLEL_GROUP_WITH_CP = grid.tp_dp_proc_group
 
     # Build the tensor + expert parallel groups
     parallel_state._EXPERT_MODEL_PARALLEL_GROUP = constants.self_group()
-    parallel_state._TENSOR_AND_EXPERT_PARALLEL_GROUP = (
-        constants.model_parallel_group()
-    )
+    parallel_state._TENSOR_AND_EXPERT_PARALLEL_GROUP = constants.model_parallel_group()
     g = constants.data_parallel_group()
     parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP = g
     parallel_state._DATA_MODULO_EXPERT_PARALLEL_GROUP_GLOO = (
@@ -144,9 +125,7 @@ def get_megatron_transformer_config(
         add_qkv_bias=mconfig.use_attention_bias,
         activation_func=get_activation_fn(mconfig.activation_function),
         rotary_interleaved=mconfig.rotary_interleaved,
-        normalization=(
-            "RMSNorm" if mconfig.layer_norm_type == "rms" else "LayerNorm"
-        ),
+        normalization=("RMSNorm" if mconfig.layer_norm_type == "rms" else "LayerNorm"),
         attention_softmax_in_fp32=True,
         apply_query_key_layer_scaling=mconfig.scale_attn_by_inverse_layer_idx,
     )
@@ -172,9 +151,9 @@ class ReaLMegatronEngine:
             num_params = sum([p.numel() for p in model_parameters])
             unique_params = num_params
 
-            params_tensor = torch.LongTensor(
-                data=[num_params, unique_params]
-            ).to(self.device)
+            params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(
+                self.device
+            )
             dist.all_reduce(
                 params_tensor, group=constants.grid().get_model_parallel_group()
             )
@@ -328,9 +307,7 @@ class ReaLMegatronEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(
-            default_factory=GenerationConfig
-        ),
+        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
         num_micro_batches: Optional[int] = None,
     ):
         with megatron_ctx():
@@ -423,9 +400,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
                 assert real_model._param_spec[n].shape == p.shape
                 assert torch.allclose(
                     p,
-                    real_model.contiguous_param[idx_start:idx_end].view(
-                        p.shape
-                    ),
+                    real_model.contiguous_param[idx_start:idx_end].view(p.shape),
                 )
 
         betas = self.optimizer_config.get("betas", (0.9, 0.95))
@@ -463,9 +438,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
                 lr_mult=1.0,
             )
 
-            warmup_steps = int(
-                self.warmup_steps_proportion * spec.total_train_steps
-            )
+            warmup_steps = int(self.warmup_steps_proportion * spec.total_train_steps)
             lr_scheduler = OptimizerParamScheduler(
                 optimizer,
                 init_lr=0.0 if self.warmup_steps_proportion > 0 else lr,

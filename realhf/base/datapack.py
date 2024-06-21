@@ -180,9 +180,7 @@ def partition_balanced(nums: np.ndarray, k: int, min_size: int = 1):
     dp = np.full((n + 1, k + 1), dtype=np.int64, fill_value=int(1e10))
     maxval = np.full((n + 1, k + 1), dtype=np.int64, fill_value=-int(1e10))
     minval = np.full((n + 1, k + 1), dtype=np.int64, fill_value=int(1e10))
-    prefix_sums = np.concatenate(
-        (np.zeros(1, dtype=np.int64), np.cumsum(nums)), axis=0
-    )
+    prefix_sums = np.concatenate((np.zeros(1, dtype=np.int64), np.cumsum(nums)), axis=0)
     split = np.zeros((n + 1, k + 1), dtype=np.int64)
 
     for i in range(n + 1):
@@ -236,9 +234,7 @@ def min_abs_diff_partition(
     if isinstance(arr, list):
         arr = np.array(arr)
     if len(arr.shape) > 1:
-        raise ValueError(
-            f"The array to be partitioned must be 1D. ({arr})" + err_hint
-        )
+        raise ValueError(f"The array to be partitioned must be 1D. ({arr})" + err_hint)
     if len(arr) < k:
         raise ValueError(
             f"The array to be partitioned must have length >= k. (array {arr}, k={k})"

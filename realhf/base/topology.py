@@ -106,9 +106,7 @@ class ProcessTopology:
             1
         """
         if len(coord_kwargs) != len(self.axes):
-            raise ValueError(
-                "get_rank() does not support slices. Use filter_match())"
-            )
+            raise ValueError("get_rank() does not support slices. Use filter_match())")
 
         key = self.ProcessCoord(**coord_kwargs)
         assert (
@@ -260,9 +258,7 @@ class ProcessTopology:
         # This could be faster by generating the desired keys directly instead of
         # filtering.
         axis_num = self.axes.index(axis)
-        ranks = [
-            self.mapping[k] for k in self.mapping.keys() if k[axis_num] == idx
-        ]
+        ranks = [self.mapping[k] for k in self.mapping.keys() if k[axis_num] == idx]
         return ranks
 
     def world_size(self):
@@ -299,9 +295,7 @@ class PipeModelDataParallelTopology(ProcessTopology):
         gradient_checkpointing: bool,
         max_prompt_len: Optional[int] = None,
     ):
-        super().__init__(
-            axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp]
-        )
+        super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
 
         self.sequence_parallel = sequence_parallel
         self.gradient_checkpointing = gradient_checkpointing
@@ -374,9 +368,7 @@ class ParallelGrid:
         self.ds_model_rank = -1
         for dp in range(self.data_parallel_size):
             ranks = sorted(self._topo.get_axis_list(axis="data", idx=dp))
-            proc_group = new_or_get_group(
-                ranks=[rank_mapping[rank] for rank in ranks]
-            )
+            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.ds_model_proc_group = proc_group
                 self.ds_model_world_size = len(ranks)
@@ -416,9 +408,7 @@ class ParallelGrid:
         self.position_embedding_proc_group = None
         self.pipe_groups = self._topo.get_axis_comm_lists("pipe")
         for ranks in self.pipe_groups:
-            proc_group = new_or_get_group(
-                ranks=[rank_mapping[rank] for rank in ranks]
-            )
+            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.pp_group = ranks
                 self.pp_proc_group = proc_group
@@ -463,9 +453,7 @@ class ParallelGrid:
         self.tp_dp_proc_group = None
         for pp in range(self.pipe_parallel_size):
             ranks = sorted(self._topo.get_axis_list(axis="pipe", idx=pp))
-            proc_group = new_or_get_group(
-                ranks=[rank_mapping[rank] for rank in ranks]
-            )
+            proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.tp_dp_proc_group = proc_group
 
@@ -594,9 +582,7 @@ class FakeGrid:
         self.mp_id = self.coord.model
 
         self.world_size = (
-            self.data_parallel_size
-            * self.pipe_parallel_size
-            * self.model_parallel_size
+            self.data_parallel_size * self.pipe_parallel_size * self.model_parallel_size
         )
 
     def get_pipe_parallel_group(self):

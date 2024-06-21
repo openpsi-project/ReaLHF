@@ -1,6 +1,6 @@
-from typing import Literal, Optional
 import logging.config
 import os
+from typing import Literal, Optional
 
 import colorlog
 

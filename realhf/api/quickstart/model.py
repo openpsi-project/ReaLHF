@@ -1,8 +1,8 @@
-from typing import *
 import dataclasses
+from typing import *
 
-from realhf.api.core.config import Model, ModelFamily, ModelWrapper
 import realhf.base.logging as logging
+from realhf.api.core.config import Model, ModelFamily, ModelWrapper
 
 logger = logging.getLogger("Quickstart Model Config")
 
@@ -33,9 +33,7 @@ class ParallelismConfig:
             or self.data_parallel_size < 1
             or self.model_parallel_size < 1
         ):
-            raise ValueError(
-                "pp_size, mp_size and dp_size must be positive integers."
-            )
+            raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
@@ -117,10 +115,7 @@ class OptimizerConfig:
     def __post_init__(self):
         if self.min_lr_ratio < 0.0 or self.min_lr_ratio > 1.0:
             raise ValueError(f"Invalid min_lr_ratio: {self.min_lr_ratio}")
-        if (
-            self.warmup_steps_proportion < 0.0
-            or self.warmup_steps_proportion > 1.0
-        ):
+        if self.warmup_steps_proportion < 0.0 or self.warmup_steps_proportion > 1.0:
             raise ValueError(
                 f"Invalid warmup_steps_proportion: {self.warmup_steps_proportion}"
             )
@@ -173,9 +168,7 @@ class ModelTrainEvalConfig:
     :type init_critic_from_actor: bool
     """
 
-    type: ModelFamily = dataclasses.field(
-        default=ModelFamily("llama", 7, False)
-    )
+    type: ModelFamily = dataclasses.field(default=ModelFamily("llama", 7, False))
     backend: str = dataclasses.field(
         default="megatron", metadata={"choices": ["megatron", "deepspeed"]}
     )
@@ -197,14 +190,10 @@ class ModelTrainEvalConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        if (
-            self.offload or self.optimizer.offload
-        ) and self.backend != "deepspeed":
+        if (self.offload or self.optimizer.offload) and self.backend != "deepspeed":
             raise ValueError("offload is only valid for the deepspeed backend.")
         if self.backend == "megatron" and self.zero_stage in [1, 3]:
-            raise ValueError(
-                "The Megatron backend only supports zero stage 0 or 2."
-            )
+            raise ValueError("The Megatron backend only supports zero stage 0 or 2.")
 
 
 def get_real_model_config(

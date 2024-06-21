@@ -1,19 +1,19 @@
-from collections import defaultdict
-from typing import List, Optional, Union
 import os
 import pickle
 import time
+from collections import defaultdict
+from typing import List, Optional, Union
 
 import pandas as pd
 import torch
 import torch.distributed as dist
 import transformers
 
-from realhf.api.core.model_api import ReaLModelConfig
 import realhf.api.core.model_api as model_api
 import realhf.api.core.system_api as config_package
 import realhf.base.constants as constants
 import realhf.base.logging as logging
+from realhf.api.core.model_api import ReaLModelConfig
 
 # from base.topology import *
 
@@ -76,9 +76,7 @@ class ProfileLayers:
             type_="deepspeed",
             args=dict(
                 optimizer_name="adam",
-                optimizer_config=dict(
-                    lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)
-                ),
+                optimizer_config=dict(lr=1e-5, weight_decay=0.0, betas=(0.9, 0.95)),
                 warmup_steps_proportion=0.0,
                 min_lr_ratio=0.0,
                 zero_stage=1,
@@ -104,9 +102,7 @@ class ProfileLayers:
         ]
         self.backend = model_api.make_backend(self.backend_config)
         ft_spec = model_api.FinetuneSpec(10, 100, 10)
-        self.layers = [
-            self.backend.initialize(layer, ft_spec) for layer in self.layers
-        ]
+        self.layers = [self.backend.initialize(layer, ft_spec) for layer in self.layers]
         self.stats = defaultdict(list)
 
     def reset_stats(self):
@@ -121,10 +117,7 @@ class ProfileLayers:
 
     @torch.no_grad()
     def fwd_gen(self, bs, seq_len):
-        from realhf.impl.model.nn.real_llm_base import (
-            PipeCacheData,
-            PipeTransferData,
-        )
+        from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 
         input_ids = torch.randint(
             0,
@@ -206,9 +199,7 @@ class ProfileLayers:
         )
         ys[0].packed_input_ids = new_tokens
         ys[0].packed_position_ids = None
-        x.cu_seqlens = torch.arange(
-            bs + 1, dtype=torch.int32, device=self.device
-        )
+        x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=self.device)
         x.max_seqlen = 1
         for layer_name, layer, y in zip(self.layer_names, self.layers, ys):
             st = time.monotonic_ns()
@@ -220,10 +211,7 @@ class ProfileLayers:
             )
 
     def fwd_bwd_opt(self, bs, seq_len):
-        from realhf.impl.model.nn.real_llm_base import (
-            PipeCacheData,
-            PipeTransferData,
-        )
+        from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 
         input_ids = torch.randint(
             0,
@@ -313,9 +301,7 @@ def make_profile_layers(
     else:
         raise NotImplementedError(f"Unsupported dtype {dtype}")
     tokenizer = None
-    config: ReaLModelConfig = getattr(
-        ReaLModel, f"config_from_{hf_model_type}"
-    )(
+    config: ReaLModelConfig = getattr(ReaLModel, f"config_from_{hf_model_type}")(
         model_path=model_path,
     )
     if tokenizer is None:
