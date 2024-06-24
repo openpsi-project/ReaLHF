@@ -107,6 +107,9 @@ class ReaLModelConfig:
     rotary_scaling_type: Optional[str] = None
     # for gemma
     normalize_embed: bool = False
+    # for opt, it's 2
+    abs_position_embedding_offset: int = 0
+    do_layernorm_before: bool = True
     # Tied embedding
     share_embeddings_and_output_weights: bool = False
     # Whether it is a critic/reward model that outputs scores.

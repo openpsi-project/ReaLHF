@@ -20,6 +20,8 @@ from realhf.impl.model.modules import (
     LayerNormMLP,
     LlamaLayerNormMLP,
     LlamaRMSNorm,
+    OffsetPositionalEmbedding,
+    OffsetParallelPositionalEmbedding
 )
 from realhf.impl.model.parallelism.model_parallel.modules import (
     ColumnParallelLinear,
@@ -111,6 +113,7 @@ class ReaLModelBlock(nn.Module):
         super().__init__()
         if dtype is None:
             dtype = torch.float16
+        self.config = config
         self.layer_index = layer_index
         self.attn = CausalSelfAttentionLayer(
             hidden_dim=config.hidden_dim,
@@ -125,6 +128,7 @@ class ReaLModelBlock(nn.Module):
             layer_norm_type=config.layer_norm_type,
             use_attention_bias=config.use_attention_bias,
             use_attn_proj_bias=config.use_attn_proj_bias,
+            do_layernorm_before=config.do_layernorm_before,
             apply_rotary=config.apply_rotary,
             rotary_base=config.rotary_base,
             rotary_interleaved=config.rotary_interleaved,
@@ -140,6 +144,7 @@ class ReaLModelBlock(nn.Module):
                 hidden_dim=config.hidden_dim,
                 intermediate_dim=config.intermediate_dim,
                 resid_pdrop=config.resid_pdrop,
+                do_layernorm_before=config.do_layernorm_before,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
                 model_parallel=constants.model_parallel_world_size() > 1,
@@ -231,7 +236,17 @@ class ReaLModelBlock(nn.Module):
             cache_seqlens=cache_seqlens,
         )
         h = h + attn_out
+
+        # For opt-350m
+        if not self.config.do_layernorm_before:
+            h = self.attn.c_attn.ln(h)
+
         h = self.mlp(h) + h
+
+        # For opt-350m
+        if not self.config.do_layernorm_before:
+            h = self.mlp.ln(h)
+    
         if self.output_layernorm:
             h = self.ln_f(h)
         return h, k, v
@@ -261,23 +276,17 @@ class VocabPositionEmbedding(nn.Module):
 
         self.apply_abs_pos_embed = not config.apply_rotary
         if self.apply_abs_pos_embed:
-            self.wpe = embed_cls(
+            p_embed_cls = OffsetParallelPositionalEmbedding if model_parallel else OffsetPositionalEmbedding
+            self.wpe = p_embed_cls(
                 config.n_positions,
                 config.hidden_dim,
+                offset=config.abs_position_embedding_offset,
                 dtype=dtype,
                 device=device,
             )
 
         self.normalize_embed = config.normalize_embed
         self.embed_drop = nn.Dropout(config.embd_pdrop)
-
-        self.self_attention_mask = torch.tril(
-            torch.ones(
-                (config.n_positions, config.n_positions),
-                dtype=torch.bool,
-                device=device,
-            )
-        )
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         # Set position ids.
@@ -380,7 +389,7 @@ class ParallelActorHead(ColumnParallelLinear):
 def real_model_embed_param_count(config: model_api.ReaLModelConfig) -> int:
     count = config.vocab_size * config.hidden_dim
     if not config.apply_rotary:
-        count += config.n_positions * config.hidden_dim
+        count += (config.n_positions + config.abs_position_embedding_offset) * config.hidden_dim
     return count
 
 

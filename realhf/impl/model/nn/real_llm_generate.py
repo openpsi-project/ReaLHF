@@ -470,7 +470,7 @@ def _gather_minibatch_gen_outputs(
         logits_mask = all_logits_mask[i]
 
         if gen_len < max_gen_tokens_length:
-            pad_size = gen_len - max_gen_tokens_length
+            pad_size = max_gen_tokens_length - gen_len
             gen_token = torch.nn.functional.pad(gen_token, (0, pad_size))
             log_probs = torch.nn.functional.pad(log_probs, (0, pad_size))
             if logits_mask is not None:

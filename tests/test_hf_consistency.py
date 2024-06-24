@@ -64,7 +64,7 @@ def get_gemma_hf_config():
     )
 
 
-def get_gpt_config():
+def get_gpt2_config():
     return transformers.GPT2Config(
         vocab_size=200,
         n_positions=200,
@@ -76,6 +76,18 @@ def get_gpt_config():
     )
 
 
+def get_opt_config():
+    return transformers.OPTConfig(
+        vocab_size=200,
+        max_position_embeddings=200,
+        hidden_size=128,
+        num_hidden_layers=2,
+        num_attention_heads=8,
+        ffn_dim=200,
+        do_layer_norm_before=True,
+    )
+
+
 def hf_config_factory(model_family_name: str):
     if model_family_name == "llama":
         return get_llama_hf_config()
@@ -84,7 +96,9 @@ def hf_config_factory(model_family_name: str):
     elif model_family_name == "gemma":
         return get_gemma_hf_config()
     elif model_family_name == "gpt2":
-        return get_gpt_config()
+        return get_gpt2_config()
+    elif model_family_name == "opt":
+        return get_opt_config()
     else:
         raise NotImplementedError(model_family_name)
 
@@ -105,7 +119,9 @@ testing.init_global_constants(
 assert dist.get_world_size() == 1, dist.get_world_size()
 
 
-@pytest.mark.parametrize("model_family_name", ["qwen2", "llama", "gemma", "gpt2"])
+@pytest.mark.parametrize(
+    "model_family_name", ["qwen2", "llama", "gemma", "gpt2", "opt"]
+)
 @torch.no_grad()
 def test_consistency(tmp_path, model_family_name: str):
     # NOTE: import here to avoid initializing CUDA context in the main process
@@ -123,7 +139,9 @@ def test_consistency(tmp_path, model_family_name: str):
         )(hf_config)
 
         # convert back to HF config
-        hf_config = getattr(ReaLModel, f"config_to_{model_family_name}")(mconfig)
+        hf_config = getattr(ReaLModel, f"config_to_{model_family_name}")(
+            mconfig
+        )
 
         # initialize model
         model = ReaLModel(mconfig, dtype=torch.float32, device="cpu")
@@ -137,7 +155,9 @@ def test_consistency(tmp_path, model_family_name: str):
             shutil.rmtree(save_dir)
         getattr(ReaLModel, f"to_{model_family_name}")(model, None, save_dir)
 
-        hf_sd = _HF_REGISTRIES[model_family_name].sd_to_hf_converter(real_sd, mconfig)
+        hf_sd = _HF_REGISTRIES[model_family_name].sd_to_hf_converter(
+            real_sd, mconfig
+        )
         hf_model = transformers.AutoModelForCausalLM.from_pretrained(save_dir)
 
         # 2. test HF -> ReaL state dict conversion
@@ -181,4 +201,4 @@ def test_consistency(tmp_path, model_family_name: str):
 if __name__ == "__main__":
     from pathlib import Path
 
-    test_consistency(Path("/tmp"), "gpt")
+    test_consistency(Path("/tmp"), "opt")

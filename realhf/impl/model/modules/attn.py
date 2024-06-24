@@ -39,7 +39,6 @@ class CausalSelfAttentionLayer(nn.Module):
         attn_pdrop: float,
         layer_index: int,
         layer_norm_epsilon: float,
-        # gpt2 does not scale attn by inverse layer idx, in contrast to starcoder
         scale_attn_by_inverse_layer_idx: bool,
         scale_attn_weights: bool,
         # llama does not require attention bias
@@ -47,6 +46,8 @@ class CausalSelfAttentionLayer(nn.Module):
         use_attn_proj_bias: bool,
         # layer norm type is special for llama
         layer_norm_type: Optional[str] = None,
+        # opt applies layer norm after attn
+        do_layernorm_before: bool = True,
         # rotary embedding
         apply_rotary: bool = False,
         rotary_base: float = 10000.0,
@@ -75,6 +76,7 @@ class CausalSelfAttentionLayer(nn.Module):
             layer_norm_epsilon=layer_norm_epsilon,
             layer_norm_type=layer_norm_type,
             use_attention_bias=use_attention_bias,
+            do_layernorm_before=do_layernorm_before,
             dtype=dtype,
             device=device,
             layer_index=layer_index,
