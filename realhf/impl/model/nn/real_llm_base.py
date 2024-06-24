@@ -20,8 +20,8 @@ from realhf.impl.model.modules import (
     LayerNormMLP,
     LlamaLayerNormMLP,
     LlamaRMSNorm,
+    OffsetParallelPositionalEmbedding,
     OffsetPositionalEmbedding,
-    OffsetParallelPositionalEmbedding
 )
 from realhf.impl.model.parallelism.model_parallel.modules import (
     ColumnParallelLinear,
@@ -246,7 +246,7 @@ class ReaLModelBlock(nn.Module):
         # For opt-350m
         if not self.config.do_layernorm_before:
             h = self.mlp.ln(h)
-    
+
         if self.output_layernorm:
             h = self.ln_f(h)
         return h, k, v
@@ -276,7 +276,11 @@ class VocabPositionEmbedding(nn.Module):
 
         self.apply_abs_pos_embed = not config.apply_rotary
         if self.apply_abs_pos_embed:
-            p_embed_cls = OffsetParallelPositionalEmbedding if model_parallel else OffsetPositionalEmbedding
+            p_embed_cls = (
+                OffsetParallelPositionalEmbedding
+                if model_parallel
+                else OffsetPositionalEmbedding
+            )
             self.wpe = p_embed_cls(
                 config.n_positions,
                 config.hidden_dim,
@@ -389,7 +393,9 @@ class ParallelActorHead(ColumnParallelLinear):
 def real_model_embed_param_count(config: model_api.ReaLModelConfig) -> int:
     count = config.vocab_size * config.hidden_dim
     if not config.apply_rotary:
-        count += (config.n_positions + config.abs_position_embedding_offset) * config.hidden_dim
+        count += (
+            config.n_positions + config.abs_position_embedding_offset
+        ) * config.hidden_dim
     return count
 
 

@@ -20,7 +20,7 @@ def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     ]
 
     for i in range(config.n_layers):
-        for k in ['weight', 'bias']:
+        for k in ["weight", "bias"]:
             new_sd[f"{i+1}.attn.c_attn.q_attn.{k}"] = state_dict[
                 f"model.decoder.layers.{i}.self_attn.q_proj.{k}"
             ]
@@ -61,25 +61,25 @@ def sd_to_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     ]
 
     for i in range(config.n_layers):
-        for k in ['weight', 'bias']:
-            new_sd[f"model.decoder.layers.{i}.self_attn.q_proj.{k}"] = (
-                state_dict[f"{i+1}.attn.c_attn.q_attn.{k}"]
-            )
-            new_sd[f"model.decoder.layers.{i}.self_attn.k_proj.{k}"] = (
-                state_dict[f"{i+1}.attn.c_attn.k_attn.{k}"]
-            )
-            new_sd[f"model.decoder.layers.{i}.self_attn.v_proj.{k}"] = (
-                state_dict[f"{i+1}.attn.c_attn.v_attn.{k}"]
-            )
-            new_sd[f"model.decoder.layers.{i}.self_attn.out_proj.{k}"] = (
-                state_dict[f"{i+1}.attn.c_proj.{k}"]
-            )
-            new_sd[f"model.decoder.layers.{i}.self_attn_layer_norm.{k}"] = (
-                state_dict[f"{i+1}.attn.c_attn.ln.{k}"]
-            )
-            new_sd[f"model.decoder.layers.{i}.final_layer_norm.{k}"] = (
-                state_dict[f"{i+1}.mlp.ln.{k}"]
-            )
+        for k in ["weight", "bias"]:
+            new_sd[f"model.decoder.layers.{i}.self_attn.q_proj.{k}"] = state_dict[
+                f"{i+1}.attn.c_attn.q_attn.{k}"
+            ]
+            new_sd[f"model.decoder.layers.{i}.self_attn.k_proj.{k}"] = state_dict[
+                f"{i+1}.attn.c_attn.k_attn.{k}"
+            ]
+            new_sd[f"model.decoder.layers.{i}.self_attn.v_proj.{k}"] = state_dict[
+                f"{i+1}.attn.c_attn.v_attn.{k}"
+            ]
+            new_sd[f"model.decoder.layers.{i}.self_attn.out_proj.{k}"] = state_dict[
+                f"{i+1}.attn.c_proj.{k}"
+            ]
+            new_sd[f"model.decoder.layers.{i}.self_attn_layer_norm.{k}"] = state_dict[
+                f"{i+1}.attn.c_attn.ln.{k}"
+            ]
+            new_sd[f"model.decoder.layers.{i}.final_layer_norm.{k}"] = state_dict[
+                f"{i+1}.mlp.ln.{k}"
+            ]
             new_sd[f"model.decoder.layers.{i}.fc1.{k}"] = state_dict[
                 f"{i+1}.mlp.c_fc.{k}"
             ]
@@ -97,9 +97,7 @@ def opt_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
     ]
 
 
-def opt_transformer_block_param_name(
-    config: ReaLModelConfig, idx: int
-) -> List[str]:
+def opt_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
     names = [
         f"model.decoder.layers.{idx}.self_attn.q_proj.weight",
         f"model.decoder.layers.{idx}.self_attn.q_proj.bias",
@@ -134,9 +132,7 @@ def convert_config_opt(
     hf_config: transformers.OPTConfig,
 ) -> ReaLModelConfig:
     if hf_config.word_embed_proj_dim != hf_config.hidden_size:
-        raise ValueError(
-            "OPT word_embed_proj_dim must be equal to hidden_size."
-        )
+        raise ValueError("OPT word_embed_proj_dim must be equal to hidden_size.")
     return ReaLModelConfig(
         n_layers=hf_config.num_hidden_layers,
         n_kv_heads=hf_config.num_attention_heads,

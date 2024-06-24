@@ -1,11 +1,10 @@
-import torch.nn as nn
-import torch
 from typing import *
+
+import torch
+import torch.nn as nn
 from torch.nn import init
 
-from realhf.impl.model.parallelism.model_parallel.modules import (
-    ParallelEmbedding,
-)
+from realhf.impl.model.parallelism.model_parallel.modules import ParallelEmbedding
 
 
 class OffsetPositionalEmbedding(nn.Embedding):
