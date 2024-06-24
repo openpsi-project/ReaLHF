@@ -116,7 +116,7 @@ def _save_then_load(
         assert file_size2 == file_size, (file_size, file_size2)
 
 
-@pytest.mark.skip("This test requires multiple GPUs to run.")
+@pytest.mark.skip("This test requires 8 GPUs to run.")
 def test_save_then_load(
     model_family_name: str,
     is_critic: bool,
@@ -124,7 +124,7 @@ def test_save_then_load(
     pp_dp_mp: Tuple,
 ):
     print(
-        f">>>>>>>>>>> running {model_family_name} "
+        f">>>>>>>>>>> running {model_family_name} parallel {pp_dp_mp} "
         f"is_critic={is_critic} init_critic_from_actor={init_critic_from_actor}"
     )
     expr_name = "saveload_test"
@@ -146,19 +146,23 @@ def test_save_then_load(
     test_impl.launch()
     shutil.rmtree(tmp_path)
     print(
-        f"<<<<<<<<<<<<<<< passed {model_family_name} "
+        f"<<<<<<<<<<<<<<< passed {model_family_name} parallel {pp_dp_mp} "
         f"is_critic={is_critic} init_critic_from_actor={init_critic_from_actor}"
     )
 
 
 if __name__ == "__main__":
-    pp_dp_mp = (2, 2, 2)
     is_critic = False
     init_critic_from_actor = False
-    for model_family_name in ["qwen2", "llama", "gemma", "opt", "gpt2"]:
-        test_save_then_load(
-            model_family_name,
-            is_critic,
-            init_critic_from_actor,
-            pp_dp_mp,
-        )
+    parallelism = [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)]
+    model_families = ["gemma", "opt", "gpt2", "llama", "qwen2"]
+    for pp_dp_mp in parallelism:
+        for model_family_name in model_families:
+            if model_family_name == "opt" and pp_dp_mp[-1] > 2:
+                continue
+            test_save_then_load(
+                model_family_name,
+                is_critic,
+                init_critic_from_actor,
+                pp_dp_mp,
+            )

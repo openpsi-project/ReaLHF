@@ -14,7 +14,7 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
         if k == "model.embed_tokens.weight":
             if constants.is_first_pipe_stage():
                 new_state_dict["0.wte.weight"] = v
-            elif (
+            if (
                 constants.is_last_pipe_stage()
                 and config.share_embeddings_and_output_weights
             ):

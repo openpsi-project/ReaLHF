@@ -205,7 +205,9 @@ def get_real_model_param_shape(
         assert config.n_positions % mp_size == 0
         if (config.n_positions + config.abs_position_embedding_offset) % mp_size != 0:
             raise ValueError(
-                "The dimenstion of position embedding is not divisible by mp_size. "
+                f"The dimenstion of position embedding "
+                f"({config.n_positions} + offset {config.abs_position_embedding_offset}) "
+                f"is not divisible by mp_size ({mp_size}). "
                 "Models like this (e.g. OPT-350m) inherently do not support tensor parallelism."
             )
         return (
