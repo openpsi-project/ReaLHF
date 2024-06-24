@@ -115,7 +115,12 @@ def sd_to_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
 
 # param name is used to load directly from huggingface checkpoints
 def gpt2_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
-    return ["wte.weight", "wpe.weight", "transformer.wte.weight", "transformer.wpe.weight"]
+    return [
+        "wte.weight",
+        "wpe.weight",
+        "transformer.wte.weight",
+        "transformer.wpe.weight",
+    ]
 
 
 def gpt2_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
@@ -136,7 +141,7 @@ def gpt2_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List
     ]
     if idx == config.n_layers - 1:
         names += ["ln_f.weight", "ln_f.bias"]
-    _names = ["transformer."+name for name in names]
+    _names = ["transformer." + name for name in names]
     return names + _names
 
 

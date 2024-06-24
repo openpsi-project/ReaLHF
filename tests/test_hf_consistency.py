@@ -19,8 +19,6 @@ from tests.hf_utils import hf_config_factory
 logger = logging.getLogger("tests.test_hf_consistency")
 
 
-
-
 dist.init_process_group(
     "gloo",
     rank=0,

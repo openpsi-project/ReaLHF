@@ -2,9 +2,9 @@ import os
 import shutil
 from typing import Dict
 
+import torch
 import tqdm
 from safetensors import safe_open
-import torch
 
 from realhf.base import logging
 
@@ -59,6 +59,8 @@ def copy_hf_configs(src_model_dir, dst_model_dir):
             logger.info(f"copied {file} from {src_model_dir} to {dst_model_dir}")
         except FileNotFoundError:
             logger.info(f"{file} not exist in {src_model_dir} skipping.")
+
+
 def load_safetensor(fn: str) -> Dict[str, torch.Tensor]:
     assert fn.endswith(".safetensors")
     state_dict = {}

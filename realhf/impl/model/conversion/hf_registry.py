@@ -10,7 +10,7 @@ import transformers
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging
-from realhf.base.saveload_utils import split_state_dict_into_shards, load_safetensor
+from realhf.base.saveload_utils import load_safetensor, split_state_dict_into_shards
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_parallel import (
     mp_merge_key,

@@ -1,13 +1,14 @@
 import os
+import pathlib
 import shutil
+import uuid
 from typing import *
 
-import pathlib
+import pytest
 import torch
 import torch.distributed as dist
 import transformers
-import pytest
-import uuid
+
 from realhf.api.core.config import ModelFamily
 from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
 from realhf.base import constants, logging
@@ -96,9 +97,7 @@ def _save_then_load(
 
         # load hf
         if not is_critic:
-            hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-                real_save_path
-            )
+            hf_model = transformers.AutoModelForCausalLM.from_pretrained(real_save_path)
             dist.barrier()
             if constants.model_parallel_world_size() == 1:
                 sd3 = HF_MODEL_FAMILY_REGISTRY[model_family_name][
@@ -156,7 +155,7 @@ if __name__ == "__main__":
     pp_dp_mp = (2, 2, 2)
     is_critic = False
     init_critic_from_actor = False
-    for model_family_name in ["qwen2", "llama", "gemma", 'opt', 'gpt2']:
+    for model_family_name in ["qwen2", "llama", "gemma", "opt", "gpt2"]:
         test_save_then_load(
             model_family_name,
             is_critic,

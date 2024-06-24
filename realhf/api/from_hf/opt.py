@@ -10,11 +10,19 @@ from realhf.base import constants
 def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     new_sd = {}
 
-    if constants.is_first_pipe_stage() and "model.decoder.embed_tokens.weight" in state_dict:
+    if (
+        constants.is_first_pipe_stage()
+        and "model.decoder.embed_tokens.weight" in state_dict
+    ):
         new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
         new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
-    if constants.is_last_pipe_stage() and "model.decoder.embed_tokens.weight" in state_dict:
-        new_sd[f"{config.n_layers + 1}.weight"] = state_dict["model.decoder.embed_tokens.weight"]
+    if (
+        constants.is_last_pipe_stage()
+        and "model.decoder.embed_tokens.weight" in state_dict
+    ):
+        new_sd[f"{config.n_layers + 1}.weight"] = state_dict[
+            "model.decoder.embed_tokens.weight"
+        ]
     if "model.decoder.final_layer_norm.weight" in state_dict:
         new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict[
             "model.decoder.final_layer_norm.weight"

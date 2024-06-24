@@ -507,7 +507,7 @@ class ReaLModel(nn.Module):
             new_state_dict[f"layers.{global_idx - self.layer_idx_start}.{name}"] = v
         # pp_size = constants.pipe_parallel_world_size()
         # pp_rank = constants.pipe_parallel_rank()
-        # if self.config.share_embeddings_and_output_weights and pp_size 
+        # if self.config.share_embeddings_and_output_weights and pp_size
         return super().load_state_dict(
             new_state_dict,
             strict=strict,

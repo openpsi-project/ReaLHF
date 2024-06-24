@@ -14,7 +14,10 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
         if k == "model.embed_tokens.weight":
             if constants.is_first_pipe_stage():
                 new_state_dict["0.wte.weight"] = v
-            elif constants.is_last_pipe_stage() and config.share_embeddings_and_output_weights:
+            elif (
+                constants.is_last_pipe_stage()
+                and config.share_embeddings_and_output_weights
+            ):
                 new_state_dict[f"{config.n_layers + 1}.weight"] = v
         elif k == "lm_head.weight":
             new_state_dict[f"{config.n_layers + 1}.weight"] = v
@@ -175,7 +178,7 @@ def llama_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
 
 def llama_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
     names = []
-    for k in ['weight', 'bias']:
+    for k in ["weight", "bias"]:
         names += [
             f"model.layers.{idx}.input_layernorm.{k}",
             f"model.layers.{idx}.mlp.down_proj.{k}",

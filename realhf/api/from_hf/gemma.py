@@ -73,9 +73,11 @@ def convert_config_back_gemma(
         tie_word_embeddings=config.share_embeddings_and_output_weights,
     )
 
+
 def gemma_output_head_param_name(config: ReaLModelConfig) -> List[str]:
     # tied embedding, use the token embedding name
     return ["model.embed_tokens.weight"]
+
 
 register_hf_family(
     name="gemma",
