@@ -17,6 +17,7 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
             if (
                 constants.is_last_pipe_stage()
                 and config.share_embeddings_and_output_weights
+                and not config.is_critic
             ):
                 new_state_dict[f"{config.n_layers + 1}.weight"] = v
         elif k == "lm_head.weight":
@@ -108,7 +109,7 @@ def to_llama_state_dict(
         if i == 0:
             new_sd["model.embed_tokens.weight"] = state_dict["0.wte.weight"]
         elif i == config.n_layers + 1:
-            if not config.share_embeddings_and_output_weights:
+            if config.is_critic or not config.share_embeddings_and_output_weights:
                 new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
         else:
             new_sd[f"model.layers.{i-1}.input_layernorm.weight"] = state_dict[
@@ -197,7 +198,7 @@ def llama_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> Lis
 
 
 def llama_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    if config.share_embeddings_and_output_weights:
+    if config.share_embeddings_and_output_weights and not config.is_critic:
         return ["model.embed_tokens.weight"]
     else:
         return ["lm_head.weight"]

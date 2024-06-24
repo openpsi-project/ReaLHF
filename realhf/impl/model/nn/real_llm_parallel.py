@@ -311,6 +311,7 @@ def partition_pipeline_layers(
     head_param_counter: Callable[[model_api.ReaLModelConfig], int],
     method: str = "parameters_balanced",
 ) -> Dict[int, Tuple[int, int]]:
+    # TODO: partition according to occupied GPU memory, e.g., logits occupy larger memory
     from deepspeed.runtime import utils as ds_utils
 
     from realhf.base.datapack import partition_balanced as true_partition_balanced

@@ -333,16 +333,16 @@ def megatron_all_reduce_layernorm_grads(engine: MegatronEngine):
             continue
         else:
             assert 0 < i < real_model.config.n_layers + 1
-            layer: ReaLModelBlock = real_model.layers[i]
+            layer: ReaLModelBlock = real_model.layers[i - real_model.layer_idx_start]
             grads.append(layer.attn.c_attn.ln.weight.main_grad)
-            if layer.attn.c_attn.ln.bias is not None:
+            if getattr(layer.attn.c_attn.ln, "bias", None) is not None:
                 grads.append(layer.attn.c_attn.ln.bias.main_grad)
             grads.append(layer.mlp.ln.weight.main_grad)
-            if layer.mlp.ln.bias is not None:
+            if getattr(layer.mlp.ln, "bias", None) is not None:
                 grads.append(layer.mlp.ln.bias.main_grad)
             if i == real_model.config.n_layers:
                 grads.append(layer.ln_f.weight.main_grad)
-                if layer.ln_f.bias is not None:
+                if getattr(layer.ln_f, "bias", None) is not None:
                     grads.append(layer.ln_f.bias.main_grad)
 
     assert all(x is not None for x in grads)
@@ -364,9 +364,9 @@ def megatron_all_reduce_word_embedding_grads(engine: MegatronEngine):
         return
 
     if pp_rank == 0:
-        grad = real_model.layers[-1].weight.main_grad
-    else:
         grad = real_model.layers[0].wte.weight.main_grad
+    else:
+        grad = real_model.layers[-1].weight.main_grad
 
     dist.all_reduce(grad, group=constants.grid().embedding_proc_group)
 

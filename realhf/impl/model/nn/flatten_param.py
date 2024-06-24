@@ -147,9 +147,9 @@ def build_param_spec(
         if (
             config.share_embeddings_and_output_weights
             and constants.pipe_parallel_world_size() == 1
-            and k == f"0.wte.weight"
+            and k == f"{config.n_layers + 1}.weight"
+            and not config.is_critic
         ):
-            param_spec[k] = param_spec[f"{config.n_layers + 1}.weight"]
             continue
 
         param_spec[k] = ContiguousParamSpec(
@@ -157,6 +157,12 @@ def build_param_spec(
         )
         param_size += int(np.prod(shape))
 
+    if (
+            config.share_embeddings_and_output_weights
+            and constants.pipe_parallel_world_size() == 1
+            and not config.is_critic
+        ):
+        param_spec[f"{config.n_layers + 1}.weight"] = param_spec["0.wte.weight"]
     return param_spec, param_size
 
 

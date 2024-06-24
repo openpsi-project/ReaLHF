@@ -74,10 +74,6 @@ def convert_config_back_gemma(
     )
 
 
-def gemma_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    # tied embedding, use the token embedding name
-    return ["model.embed_tokens.weight"]
-
 
 register_hf_family(
     name="gemma",
@@ -88,5 +84,5 @@ register_hf_family(
     sd_to_hf_converter=to_llama_state_dict,
     embedding_param_names=llama_embedding_layer_names,
     tblock_param_names=llama_transformer_block_param_name,
-    head_param_names=gemma_output_head_param_name,
+    head_param_names=llama_output_head_param_name,
 )

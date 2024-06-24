@@ -450,20 +450,21 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
 def real_model_tblock_param_keys(
     config: model_api.ReaLModelConfig, idx: int
 ) -> List[str]:
+    # NOTE: The order matters, we should not change the order of keys.
     keys = [
-        f"{idx + 1}.attn.c_attn.ln.weight",
-        f"{idx + 1}.attn.c_attn.q_attn.weight",
-        f"{idx + 1}.attn.c_attn.k_attn.weight",
-        f"{idx + 1}.attn.c_attn.v_attn.weight",
+        f"{idx + 1}.attn.c_attn.ln.weight"
     ]
     if config.layer_norm_type is None:
         keys += [f"{idx + 1}.attn.c_attn.ln.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.q_attn.weight"]
     if config.use_attention_bias:
-        keys += [
-            f"{idx + 1}.attn.c_attn.q_attn.bias",
-            f"{idx + 1}.attn.c_attn.k_attn.bias",
-            f"{idx + 1}.attn.c_attn.v_attn.bias",
-        ]
+        keys += [f"{idx + 1}.attn.c_attn.q_attn.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.k_attn.weight"]
+    if config.use_attention_bias:
+        keys += [f"{idx + 1}.attn.c_attn.k_attn.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.v_attn.weight"]
+    if config.use_attention_bias:
+        keys += [f"{idx + 1}.attn.c_attn.v_attn.bias"]
     keys += [f"{idx + 1}.attn.c_proj.weight"]
     if config.use_attn_proj_bias:
         keys += [f"{idx + 1}.attn.c_proj.bias"]
@@ -473,8 +474,8 @@ def real_model_tblock_param_keys(
     if config.mlp_type is None:
         keys += [
             f"{idx + 1}.mlp.c_fc.weight",
-            f"{idx + 1}.mlp.c_proj.weight",
             f"{idx + 1}.mlp.c_fc.bias",
+            f"{idx + 1}.mlp.c_proj.weight",
             f"{idx + 1}.mlp.c_proj.bias",
         ]
     elif config.mlp_type == "llama":

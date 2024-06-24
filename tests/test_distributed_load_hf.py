@@ -44,6 +44,7 @@ def _save_then_load(
     )
     assert dist.get_world_size() == 8, dist.get_world_size()
     assert tmp_path.exists()
+    init_save_path = tmp_path / "init"
     hf_save_path = tmp_path / "hf"
     real_save_path = tmp_path / "real"
     real_save_path2 = tmp_path / "real2"
@@ -52,9 +53,13 @@ def _save_then_load(
         tokenizer = None
         hf_config = hf_config_factory(model_family_name)
 
-        if dist.get_rank() == 0:
-            hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
-            hf_model.save_pretrained(hf_save_path)
+        # Create an HF model.
+        if not is_critic or init_critic_from_actor:
+            if dist.get_rank() == 0:
+                hf_model = transformers.AutoModelForCausalLM.from_config(
+                    hf_config
+                )
+                hf_model.save_pretrained(hf_save_path)
         dist.barrier()
 
         mconfig: ReaLModelConfig = getattr(
@@ -62,17 +67,24 @@ def _save_then_load(
         )(hf_config)
         mconfig.is_critic = is_critic
 
-        # load from hf model
+        # load from hf model or create a new critic model
         model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
-        model._instantiation_hooks.append(
-            lambda: getattr(model, f"from_{model_family_name}")(
-                hf_save_path, init_critic_from_actor
+        if not is_critic or init_critic_from_actor:
+            model._instantiation_hooks.append(
+                lambda: getattr(model, f"from_{model_family_name}")(
+                    hf_save_path, init_critic_from_actor
+                )
             )
-        )
         model.instantiate()
+        # sync initialized parameters
+        getattr(model, f"to_{model_family_name}")(tokenizer, init_save_path)
+        dist.barrier()
+        model = getattr(model, f"from_{model_family_name}")(
+            init_save_path, init_critic_from_actor=False
+        )
         sd1 = model.state_dict()
 
-        # save
+        # save ReaLModel (e.g., after SFT)
         getattr(model, f"to_{model_family_name}")(tokenizer, real_save_path)
         dist.barrier()
         file_size = 0
@@ -80,7 +92,7 @@ def _save_then_load(
             if fn.endswith(".bin"):
                 file_size += os.path.getsize(os.path.join(real_save_path, fn))
 
-        # load
+        # load ReaLModel (e.g., before PPO, RW)
         model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
         model._instantiation_hooks.append(
             lambda: getattr(model, f"from_{model_family_name}")(
@@ -93,11 +105,17 @@ def _save_then_load(
         for k, v in sd2.items():
             if init_critic_from_actor and k == f"{mconfig.n_layers + 1}.weight":
                 continue
-            assert torch.allclose(v, sd1[k]), k
+            assert torch.allclose(v, sd1[k]), (
+                k,
+                v.flatten()[:10],
+                sd1[k].flatten()[:10],
+            )
 
-        # load hf
+        # Load saved ReaLModel using HF APIs.
         if not is_critic:
-            hf_model = transformers.AutoModelForCausalLM.from_pretrained(real_save_path)
+            hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+                real_save_path
+            )
             dist.barrier()
             if constants.model_parallel_world_size() == 1:
                 sd3 = HF_MODEL_FAMILY_REGISTRY[model_family_name][
@@ -152,17 +170,23 @@ def test_save_then_load(
 
 
 if __name__ == "__main__":
-    is_critic = False
-    init_critic_from_actor = False
+    is_critic = True
+    init_critic_from_actor = True
     parallelism = [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)]
     model_families = ["gemma", "opt", "gpt2", "llama", "qwen2"]
-    for pp_dp_mp in parallelism:
-        for model_family_name in model_families:
-            if model_family_name == "opt" and pp_dp_mp[-1] > 2:
-                continue
-            test_save_then_load(
-                model_family_name,
-                is_critic,
-                init_critic_from_actor,
-                pp_dp_mp,
-            )
+    for is_critic in [True, False]:
+        if is_critic:
+            _init_critic_from_actor = [True, False]
+        else:
+            _init_critic_from_actor = [False]
+        for init_critic_from_actor in _init_critic_from_actor:
+            for pp_dp_mp in parallelism:
+                for model_family_name in model_families:
+                    if model_family_name == "opt" and pp_dp_mp[-1] > 2:
+                        continue
+                    test_save_then_load(
+                        model_family_name,
+                        is_critic,
+                        init_critic_from_actor,
+                        pp_dp_mp,
+                    )

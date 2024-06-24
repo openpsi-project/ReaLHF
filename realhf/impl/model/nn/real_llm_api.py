@@ -182,7 +182,7 @@ class ReaLModel(nn.Module):
             layers.append(self._build_layer(idx, self.config))
         self.layers = nn.ModuleList(layers)
 
-        if self.config.share_embeddings_and_output_weights:
+        if self.config.share_embeddings_and_output_weights and not self.config.is_critic:
             _sync_embedding_and_output_weights(self.layers)
 
         self.contiguous_param = torch.empty(

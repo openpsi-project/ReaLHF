@@ -22,8 +22,10 @@ def sd_from_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     if pp_rank == 0 and "wte.weight" in state_dict:
         new_sd["0.wte.weight"] = state_dict["wte.weight"]
         new_sd["0.wpe.weight"] = state_dict["wpe.weight"]
-    if pp_rank == pp_size - 1 and "wte.weight" in state_dict:
+    if pp_rank == pp_size - 1 and "wte.weight" in state_dict and not config.is_critic:
         new_sd[f"{config.n_layers + 1}.weight"] = state_dict["wte.weight"]
+    if pp_rank == pp_size - 1 and config.is_critic and "lm_head.weight" in state_dict:
+        new_sd[f"{config.n_layers + 1}.weight"] = state_dict["lm_head.weight"]
     if "ln_f.weight" in state_dict:
         new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict["ln_f.weight"]
         new_sd[f"{config.n_layers}.ln_f.bias"] = state_dict["ln_f.bias"]
@@ -77,6 +79,8 @@ def sd_to_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     if f"{config.n_layers}.ln_f.weight" in state_dict:
         new_sd["ln_f.weight"] = state_dict[f"{config.n_layers}.ln_f.weight"]
         new_sd["ln_f.bias"] = state_dict[f"{config.n_layers}.ln_f.bias"]
+    if config.is_critic and f"{config.n_layers + 1}.weight" in state_dict:
+        new_sd["lm_head.weight"] = state_dict[f"{config.n_layers + 1}.weight"]
     for i in range(config.n_layers):
         if not any(k.startswith(f"{i+1}.") for k in state_dict):
             continue
@@ -146,7 +150,7 @@ def gpt2_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List
 
 
 def gpt2_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    return ["wte.weight", "transformer.wte.weight"]
+    return ["wte.weight", "transformer.wte.weight", "lm_head.weight"]
 
 
 def convert_config_gpt2(

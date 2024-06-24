@@ -10,19 +10,14 @@ from realhf.base import constants
 def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     new_sd = {}
 
-    if (
-        constants.is_first_pipe_stage()
-        and "model.decoder.embed_tokens.weight" in state_dict
-    ):
-        new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
-        new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
-    if (
-        constants.is_last_pipe_stage()
-        and "model.decoder.embed_tokens.weight" in state_dict
-    ):
-        new_sd[f"{config.n_layers + 1}.weight"] = state_dict[
-            "model.decoder.embed_tokens.weight"
-        ]
+    if "model.decoder.embed_tokens.weight" in state_dict:
+        if constants.is_first_pipe_stage():
+            new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
+            new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
+        if constants.is_last_pipe_stage() and config.share_embeddings_and_output_weights and not config.is_critic:
+            new_sd[f"{config.n_layers + 1}.weight"] = state_dict["model.decoder.embed_tokens.weight"]
+    if "lm_head.weight" in state_dict:
+        new_sd[f"{config.n_layers + 1}.weight"] = state_dict["lm_head.weight"]
     if "model.decoder.final_layer_norm.weight" in state_dict:
         new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict[
             "model.decoder.final_layer_norm.weight"
@@ -67,6 +62,9 @@ def sd_to_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     if constants.is_first_pipe_stage():
         new_sd["model.decoder.embed_tokens.weight"] = state_dict["0.wte.weight"]
         new_sd["model.decoder.embed_positions.weight"] = state_dict["0.wpe.weight"]
+    if config.is_critic or not config.share_embeddings_and_output_weights:
+        if constants.is_last_pipe_stage():
+            new_sd["lm_head.weight"] = state_dict[f"{config.n_layers + 1}.weight"]
 
     if f"{config.n_layers}.ln_f.weight" in state_dict:
         new_sd["model.decoder.final_layer_norm.weight"] = state_dict[
@@ -143,8 +141,10 @@ def opt_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[
 
 
 def opt_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    assert config.share_embeddings_and_output_weights
-    return ["model.decoder.embed_tokens.weight"]
+    if config.share_embeddings_and_output_weights and not config.is_critic:
+        return ["model.decoder.embed_tokens.weight"]
+    else:
+        return ["lm_head.weight"]
 
 
 def convert_config_opt(

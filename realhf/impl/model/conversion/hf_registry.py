@@ -63,6 +63,7 @@ class HFModelRegistry:
         load_dir: str,
         init_critic_from_actor: bool = False,
     ):
+        # TODO: expand odd vocab size to support tensor parallel
         # NOTE: moving this upwards will result in circular import
 
         tik = time.perf_counter()
@@ -133,10 +134,11 @@ class HFModelRegistry:
 
         copy_tik = time.perf_counter()
         if (
-            init_critic_from_actor
-            and f"{model.config.n_layers + 1}.weight" in state_dict
+            init_critic_from_actor and constants.is_last_pipe_stage()
         ):
-            state_dict.pop(f"{model.config.n_layers + 1}.weight")
+            if f"{model.config.n_layers + 1}.weight" in state_dict:
+                state_dict.pop(f"{model.config.n_layers + 1}.weight")
+            assert len(state_dict) == len(model.state_dict()) - 1, (len(state_dict), len(model.state_dict()))
             model.load_state_dict(state_dict, strict=False)
         else:
             try:
