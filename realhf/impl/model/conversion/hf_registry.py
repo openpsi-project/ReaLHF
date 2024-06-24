@@ -10,7 +10,7 @@ import transformers
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging
-from realhf.base.saveload_utils import split_state_dict_into_shards
+from realhf.base.saveload_utils import split_state_dict_into_shards, load_safetensor
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_parallel import (
     mp_merge_key,
@@ -87,17 +87,37 @@ class HFModelRegistry:
         if os.path.exists(os.path.join(load_dir, "pytorch_model.bin.index.json")):
             with open(os.path.join(load_dir, "pytorch_model.bin.index.json"), "r") as f:
                 hf_sd_mapping = json.load(f)["weight_map"]
-            files_to_load = set(hf_sd_mapping[name] for name in required_hf_sd_names)
-        else:
+            files_to_load = set()
+            for name in required_hf_sd_names:
+                if name in hf_sd_mapping:
+                    files_to_load.add(hf_sd_mapping[name])
+        elif os.path.exists(os.path.join(load_dir, "model.safetensors.index.json")):
+            with open(os.path.join(load_dir, "model.safetensors.index.json"), "r") as f:
+                hf_sd_mapping = json.load(f)["weight_map"]
+            files_to_load = set()
+            for name in required_hf_sd_names:
+                if name in hf_sd_mapping:
+                    files_to_load.add(hf_sd_mapping[name])
+        elif os.path.exists(os.path.join(load_dir, "pytorch_model.bin")):
             files_to_load = ["pytorch_model.bin"]
+        elif os.path.exists(os.path.join(load_dir, "model.safetensors")):
+            files_to_load = ["model.safetensors"]
+        else:
+            raise ValueError(
+                f"Could not find model file in {load_dir}. "
+                "Make sure you have downloaded the model correctly."
+            )
         setup_time = time.perf_counter() - tik
 
         load_times, partition_times = [], []
         state_dict = {}
         for fn in files_to_load:
             load_tik = time.perf_counter()
-            # set map_location to be CPU is a little bit faster
-            sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
+            if fn.endswith(".safetensors"):
+                sd = load_safetensor(os.path.join(load_dir, fn))
+            else:
+                # set map_location to be CPU is a little bit faster
+                sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
             partition_tik = time.perf_counter()
             sd = {k: v for k, v in sd.items() if k in required_hf_sd_names}
             sd = self.sd_from_hf_converter(sd, model.config)
@@ -128,6 +148,7 @@ class HFModelRegistry:
                     f"in the model config if you are initializing "
                     f"a critic model from a regular LLM? Err: {e}"
                 )
+                raise e
 
         # Some logging info
         copy_time = time.perf_counter() - copy_tik

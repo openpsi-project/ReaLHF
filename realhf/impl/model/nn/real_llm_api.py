@@ -74,7 +74,7 @@ def _sync_embedding_and_output_weights(layers: nn.ModuleList):
         weight = layers[0].wte.weight
     else:
         weight = layers[-1].weight
-        weight.fill_(0.0)
+        weight.data.fill_(0.0)
     group = constants.grid().embedding_proc_group
     torch.distributed.all_reduce(weight.data, group=group)
 
@@ -505,6 +505,9 @@ class ReaLModel(nn.Module):
             name = k.split(".", 1)[1]
             global_idx = int(k.split(".")[0])
             new_state_dict[f"layers.{global_idx - self.layer_idx_start}.{name}"] = v
+        # pp_size = constants.pipe_parallel_world_size()
+        # pp_rank = constants.pipe_parallel_rank()
+        # if self.config.share_embeddings_and_output_weights and pp_size 
         return super().load_state_dict(
             new_state_dict,
             strict=strict,

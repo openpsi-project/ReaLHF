@@ -1,4 +1,4 @@
-LLAMA_PATH=/lustre/public/pretrained_model_weights/Llama-2-7b-hf
+LLAMA_PATH=/lustre/public/pretrained_model_weights/gemma-7b/
 CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quickstart sft \
     experiment_name=quickstart-sft trial_name=release \
     allocation_mode=manual \
@@ -7,7 +7,7 @@ CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quicks
     model.optimizer.lr_scheduler_type=cosine \
     model.optimizer.lr=1e-5 \
     model.optimizer.warmup_steps_proportion=0.02 \
-    model.type._class=llama \
+    model.type._class=gemma \
     model.type.size=7 \
     model.type.is_critic=False \
     model.path=$LLAMA_PATH \

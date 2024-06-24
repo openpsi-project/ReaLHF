@@ -5,22 +5,31 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
+from realhf.base import constants
 
 
 def sd_from_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     if any(k.startswith("transformer.") for k in state_dict.keys()):
         new_sd = {k.replace("transformer.", ""): v for k, v in state_dict.items()}
-        head_w = new_sd.pop("lm_head.weight")
-        assert torch.allclose(head_w, new_sd["wte.weight"])
+        if "lm_head.weight" in new_sd:
+            head_w = new_sd.pop("lm_head.weight")
+            assert torch.allclose(head_w, new_sd["wte.weight"])
         state_dict = new_sd
 
     new_sd = {}
-    new_sd["0.wte.weight"] = state_dict["wte.weight"]
-    new_sd["0.wpe.weight"] = state_dict["wpe.weight"]
-    new_sd[f"{config.n_layers + 1}.weight"] = state_dict["wte.weight"]
-    new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict["ln_f.weight"]
-    new_sd[f"{config.n_layers}.ln_f.bias"] = state_dict["ln_f.bias"]
+    pp_rank = constants.pipe_parallel_rank()
+    pp_size = constants.pipe_parallel_world_size()
+    if pp_rank == 0 and "wte.weight" in state_dict:
+        new_sd["0.wte.weight"] = state_dict["wte.weight"]
+        new_sd["0.wpe.weight"] = state_dict["wpe.weight"]
+    if pp_rank == pp_size - 1 and "wte.weight" in state_dict:
+        new_sd[f"{config.n_layers + 1}.weight"] = state_dict["wte.weight"]
+    if "ln_f.weight" in state_dict:
+        new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict["ln_f.weight"]
+        new_sd[f"{config.n_layers}.ln_f.bias"] = state_dict["ln_f.bias"]
     for i in range(config.n_layers):
+        if not any(k.startswith(f"h.{i}.") for k in state_dict):
+            continue
         new_sd[f"{i+1}.attn.c_attn.ln.weight"] = state_dict[f"h.{i}.ln_1.weight"]
         new_sd[f"{i+1}.attn.c_attn.ln.bias"] = state_dict[f"h.{i}.ln_1.bias"]
 
@@ -60,10 +69,14 @@ def sd_to_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     ).view(1, 1, max_positions, max_positions)
 
     new_sd = {}
-    new_sd["wte.weight"] = state_dict["0.wte.weight"]
-    new_sd["wpe.weight"] = state_dict["0.wpe.weight"]
-    new_sd["ln_f.weight"] = state_dict[f"{config.n_layers}.ln_f.weight"]
-    new_sd["ln_f.bias"] = state_dict[f"{config.n_layers}.ln_f.bias"]
+    pp_rank = constants.pipe_parallel_rank()
+    if pp_rank == 0:
+        assert "0.wte.weight" in state_dict
+        new_sd["wte.weight"] = state_dict["0.wte.weight"]
+        new_sd["wpe.weight"] = state_dict["0.wpe.weight"]
+    if f"{config.n_layers}.ln_f.weight" in state_dict:
+        new_sd["ln_f.weight"] = state_dict[f"{config.n_layers}.ln_f.weight"]
+        new_sd["ln_f.bias"] = state_dict[f"{config.n_layers}.ln_f.bias"]
     for i in range(config.n_layers):
         if not any(k.startswith(f"{i+1}.") for k in state_dict):
             continue
@@ -102,7 +115,7 @@ def sd_to_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
 
 # param name is used to load directly from huggingface checkpoints
 def gpt2_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
-    return ["wte.weight", "wpe.weight"]
+    return ["wte.weight", "wpe.weight", "transformer.wte.weight", "transformer.wpe.weight"]
 
 
 def gpt2_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
@@ -123,11 +136,12 @@ def gpt2_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List
     ]
     if idx == config.n_layers - 1:
         names += ["ln_f.weight", "ln_f.bias"]
-    return names
+    _names = ["transformer."+name for name in names]
+    return names + _names
 
 
 def gpt2_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    return ["wte.weight"]
+    return ["wte.weight", "transformer.wte.weight"]
 
 
 def convert_config_gpt2(
@@ -138,6 +152,7 @@ def convert_config_gpt2(
         n_kv_heads=hf_config.n_head,
         hidden_dim=hf_config.n_embd,
         head_dim=hf_config.n_embd // hf_config.n_head,
+        n_q_heads=hf_config.n_head,
         intermediate_dim=(
             hf_config.n_inner if hf_config.n_inner is not None else 4 * hf_config.n_embd
         ),
@@ -162,7 +177,7 @@ def to_gpt2_config(config: ReaLModelConfig) -> transformers.GPT2Config:
         n_positions=config.n_positions,
         n_embd=config.hidden_dim,
         n_layer=config.n_layers,
-        n_head=config.hidden_dim // config.head_dim,
+        n_head=config.n_q_heads,
         n_inner=config.intermediate_dim,
         activation_function=config.activation_function,
         embd_pdrop=config.embd_pdrop,

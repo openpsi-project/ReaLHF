@@ -118,6 +118,7 @@ class ReaLModelBlock(nn.Module):
         self.attn = CausalSelfAttentionLayer(
             hidden_dim=config.hidden_dim,
             n_kv_heads=config.n_kv_heads,
+            n_q_heads=config.n_q_heads,
             head_dim=config.head_dim,
             resid_pdrop=config.resid_pdrop,
             attn_pdrop=config.attn_pdrop,
@@ -408,7 +409,7 @@ def real_model_embedding_param_keys(config: model_api.ReaLModelConfig) -> int:
 
 def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -> int:
     count = 0
-    nq = config.hidden_dim // config.head_dim
+    nq = config.n_q_heads
 
     if config.layer_norm_type is None:
         # nn.LayerNorm

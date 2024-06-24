@@ -1,0 +1,165 @@
+import os
+import shutil
+from typing import *
+
+import pathlib
+import torch
+import torch.distributed as dist
+import transformers
+import pytest
+import uuid
+from realhf.api.core.config import ModelFamily
+from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
+from realhf.base import constants, logging
+from realhf.base.testing import (
+    LocalMultiProcessTest,
+    clear_name_resolve,
+    init_global_constants,
+)
+from tests.hf_utils import hf_config_factory
+
+logger = logging.getLogger("tests.test_saveload")
+
+
+def _save_then_load(
+    tmp_path: pathlib.Path,
+    model_family_name: str,
+    is_critic: bool,
+    init_critic_from_actor: bool,
+    pp_dp_mp: Tuple,
+):
+    # NOTE: import here to avoid initializing CUDA context in the main process
+    from realhf.impl.model.nn.real_llm_api import ReaLModel
+
+    # os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
+
+    model_name = f"saveload_test_{model_family_name}"
+    num_pp, num_dp, num_mp = pp_dp_mp
+    init_global_constants(
+        num_dp=num_dp,
+        num_mp=num_mp,
+        num_pp=num_pp,
+        model_name=model_name,
+    )
+    assert dist.get_world_size() == 8, dist.get_world_size()
+    assert tmp_path.exists()
+    hf_save_path = tmp_path / "hf"
+    real_save_path = tmp_path / "real"
+    real_save_path2 = tmp_path / "real2"
+
+    with constants.model_scope(model_name):
+        tokenizer = None
+        hf_config = hf_config_factory(model_family_name)
+
+        if dist.get_rank() == 0:
+            hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
+            hf_model.save_pretrained(hf_save_path)
+        dist.barrier()
+
+        mconfig: ReaLModelConfig = getattr(
+            ReaLModel, f"config_from_{model_family_name}"
+        )(hf_config)
+        mconfig.is_critic = is_critic
+
+        # load from hf model
+        model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
+        model._instantiation_hooks.append(
+            lambda: getattr(model, f"from_{model_family_name}")(
+                hf_save_path, init_critic_from_actor
+            )
+        )
+        model.instantiate()
+        sd1 = model.state_dict()
+
+        # save
+        getattr(model, f"to_{model_family_name}")(tokenizer, real_save_path)
+        dist.barrier()
+        file_size = 0
+        for fn in os.listdir(real_save_path):
+            if fn.endswith(".bin"):
+                file_size += os.path.getsize(os.path.join(real_save_path, fn))
+
+        # load
+        model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
+        model._instantiation_hooks.append(
+            lambda: getattr(model, f"from_{model_family_name}")(
+                real_save_path, init_critic_from_actor
+            )
+        )
+        model.instantiate()
+        dist.barrier()
+        sd2 = model.state_dict()
+        for k, v in sd2.items():
+            if init_critic_from_actor and k == f"{mconfig.n_layers + 1}.weight":
+                continue
+            assert torch.allclose(v, sd1[k]), k
+
+        # load hf
+        if not is_critic:
+            hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+                real_save_path
+            )
+            dist.barrier()
+            if constants.model_parallel_world_size() == 1:
+                sd3 = HF_MODEL_FAMILY_REGISTRY[model_family_name][
+                    "sd_from_hf_converter"
+                ](hf_model.state_dict(), mconfig)
+                for k, v in sd1.items():
+                    assert torch.allclose(v.cpu(), sd3[k]), k
+
+        # save again, check size
+        getattr(model, f"to_{model_family_name}")(tokenizer, real_save_path2)
+        dist.barrier()
+        file_size2 = 0
+        for fn in os.listdir(real_save_path2):
+            if fn.endswith(".bin"):
+                file_size2 += os.path.getsize(os.path.join(real_save_path2, fn))
+        assert file_size2 == file_size, (file_size, file_size2)
+
+
+@pytest.mark.skip("This test requires multiple GPUs to run.")
+def test_save_then_load(
+    model_family_name: str,
+    is_critic: bool,
+    init_critic_from_actor: bool,
+    pp_dp_mp: Tuple,
+):
+    print(
+        f">>>>>>>>>>> running {model_family_name} "
+        f"is_critic={is_critic} init_critic_from_actor={init_critic_from_actor}"
+    )
+    expr_name = "saveload_test"
+    trial_name = "test"
+    clear_name_resolve(expr_name=expr_name, trial_name=trial_name)
+    tmp_path = pathlib.Path(f"/tmp/{expr_name}/{trial_name}/{uuid.uuid4()}")
+    os.makedirs(tmp_path, exist_ok=True)
+    test_impl = LocalMultiProcessTest(
+        world_size=8,
+        func=_save_then_load,
+        expr_name=expr_name,
+        trial_name=trial_name,
+        model_family_name=model_family_name,
+        is_critic=is_critic,
+        init_critic_from_actor=init_critic_from_actor,
+        pp_dp_mp=pp_dp_mp,
+        tmp_path=tmp_path,
+    )
+    test_impl.launch()
+    shutil.rmtree(tmp_path)
+    print(
+        f"<<<<<<<<<<<<<<< passed {model_family_name} "
+        f"is_critic={is_critic} init_critic_from_actor={init_critic_from_actor}"
+    )
+
+
+if __name__ == "__main__":
+    pp_dp_mp = (2, 2, 2)
+    is_critic = False
+    init_critic_from_actor = False
+    for model_family_name in ["qwen2", "llama", "gemma", 'opt', 'gpt2']:
+        test_save_then_load(
+            model_family_name,
+            is_critic,
+            init_critic_from_actor,
+            pp_dp_mp,
+        )

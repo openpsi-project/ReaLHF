@@ -26,7 +26,8 @@ def convert_config_gemma(
         n_layers=hf_config.num_hidden_layers,
         n_kv_heads=hf_config.num_key_value_heads,
         hidden_dim=hf_config.hidden_size,
-        head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
+        n_q_heads=hf_config.num_attention_heads,
+        head_dim=hf_config.head_dim,
         intermediate_dim=hf_config.intermediate_size,
         vocab_size=hf_config.vocab_size,
         n_positions=hf_config.max_position_embeddings,
@@ -60,18 +61,21 @@ def convert_config_back_gemma(
         intermediate_size=config.intermediate_dim,
         num_hidden_layers=config.n_layers,
         num_key_value_heads=config.n_kv_heads,
-        num_attention_heads=config.hidden_dim // config.head_dim,
+        num_attention_heads=config.n_q_heads,
+        head_dim=config.head_dim,
         max_position_embeddings=config.n_positions,
         rms_norm_eps=config.layer_norm_epsilon,
         hidden_act=config.activation_function,
         hidden_activation=config.activation_function,
-        head_dim=config.head_dim,
         attention_bias=config.use_attention_bias,
         attention_dropout=config.attn_pdrop,
         rope_theta=config.rotary_base,
         tie_word_embeddings=config.share_embeddings_and_output_weights,
     )
 
+def gemma_output_head_param_name(config: ReaLModelConfig) -> List[str]:
+    # tied embedding, use the token embedding name
+    return ["model.embed_tokens.weight"]
 
 register_hf_family(
     name="gemma",
@@ -82,5 +86,5 @@ register_hf_family(
     sd_to_hf_converter=to_llama_state_dict,
     embedding_param_names=llama_embedding_layer_names,
     tblock_param_names=llama_transformer_block_param_name,
-    head_param_names=llama_output_head_param_name,
+    head_param_names=gemma_output_head_param_name,
 )

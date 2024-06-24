@@ -82,10 +82,11 @@ class ReaLModelConfig:
     ### Architectural configurations. ###
     n_layers: int
     n_kv_heads: int
-    head_dim: int
+    n_q_heads: int
     hidden_dim: int
     intermediate_dim: int  # for mlp, usually 4*h
     vocab_size: int
+    head_dim: Optional[int] = None
     n_positions: Optional[int] = None
     embd_pdrop: float = 0.1
     resid_pdrop: float = 0.1
@@ -121,6 +122,8 @@ class ReaLModelConfig:
     def __post_init__(self):
         if self.is_critic and self.share_embeddings_and_output_weights:
             raise ValueError("Critic model cannot share embeddings and output weights.")
+        if self.head_dim is None:
+            self.head_dim = self.hidden_dim // self.n_q_heads
 
 
 def load_hf_tokenizer(
@@ -131,21 +134,9 @@ def load_hf_tokenizer(
     kwargs = {}
     if padding_side is not None:
         kwargs["padding_side"] = padding_side
-    if os.path.exists(model_name_or_path):
-        # Locally tokenizer loading has some issue, so we need to force download
-        model_json = os.path.join(model_name_or_path, "config.json")
-        if "codet5" in model_name_or_path:
-            tokenizer = transformers.RobertaTokenizer.from_pretrained(
-                model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
-            )
-        if os.path.exists(model_json):
-            tokenizer = transformers.AutoTokenizer.from_pretrained(
-                model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
-            )
-    else:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
-        )
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
     return tokenizer

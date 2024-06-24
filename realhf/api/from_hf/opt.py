@@ -4,22 +4,28 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
+from realhf.base import constants
 
 
 def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
-
     new_sd = {}
-    new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
-    new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
-    new_sd[f"{config.n_layers + 1}.weight"] = state_dict["lm_head.weight"]
-    new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict[
-        "model.decoder.final_layer_norm.weight"
-    ]
-    new_sd[f"{config.n_layers}.ln_f.bias"] = state_dict[
-        "model.decoder.final_layer_norm.bias"
-    ]
+
+    if constants.is_first_pipe_stage() and "model.decoder.embed_tokens.weight" in state_dict:
+        new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
+        new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
+    if constants.is_last_pipe_stage() and "model.decoder.embed_tokens.weight" in state_dict:
+        new_sd[f"{config.n_layers + 1}.weight"] = state_dict["model.decoder.embed_tokens.weight"]
+    if "model.decoder.final_layer_norm.weight" in state_dict:
+        new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict[
+            "model.decoder.final_layer_norm.weight"
+        ]
+        new_sd[f"{config.n_layers}.ln_f.bias"] = state_dict[
+            "model.decoder.final_layer_norm.bias"
+        ]
 
     for i in range(config.n_layers):
+        if not any(k.startswith(f"model.decoder.layers.{i}.") for k in state_dict):
+            continue
         for k in ["weight", "bias"]:
             new_sd[f"{i+1}.attn.c_attn.q_attn.{k}"] = state_dict[
                 f"model.decoder.layers.{i}.self_attn.q_proj.{k}"
@@ -50,17 +56,21 @@ def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
 
 def sd_to_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     new_sd = {}
-    new_sd["model.decoder.embed_tokens.weight"] = state_dict["0.wte.weight"]
-    new_sd["model.decoder.embed_positions.weight"] = state_dict["0.wpe.weight"]
-    new_sd["lm_head.weight"] = state_dict[f"{config.n_layers + 1}.weight"]
-    new_sd["model.decoder.final_layer_norm.weight"] = state_dict[
-        f"{config.n_layers}.ln_f.weight"
-    ]
-    new_sd["model.decoder.final_layer_norm.bias"] = state_dict[
-        f"{config.n_layers}.ln_f.bias"
-    ]
+    if constants.is_first_pipe_stage():
+        new_sd["model.decoder.embed_tokens.weight"] = state_dict["0.wte.weight"]
+        new_sd["model.decoder.embed_positions.weight"] = state_dict["0.wpe.weight"]
+
+    if f"{config.n_layers}.ln_f.weight" in state_dict:
+        new_sd["model.decoder.final_layer_norm.weight"] = state_dict[
+            f"{config.n_layers}.ln_f.weight"
+        ]
+        new_sd["model.decoder.final_layer_norm.bias"] = state_dict[
+            f"{config.n_layers}.ln_f.bias"
+        ]
 
     for i in range(config.n_layers):
+        if not any(k.startswith(f"{i+1}.") for k in state_dict):
+            continue
         for k in ["weight", "bias"]:
             new_sd[f"model.decoder.layers.{i}.self_attn.q_proj.{k}"] = state_dict[
                 f"{i+1}.attn.c_attn.q_attn.{k}"
@@ -125,7 +135,8 @@ def opt_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[
 
 
 def opt_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    return ["lm_head.weight"]
+    assert config.share_embeddings_and_output_weights
+    return ["model.decoder.embed_tokens.weight"]
 
 
 def convert_config_opt(
@@ -138,6 +149,7 @@ def convert_config_opt(
         n_kv_heads=hf_config.num_attention_heads,
         hidden_dim=hf_config.hidden_size,
         head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
+        n_q_heads=hf_config.num_attention_heads,
         intermediate_dim=hf_config.ffn_dim,
         vocab_size=hf_config.vocab_size,
         n_positions=hf_config.max_position_embeddings,
@@ -156,9 +168,11 @@ def convert_config_opt(
 
 
 def to_opt_config(config: ReaLModelConfig) -> transformers.OPTConfig:
+    assert config.abs_position_embedding_offset == 2
+    assert config.n_q_heads == config.n_kv_heads
     return transformers.OPTConfig(
         num_hidden_layers=config.n_layers,
-        num_attention_heads=config.n_kv_heads,
+        num_attention_heads=config.n_q_heads,
         hidden_size=config.hidden_dim,
         ffn_dim=config.intermediate_dim,
         vocab_size=config.vocab_size,

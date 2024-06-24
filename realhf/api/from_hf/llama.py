@@ -9,11 +9,13 @@ from realhf.base import constants
 
 
 def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
-
     new_state_dict = {}
     for k, v in state_dict.items():
         if k == "model.embed_tokens.weight":
-            new_state_dict["0.wte.weight"] = v
+            if constants.is_first_pipe_stage():
+                new_state_dict["0.wte.weight"] = v
+            elif constants.is_last_pipe_stage() and config.share_embeddings_and_output_weights:
+                new_state_dict[f"{config.n_layers + 1}.weight"] = v
         elif k == "lm_head.weight":
             new_state_dict[f"{config.n_layers + 1}.weight"] = v
         elif k == "model.norm.weight":
@@ -103,7 +105,8 @@ def to_llama_state_dict(
         if i == 0:
             new_sd["model.embed_tokens.weight"] = state_dict["0.wte.weight"]
         elif i == config.n_layers + 1:
-            new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
+            if not config.share_embeddings_and_output_weights:
+                new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
         else:
             new_sd[f"model.layers.{i-1}.input_layernorm.weight"] = state_dict[
                 f"{i}.attn.c_attn.ln.weight"
@@ -171,25 +174,30 @@ def llama_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
 
 
 def llama_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
-    names = [
-        f"model.layers.{idx}.input_layernorm.weight",
-        f"model.layers.{idx}.mlp.down_proj.weight",
-        f"model.layers.{idx}.mlp.gate_proj.weight",
-        f"model.layers.{idx}.mlp.up_proj.weight",
-        f"model.layers.{idx}.post_attention_layernorm.weight",
-        f"model.layers.{idx}.self_attn.k_proj.weight",
-        f"model.layers.{idx}.self_attn.o_proj.weight",
-        f"model.layers.{idx}.self_attn.q_proj.weight",
-        # f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
-        f"model.layers.{idx}.self_attn.v_proj.weight",
-    ]
-    if idx == config.n_layers - 1:
-        names += ["model.norm.weight"]
+    names = []
+    for k in ['weight', 'bias']:
+        names += [
+            f"model.layers.{idx}.input_layernorm.{k}",
+            f"model.layers.{idx}.mlp.down_proj.{k}",
+            f"model.layers.{idx}.mlp.gate_proj.{k}",
+            f"model.layers.{idx}.mlp.up_proj.{k}",
+            f"model.layers.{idx}.post_attention_layernorm.{k}",
+            f"model.layers.{idx}.self_attn.k_proj.{k}",
+            f"model.layers.{idx}.self_attn.o_proj.{k}",
+            f"model.layers.{idx}.self_attn.q_proj.{k}",
+            # f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
+            f"model.layers.{idx}.self_attn.v_proj.{k}",
+        ]
+        if idx == config.n_layers - 1:
+            names += [f"model.norm.{k}"]
     return names
 
 
 def llama_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    return ["lm_head.weight"]
+    if config.share_embeddings_and_output_weights:
+        return ["model.embed_tokens.weight"]
+    else:
+        return ["lm_head.weight"]
 
 
 def convert_config_llama(
@@ -198,6 +206,7 @@ def convert_config_llama(
     return ReaLModelConfig(
         n_layers=hf_config.num_hidden_layers,
         n_kv_heads=hf_config.num_key_value_heads,
+        n_q_heads=hf_config.num_attention_heads,
         hidden_dim=hf_config.hidden_size,
         head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
         intermediate_dim=hf_config.intermediate_size,
@@ -242,7 +251,7 @@ def convert_config_back_llama(
         intermediate_size=config.intermediate_dim,
         num_hidden_layers=config.n_layers,
         num_key_value_heads=config.n_kv_heads,
-        num_attention_heads=config.hidden_dim // config.head_dim,
+        num_attention_heads=config.n_q_heads,
         max_position_embeddings=config.n_positions,
         rms_norm_eps=config.layer_norm_epsilon,
         hidden_act=config.activation_function,

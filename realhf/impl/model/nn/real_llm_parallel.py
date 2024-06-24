@@ -251,16 +251,16 @@ def get_real_model_param_shape(
                 assert "bias" in k
                 return (config.intermediate_dim // mp_size,)
         if "weight" in k:
-            assert config.hidden_dim // config.head_dim % mp_size == 0
-            return (config.hidden_dim // mp_size, config.hidden_dim)
+            assert config.n_q_heads % mp_size == 0
+            return (config.n_q_heads * config.head_dim // mp_size, config.hidden_dim)
         else:
             assert "bias" in k
-            return (config.hidden_dim // mp_size,)
+            return (config.n_q_heads * config.head_dim // mp_size,)
     elif any([rk in k for rk in ROW_LINEAR_KEYS]):
         if "mlp" in k and "weight" in k:
             return (config.hidden_dim, config.intermediate_dim // mp_size)
         elif "attn" in k and "weight" in k:
-            return (config.hidden_dim, config.hidden_dim // mp_size)
+            return (config.hidden_dim, config.n_q_heads * config.head_dim // mp_size)
         elif "bias" in k:
             return (config.hidden_dim,)
         else:

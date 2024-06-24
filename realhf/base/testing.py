@@ -346,6 +346,7 @@ def get_llama_config(size):
         size_args = dict(
             n_layers=40,
             n_kv_heads=32,
+            n_q_heads=32,
             head_dim=128,
             hidden_dim=4096,
             intermediate_dim=11008,
@@ -355,6 +356,7 @@ def get_llama_config(size):
         size_args = dict(
             n_layers=40,
             n_kv_heads=40,
+            n_q_heads=40,
             head_dim=128,
             hidden_dim=5120,
             intermediate_dim=13824,
@@ -364,6 +366,7 @@ def get_llama_config(size):
         size_args = dict(
             n_layers=48,
             n_kv_heads=8,
+            n_q_heads=64,
             head_dim=128,
             hidden_dim=8192,
             intermediate_dim=22016,
@@ -373,6 +376,7 @@ def get_llama_config(size):
         size_args = dict(
             n_layers=80,
             n_kv_heads=8,
+            n_q_heads=64,
             head_dim=128,
             hidden_dim=8192,
             intermediate_dim=28672,

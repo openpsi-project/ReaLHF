@@ -34,6 +34,7 @@ class CausalSelfAttentionLayer(nn.Module):
         self,
         hidden_dim: int,
         n_kv_heads: int,
+        n_q_heads: int,
         head_dim: int,
         resid_pdrop: float,
         attn_pdrop: float,
@@ -65,7 +66,6 @@ class CausalSelfAttentionLayer(nn.Module):
         if dtype is None:
             dtype = torch.float16
         assert hidden_dim % head_dim == 0
-        n_q_heads = hidden_dim // head_dim
         self.c_attn = LayerNormQKVLinear(
             input_dim=hidden_dim,
             head_dim=head_dim,
@@ -84,7 +84,7 @@ class CausalSelfAttentionLayer(nn.Module):
 
         if model_parallel:
             self.c_proj = RowParallelLinear(
-                hidden_dim,
+                n_q_heads * head_dim,
                 hidden_dim,
                 bias=use_attn_proj_bias,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
@@ -93,7 +93,7 @@ class CausalSelfAttentionLayer(nn.Module):
             )
         else:
             self.c_proj = nn.Linear(
-                hidden_dim,
+                n_q_heads * head_dim,
                 hidden_dim,
                 bias=use_attn_proj_bias,
                 dtype=dtype,
@@ -121,7 +121,6 @@ class CausalSelfAttentionLayer(nn.Module):
             )
 
         # constant
-        self.h = hidden_dim
         self.nq = n_q_heads
         self.nkv = n_kv_heads
         if self.nq % self.nkv != 0:
