@@ -203,14 +203,11 @@ def param_intervals_from_keys(
                 if end is None or param_spec[k].end_idx > end:
                     end = param_spec[k].end_idx
             intervals += [(start, end)]
-            if intervals[0][0] == end:
-                # Merge these two intervals if possible.
-                # Note that the parameter intervals are assigned in the reverse order.
-                assert start < intervals[0][1], intervals
-                return [(start, intervals[0][1])]
+            intervals = sorted(intervals, key=lambda x: x[0])
+            # Merge these two intervals if possible.
+            if intervals[0][1] == intervals[1][0]:
+                return [(intervals[0][0], intervals[1][1])]
             else:
-                assert intervals[0][0] > start, intervals
-                intervals = sorted(intervals, key=lambda x: x[0])
                 return intervals
 
     intervals = []

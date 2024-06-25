@@ -9,7 +9,7 @@ import transformers
 from megatron.core import parallel_state
 from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
 from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
-from megatron.core.optimizer import get_megatron_optimizer
+from megatron.core.optimizer import get_megatron_optimizer, DistributedOptimizer
 from megatron.core.optimizer.optimizer_config import OptimizerConfig
 from megatron.core.transformer.transformer_config import TransformerConfig
 
@@ -20,6 +20,7 @@ from realhf.impl.model.backend.utils import (
     MegatronEngine,
     OptimizerParamScheduler,
     finalize_grads_megatron,
+    step_megatron_distrb_optimizer,
 )
 from realhf.impl.model.modules.mlp import get_activation_fn
 from realhf.impl.model.nn.real_llm_api import ReaLModel
@@ -226,7 +227,10 @@ class ReaLMegatronEngine:
 
                 finalize_grads_megatron(self.engine)
 
-                update_successful, grad_norm, _ = self.engine.optim.step()
+                if isinstance(self.engine.optim, DistributedOptimizer):
+                    update_successful, grad_norm, _ = step_megatron_distrb_optimizer(self.engine.optim)
+                else:
+                    update_successful, grad_norm, _ = self.engine.optim.step()
                 if update_successful:
                     self.engine.lr_scheduler.step_absolute(version_steps)
                 if (

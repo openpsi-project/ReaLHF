@@ -75,6 +75,10 @@ def _sync_embedding_and_output_weights(layers: nn.ModuleList):
     else:
         weight = layers[-1].weight
         weight.data.fill_(0.0)
+        # To make Megatron happy
+        weight.shared = True
+        weight.shared_embedding = True
+
     group = constants.grid().embedding_proc_group
     torch.distributed.all_reduce(weight.data, group=group)
 

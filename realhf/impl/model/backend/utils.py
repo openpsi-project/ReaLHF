@@ -9,8 +9,12 @@ from megatron.core.distributed.distributed_data_parallel import (
 )
 from megatron.core.optimizer.distrib_optimizer import (
     DistributedOptimizer as MegatronDistOptim,
+    MixedPrecisionOptimizer as MegatronMixedPrecOptim,
 )
-
+from megatron.core.optimizer.clip_grads import (
+    clip_grad_norm_fp32,
+    count_zeros_fp32,
+)
 from realhf.base import constants, logging
 
 if TYPE_CHECKING:
@@ -81,7 +85,9 @@ class OptimizerParamScheduler(object):
         self.wd_incr_style = wd_incr_style
 
         self.override_opt_param_scheduler = override_opt_param_scheduler
-        self.use_checkpoint_opt_param_scheduler = use_checkpoint_opt_param_scheduler
+        self.use_checkpoint_opt_param_scheduler = (
+            use_checkpoint_opt_param_scheduler
+        )
         if self.override_opt_param_scheduler:
             assert not self.use_checkpoint_opt_param_scheduler, (
                 "both override and " "use-checkpoint are set."
@@ -89,7 +95,9 @@ class OptimizerParamScheduler(object):
 
         # Set the learning rate
         self.step(0)
-        self.log_rank_0("> learning rate decay style: {}".format(self.lr_decay_style))
+        self.log_rank_0(
+            "> learning rate decay style: {}".format(self.lr_decay_style)
+        )
 
     def log_rank_0(self, msg):
         if constants.parallelism_rank() == 0:
@@ -180,7 +188,9 @@ class OptimizerParamScheduler(object):
         for param_group in self.optimizer.param_groups:
             new_lr = self.get_lr(param_group)
             param_group["lr"] = new_lr * param_group.get("lr_mult", 1.0)
-            param_group["weight_decay"] = new_wd * param_group.get("wd_mult", 1.0)
+            param_group["weight_decay"] = new_wd * param_group.get(
+                "wd_mult", 1.0
+            )
 
     def step(self, increment):
         """Set lr for all parameters groups."""
@@ -189,7 +199,9 @@ class OptimizerParamScheduler(object):
         for param_group in self.optimizer.param_groups:
             new_lr = self.get_lr(param_group)
             param_group["lr"] = new_lr * param_group.get("lr_mult", 1.0)
-            param_group["weight_decay"] = new_wd * param_group.get("wd_mult", 1.0)
+            param_group["weight_decay"] = new_wd * param_group.get(
+                "wd_mult", 1.0
+            )
 
     def state_dict(self):
         state_dict = {
@@ -210,7 +222,9 @@ class OptimizerParamScheduler(object):
         """Auxiliary function for checking the values in the checkpoint and
         setting them."""
         if self.override_opt_param_scheduler:
-            self.log_rank_0(" > overriding {} value to {}".format(name, cls_value))
+            self.log_rank_0(
+                " > overriding {} value to {}".format(name, cls_value)
+            )
             return cls_value
 
         if not self.use_checkpoint_opt_param_scheduler:
@@ -218,7 +232,9 @@ class OptimizerParamScheduler(object):
                 f"OptimizerParamScheduler: class input value {cls_value} and checkpoint"
                 f"value {sd_value} for {name} do not match"
             )
-        self.log_rank_0(" > using checkpoint value {} for {}".format(sd_value, name))
+        self.log_rank_0(
+            " > using checkpoint value {} for {}".format(sd_value, name)
+        )
         return sd_value
 
     def load_state_dict(self, sd):
@@ -286,6 +302,115 @@ class OptimizerParamScheduler(object):
             )
 
 
+def _step_megatron_distrib_optimizer_internal(optim: MegatronDistOptim):
+    # NOTE: patching this function to use the correct model parallel group
+
+    optim._copy_model_grads_to_main_grads()
+
+    # Do unscale, check for inf, and update grad scaler only for
+    # the case that grad scaler is provided.
+    if optim.grad_scaler:
+
+        def _unscale_main_grads_and_check_for_nan(optim: MegatronDistOptim):
+
+            # Collect main grads.
+            main_grads = optim._collect_main_grad_data_for_unscaling()
+
+            # Reset found inf.
+            optim.found_inf.fill_(0.0)
+
+            # Unscale and set found inf/nan
+            torch._amp_foreach_non_finite_check_and_unscale_(
+                main_grads, optim.found_inf, optim.grad_scaler.inv_scale
+            )
+
+            # Update across all model parallel instances.
+            dist.all_reduce(
+                optim.found_inf,
+                op=dist.ReduceOp.MAX,
+                group=constants.grid().ds_model_proc_group,
+            )
+
+            # Check for nan.
+            found_inf_flag = optim.found_inf.item() > 0
+
+            return found_inf_flag
+
+        # Unscale and check for inf/nan.
+        found_inf_flag = _unscale_main_grads_and_check_for_nan(optim)
+
+        # We are done with scaling gradients
+        # so we can update the loss scale.
+        optim.grad_scaler.update(found_inf_flag)
+
+        # If we found inf/nan, skip the update.
+        if found_inf_flag:
+            optim.update_successful, grad_norm, num_zeros_in_grad = (
+                False,
+                None,
+                None,
+            )
+            return optim.update_successful, grad_norm, num_zeros_in_grad
+
+    def clip_grad_norm(optim: MegatronDistOptim, clip_grad: float) -> float:
+        """Compute grad norm."""
+        params = optim.get_parameters()
+        grads_for_norm = optim.get_main_grads_for_grad_norm()
+        return clip_grad_norm_fp32(
+            params,
+            grads_for_norm,
+            clip_grad,
+            model_parallel_group=constants.grid().ds_model_proc_group,
+        )
+
+    def count_zeros(optim: MegatronDistOptim) -> float:
+        """Count number of zeros in model's gradients."""
+        params = optim.get_parameters()
+        return count_zeros_fp32(
+            params,
+            model_parallel_group=constants.grid().ds_model_proc_group,
+        )
+
+    # Clip the main gradients.
+    grad_norm = None
+    if optim.config.clip_grad > 0.0:
+        grad_norm = clip_grad_norm(optim, optim.config.clip_grad)
+
+    # Count the zeros in the grads.
+    num_zeros_in_grad = None
+    if optim.config.log_num_zeros_in_grad:
+        num_zeros_in_grad = count_zeros(optim)
+
+    # Step the optimizer.
+    optim.optimizer.step()
+
+    # Update params from main params.
+    optim._copy_main_params_to_model_params()
+    # Successful update.
+    optim.update_successful, grad_norm, num_zeros_in_grad = (
+        True,
+        grad_norm,
+        num_zeros_in_grad,
+    )
+    return optim.update_successful, grad_norm, num_zeros_in_grad
+
+
+def step_megatron_distrb_optimizer(optim: MegatronDistOptim):
+
+    optim.update_successful, grad_norm, num_zeros_in_grad = (
+        _step_megatron_distrib_optimizer_internal(optim)
+    )
+
+    # If not overlapping all-gather for parameters, launch synchronous all-gather
+    # communication calls here. If overlapping all-gather for parameters, the following
+    # call to _gather_all_model_params is a no-op: the first all-gather is launched
+    # asynchronously in the next optimizer.zero_grad() call and subsequent all-gathers
+    # are launched in the forward pre-hook.
+    optim._reset_metadata_and_sync_gather_all_model_params(force_sync=False)
+
+    return optim.update_successful, grad_norm, num_zeros_in_grad
+
+
 def _flatten_dense_tensors(tensors):
     """Flatten dense tensors into a contiguous 1D buffer. Assume tensors are of
     same dense type.
@@ -321,7 +446,8 @@ def _unflatten_dense_tensors(flat, tensors):
 
 def megatron_all_reduce_layernorm_grads(engine: MegatronEngine):
     if not (
-        constants.sequence_parallel() and constants.model_parallel_world_size() > 1
+        constants.sequence_parallel()
+        and constants.model_parallel_world_size() > 1
     ):
         return
     real_model: ReaLModel = engine.ddp.module
@@ -333,7 +459,9 @@ def megatron_all_reduce_layernorm_grads(engine: MegatronEngine):
             continue
         else:
             assert 0 < i < real_model.config.n_layers + 1
-            layer: ReaLModelBlock = real_model.layers[i - real_model.layer_idx_start]
+            layer: ReaLModelBlock = real_model.layers[
+                i - real_model.layer_idx_start
+            ]
             grads.append(layer.attn.c_attn.ln.weight.main_grad)
             if getattr(layer.attn.c_attn.ln, "bias", None) is not None:
                 grads.append(layer.attn.c_attn.ln.bias.main_grad)
