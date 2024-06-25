@@ -73,6 +73,9 @@ def slice_intervals(
     output_size: int,
 ) -> torch.Tensor:
     assert len(tensor.shape) == 1
+    # NOTE: these following assertions will take ten years to finish.
+    # assert len(intervals) == len(intervals_cpu)
+    # assert len(set([x[0] for x in intervals_cpu])) == len(intervals_cpu)
     if len(intervals_cpu) == 1:
         return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
     elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
@@ -123,6 +126,7 @@ def build_param_spec(
     layer_indices: List[int],
     config: model_api.ReaLModelConfig,
     mp_size: int,
+    pp_size: int,
     sequence_parallel: bool,
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     if len(layer_indices) == 0:
@@ -146,7 +150,7 @@ def build_param_spec(
         shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
         if (
             config.share_embeddings_and_output_weights
-            and constants.pipe_parallel_world_size() == 1
+            and pp_size == 1
             and k == f"{config.n_layers + 1}.weight"
             and not config.is_critic
         ):
@@ -159,7 +163,7 @@ def build_param_spec(
 
     if (
             config.share_embeddings_and_output_weights
-            and constants.pipe_parallel_world_size() == 1
+            and pp_size == 1
             and not config.is_critic
         ):
         param_spec[f"{config.n_layers + 1}.weight"] = param_spec["0.wte.weight"]
@@ -177,16 +181,42 @@ def param_intervals_from_keys(
     portion_rank: int,
 ) -> List[int]:
     if portion_size == 1:
-        start, end = None, None
-        for k in sd_keys:
-            if start is None or param_spec[k].start_idx < start:
-                start = param_spec[k].start_idx
-            if end is None or param_spec[k].end_idx > end:
-                end = param_spec[k].end_idx
-        return [(start, end)]
+        if not config.share_embeddings_and_output_weights or config.is_critic or f"{config.n_layers + 1}.weight" not in sd_keys:
+            # In this case, all parameters have unique unoverlapped memory allocations.
+            # If the portion size is also one, we can merge these contiguous intervals.
+            start, end = None, None
+            for k in sd_keys:
+                if start is None or param_spec[k].start_idx < start:
+                    start = param_spec[k].start_idx
+                if end is None or param_spec[k].end_idx > end:
+                    end = param_spec[k].end_idx
+            return [(start, end)]
+        else:
+            # The embeddings and output weights are shared.
+            intervals = [(param_spec[f"{config.n_layers + 1}.weight"].start_idx, param_spec[f"{config.n_layers + 1}.weight"].end_idx)]
+            start, end = None, None
+            for k in sd_keys:
+                if k == f"{config.n_layers + 1}.weight":
+                    continue
+                if start is None or param_spec[k].start_idx < start:
+                    start = param_spec[k].start_idx
+                if end is None or param_spec[k].end_idx > end:
+                    end = param_spec[k].end_idx
+            intervals += [(start, end)]
+            if intervals[0][0] == end:
+                # Merge these two intervals if possible.
+                # Note that the parameter intervals are assigned in the reverse order.
+                assert start < intervals[0][1], intervals
+                return [(start, intervals[0][1])]
+            else:
+                assert intervals[0][0] > start, intervals
+                intervals = sorted(intervals, key=lambda x: x[0])
+                return intervals
 
     intervals = []
     for k in sd_keys:
+        if config.share_embeddings_and_output_weights and not config.is_critic and k == f"{config.n_layers + 1}.weight":
+            continue
         if (
             model_name,
             k.split(".", 1)[1],
@@ -229,23 +259,23 @@ def param_intervals_from_keys(
 
 def map_param_to_contigous_memory(
     layers: torch.nn.ModuleList,
+    config: model_api.ReaLModelConfig,
     param_spec: Dict[str, ContiguousParamSpec],
     contiguous_param: torch.Tensor,
     layer_idx_offset: int,
+    allocate_only:bool,
 ):
     for local_layer_idx, l in enumerate(layers):
         layer_idx = local_layer_idx + layer_idx_offset
         for k, v in l.named_parameters():
             spec = param_spec[f"{layer_idx}.{k}"]
             old_param_data = v.data
-            recursive_getattr(l, k).data = contiguous_param[
+            target = contiguous_param[
                 spec.start_idx : spec.end_idx
             ].view(spec.shape)
-            # This is for reward model. We should initialize the reward head instead of letting it be all-zero.
-            if old_param_data.shape == spec.shape:
-                v.data.copy_(old_param_data)
+            if not allocate_only:
+                target.copy_(old_param_data)
             else:
-                assert old_param_data.shape == torch.Size([0]), (
-                    old_param_data.shape,
-                    spec.shape,
-                )
+                if not (config.share_embeddings_and_output_weights and not config.is_critic and layer_idx == config.n_layers + 1):
+                    assert old_param_data.shape == torch.Size([0]), (old_param_data.shape, spec.shape, f"{layer_idx}.{k}")
+            recursive_getattr(l, k).data = target

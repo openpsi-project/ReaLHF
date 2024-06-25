@@ -274,7 +274,7 @@ class CommonExperimentConfig(Experiment):
                     rpc=rpc,
                     device_mesh=(
                         make_device_mesh_from_name(
-                            self.nodelist,
+                            self.global_device_mesh.name,
                             self.allocations[rpc_type].device_mesh,
                         )
                         if self.allocations[rpc_type].device_mesh is not None

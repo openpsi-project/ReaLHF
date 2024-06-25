@@ -24,7 +24,7 @@ from realhf.impl.model.comm.param_realloc import (
     is_trainable,
     store_trainable_params,
 )
-from realhf.impl.model.nn.flatten_param import set_intervals, slice_intervals
+from realhf.impl.model.nn.flatten_param import set_intervals, slice_intervals, recursive_getattr
 from realhf.impl.model.utils.padding import pad_input, unpad_input
 
 from .flatten_param import build_param_spec, map_param_to_contigous_memory
@@ -146,6 +146,7 @@ class ReaLModel(nn.Module):
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
             constants.model_parallel_world_size(),
+            constants.pipe_parallel_world_size(),
             constants.sequence_parallel(),
         )
         self.contiguous_param = None
@@ -190,9 +191,11 @@ class ReaLModel(nn.Module):
         )
         map_param_to_contigous_memory(
             self.layers,
+            self.config,
             self._param_spec,
             self.contiguous_param,
             self.layer_idx_start,
+            allocate_only=False,
         )
 
         for h in self._instantiation_hooks:
@@ -280,6 +283,8 @@ class ReaLModel(nn.Module):
             with torch.cuda.stream(self._offload_stream):
                 for k, p in l.named_parameters():
                     spec = self._param_spec[f"{layer_idx}.{k}"]
+                    if self.config.share_embeddings_and_output_weights and not self.config.is_critic and layer_idx == self.config.n_layers + 1:
+                        continue
                     self._offload_buffer[spec.start_idx : spec.end_idx].copy_(
                         p.data.view(-1), non_blocking=True
                     )
@@ -302,9 +307,11 @@ class ReaLModel(nn.Module):
         )
         map_param_to_contigous_memory(
             self.layers,
+            self.config,
             self._param_spec,
             self.contiguous_param,
             self.layer_idx_start,
+            allocate_only=True,
         )
         self.wait_for_offload()
 
@@ -553,6 +560,7 @@ class ReaLModel(nn.Module):
             to_layer_indices,
             to_model_config,
             to_topo.get_dim("model"),
+            to_topo.get_dim("pipe"),
             to_topo.sequence_parallel,
         )
         if len(to_layer_indices) > 0:
@@ -627,8 +635,11 @@ class ReaLModel(nn.Module):
                 from_model_name, (self.layers, self.contiguous_param)
             )
         elif is_trainable(to_model_name):
-            del self.layers, self.contiguous_param
-            self.layers = self.contiguous_param = None
+            if self.layers is not None:
+                for p in self.layers.parameters():
+                    p.data = torch.tensor((), dtype=self.dtype, device=self.device)
+                del self.layers, self.contiguous_param
+                self.layers = self.contiguous_param = None
             if torch.distributed.get_rank() in to_model_ranks:
                 layers, param = fetch_trainable_params(to_model_name)
             else:
@@ -644,9 +655,11 @@ class ReaLModel(nn.Module):
         )
         map_param_to_contigous_memory(
             rtgt.to_layers_handle,
+            to_model_config,
             rtgt.to_param_spec,
             to_contiguous_param,
             rtgt.to_layer_start_idx,
+            allocate_only=True,
         )
 
         # Allocate tensors in advance to reduce overhead.
@@ -695,13 +708,13 @@ class ReaLModel(nn.Module):
                         step.param_size,
                     )
                     send_buf_specs.append(buf)
-                # if step.remove:
-                #     for param_key in step.param_keys:
-                #         layer_idx, k = param_key.split(".", 1)
-                #         layer_idx = int(layer_idx)
-                #         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
-                #         recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                #                           k).data = dummy_tensor
+                if step.remove and not is_trainable(from_model_name):
+                    for param_key in step.param_keys:
+                        layer_idx, k = param_key.split(".", 1)
+                        layer_idx = int(layer_idx)
+                        dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
+                        recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
+                                          k).data = dummy_tensor
 
         # Run boradcast!
         streams = [torch.cuda.Stream() for step in rtgt.comm_plan]

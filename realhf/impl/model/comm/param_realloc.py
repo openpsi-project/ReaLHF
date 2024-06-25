@@ -425,6 +425,7 @@ def _derive_reparallelize_comm_plan(
                 from_layer_indices,
                 from_model_config,
                 from_topo.get_dim("model"),
+                from_topo.get_dim("pipe"),
                 from_topo.sequence_parallel,
             )
     if constants.has_model_name(to_model_name):
@@ -434,6 +435,7 @@ def _derive_reparallelize_comm_plan(
                 to_layer_indices,
                 to_model_config,
                 to_topo.get_dim("model"),
+                to_topo.get_dim("pipe"),
                 to_topo.sequence_parallel,
             )
 

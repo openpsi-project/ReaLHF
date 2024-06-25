@@ -141,12 +141,8 @@ def test_save_then_load(
     init_critic_from_actor: bool,
     pp_dp_mp: Tuple,
 ):
-    print(
-        f">>>>>>>>>>> running {model_family_name} parallel {pp_dp_mp} "
-        f"is_critic={is_critic} init_critic_from_actor={init_critic_from_actor}"
-    )
-    expr_name = "saveload_test"
-    trial_name = "test"
+    expr_name = uuid.uuid4()
+    trial_name = uuid.uuid4()
     clear_name_resolve(expr_name=expr_name, trial_name=trial_name)
     tmp_path = pathlib.Path(f"/tmp/{expr_name}/{trial_name}/{uuid.uuid4()}")
     os.makedirs(tmp_path, exist_ok=True)
@@ -163,30 +159,48 @@ def test_save_then_load(
     )
     test_impl.launch()
     shutil.rmtree(tmp_path)
-    print(
-        f"<<<<<<<<<<<<<<< passed {model_family_name} parallel {pp_dp_mp} "
-        f"is_critic={is_critic} init_critic_from_actor={init_critic_from_actor}"
-    )
 
 
 if __name__ == "__main__":
-    is_critic = True
-    init_critic_from_actor = True
-    parallelism = [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)]
-    model_families = ["gemma", "opt", "gpt2", "llama", "qwen2"]
-    for is_critic in [True, False]:
-        if is_critic:
-            _init_critic_from_actor = [True, False]
+    import concurrent.futures
+    def run_test_cases():
+        parallelism = [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)]
+        model_families = ["gemma", "opt", "gpt2", "llama", "qwen2"]
+        
+        test_cases = []
+        
+        for is_critic in [True, False]:
+            if is_critic:
+                _init_critic_from_actor = [True, False]
+            else:
+                _init_critic_from_actor = [False]
+            
+            for init_critic_from_actor in _init_critic_from_actor:
+                for pp_dp_mp in parallelism:
+                    for model_family_name in model_families:
+                        if model_family_name == "opt" and pp_dp_mp[-1] > 2:
+                            continue
+                        test_cases.append((model_family_name, is_critic, init_critic_from_actor, pp_dp_mp))
+    
+        return test_cases
+
+    def main():
+        test_cases = run_test_cases()
+        failed_cases = []
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(test_save_then_load, *test_case): test_case for test_case in test_cases}
+
+        for future in concurrent.futures.as_completed(futures):
+            test_case = futures[future]
+            try:
+                future.result()
+            except Exception as exc:
+                failed_cases.append((test_case, exc))
+        
+        if failed_cases:
+            print(f"Failed test cases: {failed_cases}")
         else:
-            _init_critic_from_actor = [False]
-        for init_critic_from_actor in _init_critic_from_actor:
-            for pp_dp_mp in parallelism:
-                for model_family_name in model_families:
-                    if model_family_name == "opt" and pp_dp_mp[-1] > 2:
-                        continue
-                    test_save_then_load(
-                        model_family_name,
-                        is_critic,
-                        init_critic_from_actor,
-                        pp_dp_mp,
-                    )
+            print("Success!")
+    
+    main()

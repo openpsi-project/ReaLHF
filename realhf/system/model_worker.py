@@ -393,12 +393,6 @@ class ModelWorker(worker_base.Worker):
             for model_name in self.__models.keys()
         }
 
-        # A monitoring process.
-        self.__gpu_util_mp = mp.Process(
-            target=gpu_utilization_monitor, args=(self.__worker_index, 20, 7200)
-        )
-        # self.__gpu_util_mp.start()
-
     def __prefetch_from_dataset(self):
         if self.__cur_sample is None:
             try:
