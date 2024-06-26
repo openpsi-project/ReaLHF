@@ -27,6 +27,8 @@ class GenerationHyperparameters:
     :type top_p: float
     :param temperature: The temperature of the sampling process.
     :type temperature: float
+    :param use_cuda_graph: Whether to use CUDA graph.
+    :type use_cuda_graph: bool
     """
 
     max_new_tokens: int = 256
@@ -35,6 +37,7 @@ class GenerationHyperparameters:
     top_p: float = 0.9
     top_k: int = 200
     temperature: float = 1.0
+    use_cuda_graph: bool = False
 
 
 @dataclasses.dataclass
@@ -65,6 +68,10 @@ class GenerationConfig(CommonExperimentConfig):
     )
     allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
+    def __post_init__(self):
+        if self.gen.use_cuda_graph:
+            os.environ["USE_CUDA_GRAPH"] = "1"
+
     @property
     def models(self):
         return {
@@ -92,6 +99,7 @@ class GenerationConfig(CommonExperimentConfig):
             interface_impl=interface,
             input_data=["packed_prompts"],
             balanced_dp=True,
+            log_return_value=True,
             min_n_seqs=self.dataset.train_bs_n_seqs,
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )

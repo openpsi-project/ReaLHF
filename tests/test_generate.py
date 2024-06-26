@@ -17,12 +17,6 @@ from realhf.base import constants, logging, testing
 
 logger = logging.getLogger("tests.test_generate")
 
-# MODEL_FAMILY_TO_PATH = {
-#     ModelFamily("llama", 7, is_critic=False): "/path/to/Llama-2-7b-hf",
-#     ModelFamily("llama", 13, is_critic=False): "/path/to/Llama-2-13b-hf",
-# }
-# PROMPT_DATASET_PATH = "/path/to/prompt_dataset.jsonl"
-
 MODEL_FAMILY_TO_PATH = {
     ModelFamily(
         "llama", 7, is_critic=False

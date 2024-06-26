@@ -149,7 +149,6 @@ class PPOActorInterface(model_api.ModelInterface):
     value_norm_eps: float = 1e-5
 
     def __post_init__(self):
-        # super().__post_init__()
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None
@@ -559,7 +558,6 @@ class PPOCriticInterface(model_api.ModelInterface):
     value_norm_eps: float = 1e-5
 
     def __post_init__(self):
-        # super().__post_init__()
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None

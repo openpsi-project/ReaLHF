@@ -182,7 +182,8 @@ class CustomAllreduce:
         rank: int,
         world_size: int,
         full_nvlink: bool = True,
-        max_size: int = 1024 * 1024 * 1024,  # originally 8MB not enough
+        max_size: int = 2**31
+        - 2,  # originally 8MB not enough, here is max possible max_size as input
     ) -> None:
         """
         Args:
