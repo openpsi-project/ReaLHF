@@ -1,4 +1,5 @@
 from typing import *
+import dataclasses
 import os
 import pickle
 import time
@@ -30,9 +31,7 @@ MODEL_FAMILY_TO_PATH = {
         "llama", 13, is_critic=False
     ): "/lustre/public/pretrained_model_weights/Llama-2-13b-hf",
 }
-PROMPT_DATASET_PATH = (
-    "/lustre/meizy/data/antropic-hh/ppo_prompt_only_short.jsonl"
-)
+PROMPT_DATASET_PATH = "/lustre/meizy/data/antropic-hh/ppo_prompt_only.jsonl"
 TMP_SAVE_DIR = "profile_result/generate/"
 
 
@@ -50,6 +49,9 @@ def real_model_parallel_generate(
 ):
     import os
 
+    compare_run_id = "cudagraph" if use_cuda_graph else "noncudagraph"
+    testing.set_compare_run_identifier(identifier=compare_run_id)
+
     os.environ["USE_CUDA_GRAPH"] = "1" if use_cuda_graph else "0"
     from realhf.base.namedarray import NamedArray
     from realhf.impl.model.nn.real_llm_generate import GenerationConfig
@@ -62,6 +64,8 @@ def real_model_parallel_generate(
         sequence_parallel=parallel.use_sequence_parallel,
         max_prompt_len=max_prompt_len + max_new_tokens,
     )
+    num_pp = parallel.pipeline_parallel_size
+
     dataset_config = system_api.Dataset(
         "prompt",
         args=dict(
@@ -86,8 +90,12 @@ def real_model_parallel_generate(
             max_new_tokens=max_new_tokens,
             greedy=True,
         )
-        if_save = save_result and constants.data_parallel_rank() == 0
-        # from realhf.impl.model.parallelism.model_parallel.custom_all_reduce import init_custom_ar
+        if_save = (
+            save_result
+            and constants.pipe_parallel_rank() == num_pp - 1
+            and constants.model_parallel_rank() == 0
+        )
+        # from realrlhf.impl.model.parallelism.model_parallel.custom_all_reduce import init_custom_ar
         # init_custom_ar()
 
         for i, data_batch in enumerate(data_batches[:max_num_batches]):
@@ -102,6 +110,11 @@ def real_model_parallel_generate(
                 prompt_lengths.cumsum(0), (1, 0)
             )
 
+            logger.info(
+                f"Batch {i} rank {constants.parallelism_rank()} "
+                f"prompt shape {packed_prompts.shape}"
+            )
+
             model.module.eval()
             st = time.monotonic()
             res = model.module.generate(
@@ -112,6 +125,8 @@ def real_model_parallel_generate(
                 gconfig=GenerationConfig(**gconfig_dict),
             )
             t = time.monotonic() - st
+
+            # torch.cuda.synchronize()
 
             if res is None:
                 logger.info(f"Batch {i} rank {dist.get_rank()} return None")
@@ -125,14 +140,13 @@ def real_model_parallel_generate(
                     to_save.append(gen_tokens)
             logger.info(f"Batch {i} rank {dist.get_rank()} time = {t:.2f}s")
 
-        if (
-            if_save
-            and constants.model_parallel_rank() == 0
-            and len(to_save) > 0
-        ):
+            dist.barrier(group=constants.parallelism_group())
+            torch.cuda.synchronize()
+
+        if if_save and len(to_save) > 0:
             to_save = torch.cat(to_save, dim=0)
-            print("saving", to_save.shape)
-            identifier = "realcuda"
+            print(f"rank {constants.parallelism_rank()} saving {to_save.shape}")
+            identifier = "real"
             identifier += f"dp{parallel.data_parallel_size}"
             identifier += f"mp{parallel.model_parallel_size}"
             identifier += f"pp{parallel.pipeline_parallel_size}"
@@ -144,6 +158,8 @@ def real_model_parallel_generate(
                 constants.data_parallel_rank(),
                 identifier,
             )
+            print(f"rank {constants.parallelism_rank()} saving done")
+            # testing.dump_stored_to_file()
 
 
 @torch.no_grad()
@@ -182,6 +198,10 @@ def huggingface_model_generate_simple(
         input_ids = batch['input_ids'].cuda()
         attention_mask = batch['attention_mask'].cuda()
         prompt_len = input_ids.shape[1]
+        logger.info(
+            f"Rank {constants.parallelism_rank()} Batch {i} "
+            f"input_ids shape {input_ids.shape}"
+        )
         res = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -195,7 +215,7 @@ def huggingface_model_generate_simple(
             return_dict_in_generate=True,
         )
         logger.info(
-            f"Batch {i} tokens shape "
+            f"Rank {constants.parallelism_rank()} Batch {i} tokens shape "
             f"{res['sequences'].shape} scores shape {res['scores'][-1].shape}"
         )
         to_save.append(res["sequences"][:, prompt_len:])
@@ -203,55 +223,163 @@ def huggingface_model_generate_simple(
     if save_result:
         to_save = torch.cat(to_save, dim=0)
         testing.save_test_result(
-            to_save, TMP_SAVE_DIR, model_family, 0, f"huggingface{device}"
+            to_save, TMP_SAVE_DIR, model_family, 0, f"huggingface"
+        )
+        # testing.dump_stored_to_file()
+
+
+@dataclasses.dataclass
+class CompareConfig:
+    parallel: ParallelismConfig
+    use_cuda_graph: bool
+    huggingface: bool = False
+
+    def name(self):
+        return (
+            ("huggingface" if self.huggingface else "real")
+            + f"dp{self.parallel.data_parallel_size}"
+            + f"mp{self.parallel.model_parallel_size}"
+            + f"pp{self.parallel.pipeline_parallel_size}"
+            + ("G" if self.use_cuda_graph else "")
         )
 
 
-if __name__ == "__main__":
-    model_family = ModelFamily("llama", 7, is_critic=False)
-    # os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
-    num_mp, num_pp, num_dp = 1, 1, 1
-    n_gpus = num_mp * num_pp * num_dp
+def test_accordance(
+    model_family: ModelFamily,
+    max_prompt_length: int,
+    batch_size: int,
+    min_new_tokens: int,
+    max_new_tokens: int,
+    max_num_batches: int,
+    compare_config_1: CompareConfig,
+    compare_config_2: CompareConfig,
+):
     testing.remove_file_cache(TMP_SAVE_DIR)
+    num_mp = compare_config_1.parallel.model_parallel_size
+    num_pp = compare_config_1.parallel.pipeline_parallel_size
+    num_dp = compare_config_1.parallel.data_parallel_size
+    n_gpus = num_mp * num_pp * num_dp
 
     test1 = testing.LocalMultiProcessTest(
         n_gpus,
         real_model_parallel_generate,
         model_family,
         ParallelismConfig(num_mp, num_pp, num_dp, False),
-        256,
-        64,
-        128,
-        128,
+        max_prompt_length,
+        batch_size,
+        min_new_tokens,
+        max_new_tokens,
         True,
-        3,
-        True,
+        max_num_batches,
+        compare_config_1.use_cuda_graph,
     )
     test1.launch()
 
+    num_mp = compare_config_2.parallel.model_parallel_size
+    num_pp = compare_config_2.parallel.pipeline_parallel_size
+    num_dp = compare_config_2.parallel.data_parallel_size
+    n_gpus = num_mp * num_pp * num_dp
     test2 = testing.LocalMultiProcessTest(
         n_gpus,
         real_model_parallel_generate,
         model_family,
         ParallelismConfig(num_mp, num_pp, num_dp, False),
-        256,
-        64,
-        128,
-        128,
+        max_prompt_length,
+        batch_size,
+        min_new_tokens,
+        max_new_tokens,
         True,
-        3,
-        False,
+        max_num_batches,
+        compare_config_2.use_cuda_graph,
     )
     test2.launch()
-
-    # hf_test = testing.LocalMultiProcessTest(
-    #     1, huggingface_model_generate_simple,
-    #     model_family,
-    #     256, 32, 128, 128, True, "cuda", 16
-    # )
-    # hf_test.launch()
-    non_cudagraph = "realcuda" + f"dp{num_dp}" + f"mp{num_mp}" + f"pp{num_pp}"
-    cuda_graph = non_cudagraph + "G"
     testing.check_generation_consistency(
-        TMP_SAVE_DIR, model_family, [cuda_graph, non_cudagraph]
+        TMP_SAVE_DIR,
+        model_family,
+        [compare_config_1.name(), compare_config_2.name()],
     )
+
+
+def test_single_gpu_cuda_graph():
+    model_family = ModelFamily("llama", 7, is_critic=False)
+    compare_config_1 = CompareConfig(ParallelismConfig(1, 1, 1, False), True)
+    compare_config_2 = CompareConfig(ParallelismConfig(1, 1, 1, False), False)
+    test_accordance(
+        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+    )
+
+
+def test_pipe_parallel_cuda_graph(num_gpus: int = 2):
+    model_family = ModelFamily("llama", 7, is_critic=False)
+    compare_config_1 = CompareConfig(
+        ParallelismConfig(1, num_gpus, 1, False), True
+    )
+    compare_config_2 = CompareConfig(
+        ParallelismConfig(1, num_gpus, 1, False), False
+    )
+    test_accordance(
+        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+    )
+
+
+def test_model_parallel_cuda_graph(num_gpus: int = 8):
+    model_family = ModelFamily("llama", 7, is_critic=False)
+    compare_config_1 = CompareConfig(
+        ParallelismConfig(num_gpus, 1, 1, False), True
+    )
+    compare_config_2 = CompareConfig(
+        ParallelismConfig(num_gpus, 1, 1, False), False
+    )
+    test_accordance(
+        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+    )
+
+
+def test_data_parallel_cuda_graph(num_gpus: int = 8):
+    model_family = ModelFamily("llama", 7, is_critic=False)
+    compare_config_1 = CompareConfig(
+        ParallelismConfig(1, 1, num_gpus, False), True
+    )
+    compare_config_2 = CompareConfig(
+        ParallelismConfig(1, 1, num_gpus, False), False
+    )
+    test_accordance(
+        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+    )
+
+
+def test_3d_parallel_cuda_graph():
+    model_family = ModelFamily("llama", 7, is_critic=False)
+    compare_config_1 = CompareConfig(ParallelismConfig(2, 2, 2, False), True)
+    compare_config_2 = CompareConfig(ParallelismConfig(2, 2, 2, False), False)
+    test_accordance(
+        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+    )
+
+
+def test_2d_parallel_cuda_graph():
+    model_family = ModelFamily("llama", 7, is_critic=False)
+    compare_config_1 = CompareConfig(ParallelismConfig(2, 2, 1, False), True)
+    compare_config_2 = CompareConfig(ParallelismConfig(2, 2, 1, False), False)
+    test_accordance(
+        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+    )
+
+
+def test_3d():
+    model_family = ModelFamily("llama", 7, is_critic=False)
+    compare_config_1 = CompareConfig(ParallelismConfig(1, 1, 1, False), False)
+    compare_config_2 = CompareConfig(ParallelismConfig(2, 2, 2, False), False)
+    test_accordance(
+        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+    )
+
+
+if __name__ == "__main__":
+    # test_single_gpu_cuda_graph()
+    # test_pipe_parallel_cuda_graph(num_gpus=8)
+    # test_model_parallel_cuda_graph()
+    test_data_parallel_cuda_graph()
+    # test_3d_parallel_cuda_graph()
+    # test_2d_parallel_cuda_graph()
+    # test_3d()

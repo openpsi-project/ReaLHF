@@ -9,6 +9,7 @@ import realhf.experiments.common.dpo_exp
 import realhf.experiments.common.ppo_exp
 import realhf.experiments.common.rw_exp
 import realhf.experiments.common.sft_exp
+import realhf.experiments.common.gen_exp
 
 # NOTE: Register all implemented experiments inside ReaL.
 from realhf.api.quickstart.entrypoint import QUICKSTART_FN

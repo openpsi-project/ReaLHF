@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from .real_llm_api import ReaLModel
 
 logger = logging.getLogger("ReaLModel Generation")
-CUDA_GRAPH_NAME = "decoding"
 
 
 @dataclasses.dataclass
@@ -158,24 +157,26 @@ def prepare(
     gconfig: GenerationConfig,
     x: PipeTransferData,
     ys: List[PipeCacheData],
+    cuda_graph_name: str,
 ):
     cu_seqlens = x.cu_seqlens
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
     # assert constants.pipe_parallel_world_size() >= 2
     layer_indices = range(module.layer_idx_start, module.layer_idx_end)
     min_layer_index = module.layer_idx_start
+    bs = input_lens.shape[0]
+    cache_seqlens = input_lens.clone().to(dtype=torch.int32)
 
     block_ys = ys
+    assert len(layer_indices) == len(block_ys), (len(block_ys), layer_indices)
     if constants.is_first_pipe_stage():
         layer_indices = layer_indices[1:]
+        ys[0].cache_seqlens = cache_seqlens
         block_ys = ys[1:]
     if constants.is_last_pipe_stage():
         layer_indices = layer_indices[:-1]
         block_ys = block_ys[:-1]
 
-    assert len(layer_indices) == len(block_ys), (len(block_ys), layer_indices)
-    bs = input_lens.shape[0]
-    cache_seqlens = input_lens.clone().to(dtype=torch.int32)
     for y, layer_idx in zip(block_ys, layer_indices):
         assert (
             y.k_cache is not None
@@ -187,15 +188,14 @@ def prepare(
             module.config.hidden_dim // module.config.head_dim + 10,
         )
         k_cache_handle = cuda_graph.input_buffer_handle(
-            CUDA_GRAPH_NAME, "k_caches"
+            cuda_graph_name, "k_caches"
         )
         v_cache_handle = cuda_graph.input_buffer_handle(
-            CUDA_GRAPH_NAME, "v_caches"
+            cuda_graph_name, "v_caches"
         )
+        k_cache_handle = None
+        v_cache_handle = None
         if k_cache_handle is not None and v_cache_handle is not None:
-            # print(k_cache_handle)
-            # print(v_cache_handle)
-            # print(type(k_cache_handle), len(k_cache_handle), layer_idx, layer_indices)
             k_cache = k_cache_handle[layer_idx - min_layer_index][
                 :bs, :kvcache_seqlen
             ]
@@ -223,9 +223,7 @@ def prepare(
         v_cache[indices] = y.v_cache
         y.k_cache = k_cache
         y.v_cache = v_cache
-        y.cache_seqlens = input_lens.clone().to(dtype=torch.int32)
-        # if constants.is_last_pipe_stage():
-        #     print(y.cache_seqlens
+        y.cache_seqlens = cache_seqlens
 
     # use cuda graph if env var USE_CUDA_GRAPH is set to 1,
     # otherwise `graph` should be None
@@ -247,7 +245,7 @@ def prepare(
     )
 
     graph, input_buffers, output_buffers = cuda_graph.capture_func(
-        CUDA_GRAPH_NAME,
+        cuda_graph_name,
         module._forward,
         input_buffers,
         force_recapture=False,
@@ -296,7 +294,6 @@ def generate(
             f"Input sequence length {max_seqlen} is larger than the maximum sequence length "
             f"supported by the model {constants.max_prompt_len()}."
         )
-    # input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
     x = PipeTransferData(
         cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True
     )
@@ -309,53 +306,6 @@ def generate(
     prompt_logits = model(x, ys)[0].pp_output
     logits = prompt_logits[cu_seqlens[1:] - 1]
 
-    # cache_seqlens = input_lens.clone().to(dtype=torch.int32)
-    # for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
-    #     assert (
-    #         y.k_cache is not None
-    #         and y.v_cache is not None
-    #         and y.cache_seqlens is not None
-    #     )
-    #     # fix of a flash attention bug
-    #     kvcache_seqlen = max(
-    #         constants.max_prompt_len() + gconfig.max_new_tokens,
-    #         mconfig.hidden_dim // mconfig.head_dim + 10,
-    #     )
-
-    #     k_cache_handle = cuda_graph.input_buffer_handle(
-    #         CUDA_GRAPH_NAME, "k_caches"
-    #     )
-    #     v_cache_handle = cuda_graph.input_buffer_handle(
-    #         CUDA_GRAPH_NAME, "v_caches"
-    #     )
-    #     if k_cache_handle is not None and v_cache_handle is not None:
-    #         k_cache = k_cache_handle[layer_idx + 1][:bs, :kvcache_seqlen]
-    #         v_cache = v_cache_handle[layer_idx + 1][:bs, :kvcache_seqlen]
-    #     else:
-    #         k_cache = torch.zeros(
-    #             (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-    #             dtype=y.k_cache.dtype,
-    #             device=y.k_cache.device,
-    #         )
-    #         v_cache = torch.zeros(
-    #             (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-    #             dtype=y.v_cache.dtype,
-    #             device=y.v_cache.device,
-    #         )
-    #     indices = (
-    #         torch.arange(kvcache_seqlen, device=device, dtype=torch.long)[
-    #             None, :
-    #         ]
-    #         < input_lens[:, None]
-    #     )
-    #     k_cache[indices] = y.k_cache
-    #     v_cache[indices] = y.v_cache
-    #     y.k_cache = k_cache
-    #     y.v_cache = v_cache
-    #     y.cache_seqlens = cache_seqlens
-    # x = PipeTransferData(store_kv_cache=True)
-    # ys[0].cache_seqlens = cache_seqlens
-
     # Next, we will generate the next token after prompts.
     # cache_seqlens is exactly the lengths of prompts.
     # We perform a genstep outside the loop due to a historical reason.
@@ -367,55 +317,14 @@ def generate(
     gen_logits_mask_ph.append(logits_mask)
     generated_idx += 1
 
-    # use cuda graph if env var USE_CUDA_GRAPH is set to 1,
-    # other `graph` should be None
-    # input_buffers_meta = dict(
-    #     input_ids=cuda_graph.TensorMetadata(shape=(bs,), dtype=torch.long),
-    #     position_ids=cuda_graph.TensorMetadata(
-    #         shape=(bs, 1), dtype=cache_seqlens.dtype
-    #     ),
-    #     k_caches=[
-    #         (
-    #             cuda_graph.TensorMetadata(
-    #                 shape=y.k_cache.shape,
-    #                 dtype=y.k_cache.dtype,
-    #             )
-    #             if y.k_cache is not None
-    #             else cuda_graph.TensorMetadata()
-    #         )
-    #         for y in ys
-    #     ],
-    #     v_caches=[
-    #         (
-    #             cuda_graph.TensorMetadata(
-    #                 shape=y.v_cache.shape,
-    #                 dtype=y.v_cache.dtype,
-    #             )
-    #             if y.v_cache is not None
-    #             else cuda_graph.TensorMetadata()
-    #         )
-    #         for y in ys
-    #     ],
-    #     cache_seqlens=cuda_graph.TensorMetadata(shape=(bs,), dtype=torch.int32),
-    #     max_seqlen=cuda_graph.TensorMetadata(),
-    #     cu_seqlens=cuda_graph.TensorMetadata(),
-    #     hidden_states=cuda_graph.TensorMetadata(),
-    # )
-    # graph, input_buffers, output_buffers = cuda_graph.capture_func(
-    #     CUDA_GRAPH_NAME,
-    #     model._forward,
-    #     input_buffers_meta,
-    #     force_recapture=False,
-    # )
     x, ys, cache_seqlens, graph, input_buffers, output_buffers = prepare(
-        model, gconfig, x, ys
+        model, gconfig, x, ys, f"decoding"
     )
 
     # The main loop.
     while not terminate:
         # the next round of inference
         if graph is not None:
-            print("use graph")
             input_buffers["input_ids"][:bs].copy_(
                 next_tokens, non_blocking=True
             )
@@ -428,9 +337,7 @@ def generate(
             # K/v cache will be changed in-place with flash attention.
             graph.replay()
             logits = output_buffers["output"][:bs].squeeze(1)
-            cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
         else:
-            print("no use graph")
             ys[0].packed_input_ids = next_tokens
             ys[0].packed_position_ids = None
             x.cu_seqlens = torch.arange(
@@ -439,10 +346,14 @@ def generate(
             x.max_seqlen = 1
             # K/v cache will be changed in-place with flash attention.
             logits = model(x, ys)[0].pp_output.squeeze(dim=1)
-            cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
 
-        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
-            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+        cache_seqlens += (
+            1  # The global handle. This will increase all handles in ys by 1.
+        )
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (
+            genstep(
+                logits, tokenizer, unfinished_sequences, generated_idx, gconfig
+            )
         )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)
@@ -452,14 +363,6 @@ def generate(
     gen_tokens, log_probs, logits_mask = _gather_gen_output_from_list(
         gen_token_ph, gen_logprob_ph, gen_logits_mask_ph
     )
-
-    # if _USE_CUDA_GRAPH:
-    #     _DECODING_CUDA_GRAPH = None
-    #     _DECODING_CUDA_GRAPH_BS = None
-    #     _DECODING_CUDA_GRAPH_SEQLEN = None
-    #     _DECODING_CUDA_GRAPH_INPUT_BUFFER = None
-    #     _DECODING_CUDA_GRAPH_OUTPUT_BUFFER = None
-
     return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
 
 
@@ -509,7 +412,7 @@ def _gather_minibatch_gen_outputs(
         logits_mask = all_logits_mask[i]
 
         if gen_len < max_gen_tokens_length:
-            pad_size = gen_len - max_gen_tokens_length
+            pad_size = max_gen_tokens_length - gen_len
             gen_token = torch.nn.functional.pad(gen_token, (0, pad_size))
             log_probs = torch.nn.functional.pad(log_probs, (0, pad_size))
             if logits_mask is not None:

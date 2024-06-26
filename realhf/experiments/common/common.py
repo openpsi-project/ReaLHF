@@ -223,6 +223,7 @@ class CommonExperimentConfig(Experiment):
                 f"allocated according to n_nodes {self.n_nodes} "
                 f"and n_gpus_per_node {self.n_gpus_per_node}."
             )
+
         self.__check_legal_experiment()
 
         rpcs = self.rpcs

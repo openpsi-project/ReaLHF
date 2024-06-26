@@ -147,10 +147,12 @@ def main_start(args, recover_count: int = 0):
         "RECOVER_RUN": "1" if is_recover_run else "0",
         "SAVE_RECOVER_STATES": "1" if save_recover_states else "0",
         "CLUSTER_SPEC_PATH": cluster_spec_path if cluster_spec_path else "",
+        "USE_CUDA_GRAPH": "1",
     }
 
     os.environ["IS_REMOTE"] = "0" if not force_allocation_use_cache else "1"
     os.environ["REAL_PACKAGE_PATH"] = repo_path
+    os.environ["USE_CUDA_GRAPH"] = "1"
 
     # setup experiments
     if recover_count == 0:

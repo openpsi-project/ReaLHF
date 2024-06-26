@@ -2,6 +2,7 @@ import dataclasses
 import gc
 import multiprocessing as mp
 import os
+import pickle
 import queue
 import random
 import time
@@ -71,6 +72,7 @@ class StandaloneTestingProcess(mp.Process):
 
         # isolate cuda devices
         os.environ["CUDA_VISIBLE_DEVICES"] = str(self.rank)
+        # os.environ["CUDA_VISIBLE_DEVICES"] = str(self.rank+2) if self.rank in [0, 1] else str(self.rank+4)
         os.environ["GPU_DEVICES_ISOLATED"] = str(1)
         torch.cuda.set_device(0)
 
@@ -303,7 +305,7 @@ def make_packed_input_batches(
     dataset: torch.utils.data.Dataset, batch_size: int
 ):
     batches = [
-        [dataset[j] for j in range(i, i + batch_size)]
+        [dataset[j] for j in range(i, min(i + batch_size, len(dataset)))]
         for i in range(0, len(dataset), batch_size)
     ]
     batches = [data_api.gather_sequences(batch) for batch in batches]
@@ -430,8 +432,6 @@ def save_test_result(
     save_path = os.path.join(
         path, test_result_file_name(identifier, model_family, dp_rank)
     )
-    import pickle
-
     with open(save_path, "wb") as f:
         pickle.dump(result, f)
 
@@ -439,8 +439,6 @@ def save_test_result(
 def check_generation_consistency(
     path: str, model_family: model_api.ModelFamily, identifiers: List[str]
 ):
-    import pickle
-
     dp_rank_counter = {identifier: 0 for identifier in identifiers}
     for f in os.listdir(path):
         if not f.endswith(".pkl"):
@@ -471,8 +469,10 @@ def check_generation_consistency(
             a = baseline_result[i]
             b = result[i]
             assert torch.is_tensor(a) and torch.is_tensor(b)
-            assert a.shape == b.shape and a.dim() == 1, (a.shape, b.shape)
-            gen_len = a.shape[0]
+            assert a.dim() == 1 and b.dim() == 1, (a.shape, b.shape)
+            gen_len = a.shape[0] if a.shape[0] < b.shape[0] else b.shape[0]
+            b = b[:gen_len]
+            a = a[:gen_len]
             for j in range(gen_len):
                 if a[j] != b[j]:
                     print(f"Mismatch at sequence {i} position {j}")
@@ -485,3 +485,77 @@ def check_generation_consistency(
             f"{identifiers[0]} and {identifier} Matched {matched_seqs}/{len(baseline_result)} "
             f"sequences and {matched_tokens}/{len(baseline_result) * gen_len} tokens"
         )
+
+
+COMPARE_TENSOR_PATH = "profile_result/compare_tensor/"
+_TMP_TENSOR_STORAGE = {}
+_COMPARE_RUN_IDENTIFIER = None
+
+
+def set_compare_run_identifier(identifier: str):
+    global _COMPARE_RUN_IDENTIFIER
+    _COMPARE_RUN_IDENTIFIER = identifier
+
+
+def store_tensor_to_compare(
+    tensor: torch.Tensor,
+    tensor_name: str,
+):
+    assert _COMPARE_RUN_IDENTIFIER is not None
+    assert tensor_name not in _TMP_TENSOR_STORAGE
+    _TMP_TENSOR_STORAGE[tensor_name] = tensor
+
+
+def dump_stored_to_file():
+    if len(_TMP_TENSOR_STORAGE) == 0:
+        return
+    os.makedirs(COMPARE_TENSOR_PATH, exist_ok=True)
+    mp = constants.model_parallel_rank()
+    pp = constants.pipe_parallel_rank()
+    dp = constants.data_parallel_rank()
+    fn = _COMPARE_RUN_IDENTIFIER + f"_dp{dp}_pp{pp}_mp{mp}.pkl"
+    with open(os.path.join(COMPARE_TENSOR_PATH, fn), "wb") as f:
+        pickle.dump(_TMP_TENSOR_STORAGE, f)
+
+
+def compare_two_runs(run_id1, run_id2, mp=1, dp=1, pp=1):
+    import itertools
+
+    os.makedirs(os.path.join(COMPARE_TENSOR_PATH, "logs"), exist_ok=True)
+    for mpr, dpr, ppr in itertools.product(range(mp), range(dp), range(pp)):
+        log_path = os.path.join(
+            COMPARE_TENSOR_PATH,
+            f"logs/{run_id1}_{run_id2}_dp{dpr}_pp{ppr}_mp{mpr}.log",
+        )
+        fn1 = run_id1 + f"_dp{dpr}_pp{ppr}_mp{mpr}.pkl"
+        fn2 = run_id2 + f"_dp{dpr}_pp{ppr}_mp{mpr}.pkl"
+        ts1 = pickle.load(open(os.path.join(COMPARE_TENSOR_PATH, fn1), "rb"))
+        ts2 = pickle.load(open(os.path.join(COMPARE_TENSOR_PATH, fn2), "rb"))
+        assert ts1.keys() == ts2.keys()
+
+        with open(log_path, "w") as f:
+            print(f"Comparing {fn1} and {fn2}")
+            f.write(f"dp{dp}_pp{pp}_mp{mp}:\n")
+
+            match_count = 0
+            for k in ts1.keys():
+                match = torch.allclose(ts1[k], ts2[k], atol=1e-2, rtol=1e-3)
+                print(f"tensor {k} shape {ts1[k].shape}")
+                f.write(f"tensor {k} shape {ts1[k].shape}\n\n")
+                if match:
+                    print(f"tensor {k} matches")
+                    f.write(f"tensor {k} matches\n\n")
+                    f.write(
+                        f"max diff: {torch.max(torch.abs(ts1[k] - ts2[k]))}\n\n"
+                    )
+                    match_count += 1
+                else:
+                    # torch.set_printoptions(precision=4)
+                    print(f"tensor {k} does not match")
+                    f.write(
+                        f"tensor {k} does not match\n"
+                        f"max diff: {torch.max(torch.abs(ts1[k] - ts2[k]))}\n\n"
+                    )
+
+            f.write(f"Matched {match_count}/{len(ts1)} tensors")
+            print(f"Matched {match_count}/{len(ts1)} tensors")

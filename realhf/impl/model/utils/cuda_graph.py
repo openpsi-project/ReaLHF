@@ -15,43 +15,22 @@ CUDA_GRAPH_INPUT_BUFFER: Dict[str, Dict[str, torch.Tensor]] = dict()
 CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, Dict[str, torch.Tensor]] = dict()
 
 
-# @dataclasses.dataclass
-# class TensorMetadata:
-#     """Metadata for a pytorch tensor in GPU."""
+def reinitialize_input_buffer(cuda_graph_name, new_buf):
+    global CUDA_GRAPH_INPUT_BUFFER
+    assert (
+        cuda_graph_name in CUDA_GRAPH_INPUT_BUFFER
+    ), f"CUDAGraph {cuda_graph_name} does not exist."
 
-#     shape: Tuple[int]
-#     dtype: torch.dtype
-
-#     @staticmethod
-#     def from_tensor(t: torch.Tensor):
-#         return TensorMetadata(t.shape, t.dtype)
-
-#     def to_tensor(self):
-#         return torch.zeros(self.shape, dtype=self.dtype, device="cuda")
-
-# def metadata_to_buffer(metadata: Dict[str, Union[List[Any], Any]]):
-#     buf = {}
-#     for k, v in metadata.items():
-#         if isinstance(v, list):
-#             buf[k] = [vv.to_tensor() if isinstance(vv, TensorMetadata) else vv
-#                       for vv in v]
-#         elif isinstance(v, TensorMetadata):
-#             buf[k] = v.to_tensor()
-#         else:
-#             buf[k] = v
-#     return buf
-
-# def buffer_to_metadata(buffer: Dict[str, Union[List[Any], Any]]):
-#     metadata = {}
-#     for k, v in buffer.items():
-#         if isinstance(v, list):
-#             metadata[k] = [TensorMetadata.from_tensor() if torch.is_tensor(v) else vv
-#                            for vv in v]
-#         elif torch.is_tensor(v):
-#             metadata[k] = TensorMetadata.from_tensor()
-#         else:
-#             metadata[k] = v
-#     return metadata
+    buf = CUDA_GRAPH_INPUT_BUFFER[cuda_graph_name]
+    for k, v in buf.items():
+        if torch.is_tensor(v):
+            v.copy_(new_buf[k])
+        elif isinstance(v, list):
+            for i, vv in enumerate(v):
+                if torch.is_tensor(vv):
+                    vv.copy_(new_buf[k][i])
+        else:
+            buf[k] = new_buf[k]
 
 
 @torch.no_grad()
@@ -83,6 +62,7 @@ def capture_func(
     global CUDA_GRAPH_OUTPUT_BUFFER
     if not force_recapture:
         if name in CUDA_GRAPH_STORAGE:
+            reinitialize_input_buffer(name, input_buffer)
             assert name in CUDA_GRAPH_INPUT_BUFFER
             assert name in CUDA_GRAPH_OUTPUT_BUFFER
             return (
@@ -101,6 +81,9 @@ def capture_func(
 
     maybe_no_grad = nullcontext() if not no_grad else torch.no_grad()
     st = time.monotonic()
+
+    # input_buffer_cache = clone_buffer(input_buffer)
+
     with custom_all_reduce.graph_capture(), maybe_no_grad:
         print(
             f"rank {torch.distributed.get_rank()}: Capturing CUDA graph for {name}"
@@ -119,11 +102,14 @@ def capture_func(
             f"for decoding takes {time.monotonic() - st:.2f} seconds."
         )
 
+    # restore_buffer(input_buffer, input_buffer_cache)
+
     assert torch.is_tensor(output)
     output_buffer = dict(output=output)
 
     gc.collect()
     torch.cuda.empty_cache()
+    gc.collect()
 
     CUDA_GRAPH_STORAGE[name] = graph
     CUDA_GRAPH_INPUT_BUFFER[name] = input_buffer
