@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-| <a href="https://openpsi-project.github.io/ReaLHF/"><b>Documentation</b></a> | <a href="https://openpsi-project.github.io/ReaLHF/"><b>Paper</b></a> |
+| <a href="https://openpsi-project.github.io/ReaLHF/"><b>Documentation</b></a> | <a href="https://arxiv.org/abs/2406.14088"><b>Paper</b></a> |
 </p>
 
 <h1 align="center">

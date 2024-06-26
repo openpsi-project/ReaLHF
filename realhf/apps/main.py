@@ -95,6 +95,10 @@ def get_repo_path():
 
 
 def main_start(args, recover_count: int = 0):
+    if recover_count == 0:
+        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+    experiment = config_package.make_experiment(args.experiment_name)
+
     if args.mode == "ray" and args.image_name is None:
         raise ValueError(
             "--image_name must be specified when using ray cluster. "
@@ -135,6 +139,7 @@ def main_start(args, recover_count: int = 0):
             "will be saved to temporary directory of the system. "
             "To change the fileroot, set the fileroot option of your choice in your CLUSTER_SPEC_PATH."
         )
+    use_cuda_graph = os.environ.get("USE_CUDA_GRAPH", "0") == "1"
 
     BASE_ENVIRONS = {
         "PYTHONPATH": "/realhf",
@@ -147,16 +152,14 @@ def main_start(args, recover_count: int = 0):
         "RECOVER_RUN": "1" if is_recover_run else "0",
         "SAVE_RECOVER_STATES": "1" if save_recover_states else "0",
         "CLUSTER_SPEC_PATH": cluster_spec_path if cluster_spec_path else "",
+        "USE_CUDA_GRAPH": "1" if use_cuda_graph else "0",
     }
 
     os.environ["IS_REMOTE"] = "0" if not force_allocation_use_cache else "1"
     os.environ["REAL_PACKAGE_PATH"] = repo_path
+    os.environ["USE_CUDA_GRAPH"] = "1" if use_cuda_graph else "0"
 
     # setup experiments
-    if recover_count == 0:
-        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
-
-    experiment = config_package.make_experiment(args.experiment_name)
     if args.allocation_mode == "search":
         experiment._search()
 
@@ -464,7 +467,6 @@ def main():
         required=True,
         help="name of the experiment",
     )
-
     subparser.add_argument(
         "--trial_name", "-f", type=str, required=True, help="name of the trial"
     )

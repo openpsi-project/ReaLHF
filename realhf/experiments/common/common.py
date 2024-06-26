@@ -17,7 +17,7 @@ from realhf.api.quickstart.device_mesh import (
     RPCAllocation,
     make_device_mesh_from_name,
 )
-from realhf.api.quickstart.model import ModelTrainEvalConfig
+from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.experiments.common.check import *
 from realhf.experiments.common.utils import *
 from realhf.search_engine.search import search_rpc_allocations
@@ -223,6 +223,7 @@ class CommonExperimentConfig(Experiment):
                 f"allocated according to n_nodes {self.n_nodes} "
                 f"and n_gpus_per_node {self.n_gpus_per_node}."
             )
+
         self.__check_legal_experiment()
 
         rpcs = self.rpcs
@@ -274,7 +275,7 @@ class CommonExperimentConfig(Experiment):
                     rpc=rpc,
                     device_mesh=(
                         make_device_mesh_from_name(
-                            self.nodelist,
+                            self.global_device_mesh.name,
                             self.allocations[rpc_type].device_mesh,
                         )
                         if self.allocations[rpc_type].device_mesh is not None

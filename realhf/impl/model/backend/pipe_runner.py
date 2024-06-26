@@ -1,4 +1,5 @@
 import dataclasses
+import os
 from typing import *
 
 from deepspeed.runtime.engine import MEMORY_OPT_ALLREDUCE_SIZE, DeepSpeedEngine
@@ -22,6 +23,7 @@ import realhf.base.constants as constants
 import realhf.base.logging as logging
 import realhf.impl.model.parallelism.pipeline_parallel.p2p as p2p
 import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
+import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import data_api
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.base.namedarray import NamedArray
@@ -33,7 +35,7 @@ from realhf.impl.model.nn.real_llm_generate import (
     _gather_gen_output_from_list,
     _gather_minibatch_gen_outputs,
     genstep,
-    init_kv_cache,
+    prepare,
 )
 from realhf.impl.model.parallelism.pipeline_parallel.instruction import PipeInstruction
 from realhf.impl.model.parallelism.pipeline_parallel.static_schedule import PipeSchedule
@@ -259,6 +261,7 @@ def _exec_pipe_schedule(
                     f"Exception in cmd: {cmd}"
                 )
                 raise e
+
         step_count += 1
 
         if will_break:
@@ -371,6 +374,9 @@ class PipeGenInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
+        cuda_graph_name = f"decoding_{micro_batch_id}"
+        graph = cuda_graph.get_graph(cuda_graph_name)
+
         is_first_stage = constants.is_first_pipe_stage()
         if is_first_stage:
             buf = tensor_buffer.get(
@@ -389,6 +395,7 @@ class PipeGenInstrSet:
 
         ys = tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
 
+        others = None
         if buf is not None:
             if is_first_stage:
                 x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
@@ -406,9 +413,34 @@ class PipeGenInstrSet:
         else:
             x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
 
-        _zero_grads(x)
-        _zero_grads(ys)
-        x, ys = module.forward(x, ys)
+        if graph is None or step_id == 0:
+            x, ys = module.forward(x, ys)
+        else:
+            # only replay decoding phase
+            bs = ys[0].cache_seqlens.shape[0]
+            if is_first_stage:
+                cuda_graph.input_buffer_handle(cuda_graph_name, "input_ids")[:bs].copy_(
+                    ys[0].packed_input_ids, non_blocking=True
+                )
+            if not is_first_stage:
+                cuda_graph.input_buffer_handle(cuda_graph_name, "hidden_states").copy_(
+                    x.pp_input, non_blocking=True
+                )
+                cuda_graph.input_buffer_handle(cuda_graph_name, "cu_seqlens").copy_(
+                    x.cu_seqlens, non_blocking=True
+                )
+                # cuda_graph.input_buffer_handle(cuda_graph_name, "max_seqlen").copy_(
+                #     torch.tensor(x.max_seqlen), non_blocking=True
+                # )
+            cuda_graph.input_buffer_handle(cuda_graph_name, "position_ids")[:bs].copy_(
+                ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
+            )
+            cuda_graph.input_buffer_handle(cuda_graph_name, "cache_seqlens")[:bs].copy_(
+                ys[0].cache_seqlens, non_blocking=True
+            )
+
+            graph.replay()
+            x.pp_output = cuda_graph.output_buffer_handle(cuda_graph_name, "output")
 
         tensor_buffer.put("batch_output_x", micro_batch_id, x)
 
@@ -420,31 +452,15 @@ class PipeGenInstrSet:
         if not tensor_buffer.get("kv_cache_reserved", micro_batch_id):
             # KV cache is attached to x and ys.
             assert constants.pipe_parallel_world_size() >= 2
-            if constants.is_first_pipe_stage():
-                ys[0].cache_seqlens = x.cu_seqlens[1:] - x.cu_seqlens[:-1]
-                init_kv_cache(module, gconfig, x, ys[1:])
-            elif constants.is_last_pipe_stage():
-                init_kv_cache(module, gconfig, x, ys[:-1])
-            else:
-                init_kv_cache(module, gconfig, x, ys)
+            x, ys, cache_seqlens, graph, input_buffers, output_buffers = prepare(
+                module, gconfig, x, ys, cuda_graph_name
+            )
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
 
         # Increase cache_seqlens in the decoding phase.
         if not is_prefill_phase:
-            if constants.is_last_pipe_stage():
-                for y in ys[:-1]:
-                    y.cache_seqlens += 1
-                assert all(
-                    torch.allclose(ys[0].cache_seqlens, y.cache_seqlens)
-                    for y in ys[:-1]
-                )
-            else:
-                for y in ys:
-                    y.cache_seqlens += 1
-                assert all(
-                    torch.allclose(ys[0].cache_seqlens, y.cache_seqlens) for y in ys
-                )
+            ys[0].cache_seqlens += 1  # global handle
 
         # Perform a decoding step.
         if constants.is_last_pipe_stage():
@@ -1030,11 +1046,9 @@ class PipelineRunner:
             logits_list = []
             for i in range(num_micro_batches):
                 logits = tensor_buffer.get("logits", i, remove=True)
-                # logger.info(f"mbid {i} before remove pad logits shape {logits.shape}")
                 if constants.sequence_parallel():
                     pad_size = tensor_buffer.get("pad_size", i, remove=True)
                     logits = logits[:-pad_size] if pad_size > 0 else logits
-                    # logger.info(f"mbid {i} after remove pad {pad_size} logits shape {logits.shape}")
                 logits_list.append(logits)
             logits = torch.cat(logits_list, dim=0)
 
@@ -1102,12 +1116,13 @@ class PipelineRunner:
         )
 
         def terminate_condition():
-            return all(
+            term = all(
                 [
                     tensor_buffer.get("terminate", mbid)
                     for mbid in range(num_micro_batches)
                 ]
             )
+            return term
 
         _exec_pipe_schedule(
             self.module,
@@ -1116,6 +1131,11 @@ class PipelineRunner:
             pipe_schedule=sched,
             terminate_condition=terminate_condition,
         )
+
+        use_cuda_graph = os.environ.get("USE_CUDA_GRAPH", "0") == "1"
+        if use_cuda_graph:
+            dist.barrier(group=constants.parallelism_group())
+            torch.cuda.synchronize()
 
         if not constants.is_last_pipe_stage():
             return None
