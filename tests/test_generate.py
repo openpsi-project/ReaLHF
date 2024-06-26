@@ -66,12 +66,18 @@ def real_model_parallel_generate(
     )
     num_pp = parallel.pipeline_parallel_size
 
+    assert max_num_batches * batch_size % parallel.data_parallel_size == 0, (
+        f"Batch size {batch_size} * max_num_batches {max_num_batches} "
+        f"must be divisible by data parallel size "
+        f"{parallel.data_parallel_size} otherwise the consistency test will fail"
+    )
     dataset_config = system_api.Dataset(
         "prompt",
         args=dict(
             dataset_path=PROMPT_DATASET_PATH,
             max_length=max_prompt_len,
             pad_to_max_length=False,
+            max_num_sequences=max_num_batches * batch_size,
         ),
     )
     backend_config = system_api.ModelBackend("inference")
@@ -95,8 +101,6 @@ def real_model_parallel_generate(
             and constants.pipe_parallel_rank() == num_pp - 1
             and constants.model_parallel_rank() == 0
         )
-        # from realrlhf.impl.model.parallelism.model_parallel.custom_all_reduce import init_custom_ar
-        # init_custom_ar()
 
         for i, data_batch in enumerate(data_batches[:max_num_batches]):
             data_batch: NamedArray
@@ -303,7 +307,7 @@ def test_single_gpu_cuda_graph():
     compare_config_1 = CompareConfig(ParallelismConfig(1, 1, 1, False), True)
     compare_config_2 = CompareConfig(ParallelismConfig(1, 1, 1, False), False)
     test_accordance(
-        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+        model_family, 256, 64, 128, 128, 8, compare_config_1, compare_config_2
     )
 
 
@@ -312,7 +316,7 @@ def test_pipe_parallel_cuda_graph(num_gpus: int = 2):
     compare_config_1 = CompareConfig(ParallelismConfig(1, num_gpus, 1, False), True)
     compare_config_2 = CompareConfig(ParallelismConfig(1, num_gpus, 1, False), False)
     test_accordance(
-        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+        model_family, 256, 64, 128, 128, 8, compare_config_1, compare_config_2
     )
 
 
@@ -321,7 +325,7 @@ def test_model_parallel_cuda_graph(num_gpus: int = 8):
     compare_config_1 = CompareConfig(ParallelismConfig(num_gpus, 1, 1, False), True)
     compare_config_2 = CompareConfig(ParallelismConfig(num_gpus, 1, 1, False), False)
     test_accordance(
-        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+        model_family, 256, 64, 128, 128, 8, compare_config_1, compare_config_2
     )
 
 
@@ -330,7 +334,7 @@ def test_data_parallel_cuda_graph(num_gpus: int = 8):
     compare_config_1 = CompareConfig(ParallelismConfig(1, 1, num_gpus, False), True)
     compare_config_2 = CompareConfig(ParallelismConfig(1, 1, num_gpus, False), False)
     test_accordance(
-        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+        model_family, 256, 64, 128, 128, 8, compare_config_1, compare_config_2
     )
 
 
@@ -339,16 +343,16 @@ def test_3d_parallel_cuda_graph():
     compare_config_1 = CompareConfig(ParallelismConfig(2, 2, 2, False), True)
     compare_config_2 = CompareConfig(ParallelismConfig(2, 2, 2, False), False)
     test_accordance(
-        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+        model_family, 256, 64, 128, 128, 32, compare_config_1, compare_config_2
     )
 
 
 def test_2d_parallel_cuda_graph():
     model_family = ModelFamily("llama", 7, is_critic=False)
-    compare_config_1 = CompareConfig(ParallelismConfig(2, 2, 1, False), True)
-    compare_config_2 = CompareConfig(ParallelismConfig(2, 2, 1, False), False)
+    compare_config_1 = CompareConfig(ParallelismConfig(2, 4, 1, False), True)
+    compare_config_2 = CompareConfig(ParallelismConfig(2, 4, 1, False), False)
     test_accordance(
-        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+        model_family, 256, 64, 128, 128, 8, compare_config_1, compare_config_2
     )
 
 
@@ -357,7 +361,7 @@ def test_3d():
     compare_config_1 = CompareConfig(ParallelismConfig(1, 1, 1, False), False)
     compare_config_2 = CompareConfig(ParallelismConfig(2, 2, 2, False), False)
     test_accordance(
-        model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
+        model_family, 256, 64, 128, 128, 8, compare_config_1, compare_config_2
     )
 
 
@@ -365,7 +369,7 @@ if __name__ == "__main__":
     # test_single_gpu_cuda_graph()
     # test_pipe_parallel_cuda_graph(num_gpus=8)
     # test_model_parallel_cuda_graph()
-    test_data_parallel_cuda_graph()
+    # test_data_parallel_cuda_graph()
     # test_3d_parallel_cuda_graph()
     # test_2d_parallel_cuda_graph()
-    # test_3d()
+    test_3d()

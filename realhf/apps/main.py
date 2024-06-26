@@ -147,12 +147,12 @@ def main_start(args, recover_count: int = 0):
         "RECOVER_RUN": "1" if is_recover_run else "0",
         "SAVE_RECOVER_STATES": "1" if save_recover_states else "0",
         "CLUSTER_SPEC_PATH": cluster_spec_path if cluster_spec_path else "",
-        "USE_CUDA_GRAPH": "1",
+        "USE_CUDA_GRAPH": "1" if args.use_cuda_graph else "0",
     }
 
     os.environ["IS_REMOTE"] = "0" if not force_allocation_use_cache else "1"
     os.environ["REAL_PACKAGE_PATH"] = repo_path
-    os.environ["USE_CUDA_GRAPH"] = "1"
+    os.environ["USE_CUDA_GRAPH"] = "1" if args.use_cuda_graph else "0"
 
     # setup experiments
     if recover_count == 0:
@@ -398,61 +398,6 @@ def main():
         default=None,
         help="trial name; by default uses '<USER>-test'",
     )
-    subparser.add_argument(
-        "--mode",
-        default="slurm",
-        choices=["local", "slurm", "ray", "local_ray"],
-    )
-    subparser.add_argument(
-        "--partition",
-        default="dev",
-        help="slurm partition to schedule the trial",
-    )
-    subparser.add_argument(
-        "--wandb_mode",
-        type=str,
-        default="disabled",
-        choices=["online", "offline", "disabled"],
-    )
-    subparser.add_argument(
-        "--image_name",
-        type=str,
-        required=False,
-        default=None,
-        help="if specified, all workers will use this image. Useful in CI/CD pipeline.",
-    )
-    subparser.add_argument("--ignore_worker_error", action="store_true")
-    subparser.add_argument(
-        "--debug",
-        action="store_true",
-        help="If True, activate all assertions in the code.",
-    )
-    subparser.add_argument(
-        "--recover_mode",
-        required=False,
-        default="disabled",
-        choices=["disabled", "auto", "save", "resume"],
-        help="Recover mode, 'auto': automatically recover the last failed run; "
-        "'save': save recover states if any error occurs; "
-        "'resume': resume from saved recover states and save states if fail again; "
-        "'disabled': do nothing when error occurs. ",
-    )
-    subparser.add_argument(
-        "--recover_retries",
-        type=int,
-        required=False,
-        default=1,
-        help="Total number of trials for the system to recover automatically when a worker fails. "
-        "Only effective when recover_mode is 'auto'.",
-    )
-    subparser.add_argument(
-        "--allocation_mode",
-        type=str,
-        required=False,
-        default="pipe_model",
-        choices=["manual", "search", "heuristic", "pipe_model", "pipe_data"],
-        help="Mode of GPU resource/model parallel strategy allocation.",
-    )
     subparser.set_defaults(ignore_worker_error=False)
     subparser.set_defaults(func=main_start)
 
@@ -466,7 +411,6 @@ def main():
         required=True,
         help="name of the experiment",
     )
-
     subparser.add_argument(
         "--trial_name", "-f", type=str, required=True, help="name of the trial"
     )

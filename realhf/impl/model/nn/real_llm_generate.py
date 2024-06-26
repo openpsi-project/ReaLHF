@@ -11,14 +11,11 @@ import transformers
 
 import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import model_api
-
-# import realhf.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
 from realhf.base import constants, logging
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.utils.functional import mask_eos_token
 from realhf.impl.model.utils.logits_warper import top_k_top_p_logits
 from realhf.impl.model.utils.padding import index_first_axis, unpad_input
-from realrlhf.api.core import model_api
 
 if TYPE_CHECKING:
     from .real_llm_api import ReaLModel

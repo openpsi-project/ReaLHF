@@ -346,10 +346,9 @@ def prepare(
     dataset_config: Optional[system_api.Dataset] = None,
     device: str = "cuda",
 ):
-    from realrlhf.impl.model.nn.real_llm_api import ReaLModel, make_real_model
-
-    import realrlhf.impl.dataset
-    import realrlhf.impl.model
+    import realhf.impl.dataset
+    import realhf.impl.model
+    from realhf.impl.model.nn.real_llm_api import ReaLModel, make_real_model
 
     with constants.model_scope(MODEL_NAME):
         if dataset_config is not None:
@@ -446,6 +445,7 @@ def check_generation_consistency(
         tmp = []
         for i in range(dp_rank_counter[identifier]):
             p = test_result_file_name(identifier, model_family, i)
+            print("loading", p)
             load_path = os.path.join(path, p)
             t = pickle.load(open(load_path, "rb"))
             tmp.append(t)

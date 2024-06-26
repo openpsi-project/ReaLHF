@@ -3,13 +3,13 @@ import realhf.base.namedarray as namedarray
 import realhf.impl.dataset
 import realhf.impl.model
 from realhf.api.core import data_api, system_api
-from realhf.base import constants, logging
+from realhf.base import logging
 
 logger = logging.getLogger("tests.test_load_data")
 
-TOKENIZER_PATH = "/lustre/public/pretrained_model_weights/Llama-2-7b-hf"
-PROMPT_ONLY_PATH = "/lustre/meizy/data/antropic-hh/ppo_prompt_only.jsonl"
-PROMPT_ANSWER_PATH = "/lustre/fw/datasets/imdb/rl/rm_paired-train-lite.jsonl"
+TOKENIZER_PATH = "/path/to/Llama-2-7b-hf"
+PROMPT_ONLY_PATH = "/path/to/prompt_only.jsonl"
+PROMPT_ANSWER_PATH = "/path/to/prompt_answer.jsonl"
 
 
 def test_prompt_only(

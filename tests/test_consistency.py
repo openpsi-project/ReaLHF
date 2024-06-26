@@ -33,7 +33,7 @@ def _shrink_mconfig(mconfig: ReaLModelConfig):
 @torch.no_grad()
 def test_consistency(model_family_names: List[str]):
     # NOTE: import here to avoid initializing CUDA context in the main process
-    from realrlhf.impl.model.nn.real_llm_api import ReaLModel
+    from realhf.impl.model.nn.real_llm_api import ReaLModel
 
     # NOTE: we run CPU float32 test instead of GPU test, because GPU inherently has non-deterministic behavior
     dist.init_process_group(
