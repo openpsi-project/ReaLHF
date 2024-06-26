@@ -1,11 +1,11 @@
-from typing import Dict, Optional, Tuple
 import dataclasses
+from typing import Dict, Optional, Tuple
 
 import torch
 
+import realhf.api.core.model_api as model_api
 from realhf.base.namedarray import NamedArray, recursive_apply
 from realhf.impl.model.nn.real_llm_generate import GenerationConfig
-import realhf.api.core.model_api as model_api
 
 
 @dataclasses.dataclass
@@ -25,9 +25,7 @@ class GenerationInterface(model_api.ModelInterface):
             dtype=torch.int32,
             device=packed_prompts.device,
         )
-        prompt_cu_seqlens = torch.nn.functional.pad(
-            prompt_lengths.cumsum(0), (1, 0)
-        )
+        prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
 
         res = module.generate(
             seqlens_cpu=data.metadata["seqlens"],

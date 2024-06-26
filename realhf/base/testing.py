@@ -7,20 +7,19 @@ import queue
 import random
 import time
 import traceback
-from typing import Callable, Dict, Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pynvml
 import torch
 import torch.utils.data
 import transformers
 
-from realhf.api.core.config import ModelFamily
-from realhf.base import (constants, gpu_utils, name_resolve, namedarray,
-                           names, topology)
-from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
 import realhf.api.core.data_api as data_api
 import realhf.api.core.model_api as model_api
 import realhf.api.core.system_api as system_api
+from realhf.api.core.config import ModelFamily
+from realhf.base import constants, gpu_utils, name_resolve, namedarray, names, topology
+from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
 # mp.set_start_method("spawn", force=True)  # Otherwise a CUDA reinitialization error will be thrown
 MODEL_NAME = "default"
@@ -301,9 +300,7 @@ def get_llama_config(size):
     )
 
 
-def make_packed_input_batches(
-    dataset: torch.utils.data.Dataset, batch_size: int
-):
+def make_packed_input_batches(dataset: torch.utils.data.Dataset, batch_size: int):
     batches = [
         [dataset[j] for j in range(i, min(i + batch_size, len(dataset)))]
         for i in range(0, len(dataset), batch_size)
@@ -319,7 +316,7 @@ def make_huggingface_generate_input_batches(
     batch_size: int,
 ):
     batches = [
-        [dataset[j]['prompt'] for j in range(i, i + batch_size)]
+        [dataset[j]["prompt"] for j in range(i, i + batch_size)]
         for i in range(0, len(dataset), batch_size)
     ]
     tokenizer.padding_side = "left"
@@ -337,9 +334,7 @@ def make_huggingface_generate_input_batches(
     return batches
 
 
-def make_random_input_batches(
-    shape: Tuple[int], n_batches: int, vocab_size: int
-):
+def make_random_input_batches(shape: Tuple[int], n_batches: int, vocab_size: int):
     batches = [torch.randint(0, vocab_size, shape) for _ in range(n_batches)]
     return batches
 
@@ -351,7 +346,8 @@ def prepare(
     dataset_config: Optional[system_api.Dataset] = None,
     device: str = "cuda",
 ):
-    from realrlhf.impl.model.nn.real_llm_api import make_real_model, ReaLModel
+    from realrlhf.impl.model.nn.real_llm_api import ReaLModel, make_real_model
+
     import realrlhf.impl.dataset
     import realrlhf.impl.model
 
@@ -406,9 +402,7 @@ def test_result_file_name(
     dp_rank: int,
 ):
     assert "-" not in identifier and "-" not in model_family._class
-    return (
-        f"{identifier}-{model_family._class}-{model_family.size}-{dp_rank}.pkl"
-    )
+    return f"{identifier}-{model_family._class}-{model_family.size}-{dp_rank}.pkl"
 
 
 def info_from_file_name(file_name: str):
@@ -545,9 +539,7 @@ def compare_two_runs(run_id1, run_id2, mp=1, dp=1, pp=1):
                 if match:
                     print(f"tensor {k} matches")
                     f.write(f"tensor {k} matches\n\n")
-                    f.write(
-                        f"max diff: {torch.max(torch.abs(ts1[k] - ts2[k]))}\n\n"
-                    )
+                    f.write(f"max diff: {torch.max(torch.abs(ts1[k] - ts2[k]))}\n\n")
                     match_count += 1
                 else:
                     # torch.set_printoptions(precision=4)

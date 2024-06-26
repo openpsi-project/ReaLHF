@@ -4,8 +4,8 @@
 import torch
 import torch.distributed
 
-from realhf.base import constants
 import realhf.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
+from realhf.base import constants
 
 from .utils import split_tensor_along_last_dim
 

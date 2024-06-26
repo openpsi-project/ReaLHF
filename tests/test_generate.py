@@ -1,19 +1,19 @@
-from typing import *
 import dataclasses
 import os
 import pickle
 import time
+from typing import *
 
 import torch
 import torch.distributed as dist
 import torch.utils.data
 
+import realhf.api.core.model_api as model_api
+import realhf.api.core.system_api as system_api
 from realhf.api.core import data_api
 from realhf.api.core.config import ModelFamily
 from realhf.api.quickstart.model import ParallelismConfig
 from realhf.base import constants, logging, testing
-import realhf.api.core.model_api as model_api
-import realhf.api.core.system_api as system_api
 
 logger = logging.getLogger("tests.test_generate")
 
@@ -195,8 +195,8 @@ def huggingface_model_generate_simple(
 
     to_save = []
     for i, batch in enumerate(data_batches[:max_num_batches]):
-        input_ids = batch['input_ids'].cuda()
-        attention_mask = batch['attention_mask'].cuda()
+        input_ids = batch["input_ids"].cuda()
+        attention_mask = batch["attention_mask"].cuda()
         prompt_len = input_ids.shape[1]
         logger.info(
             f"Rank {constants.parallelism_rank()} Batch {i} "
@@ -222,9 +222,7 @@ def huggingface_model_generate_simple(
 
     if save_result:
         to_save = torch.cat(to_save, dim=0)
-        testing.save_test_result(
-            to_save, TMP_SAVE_DIR, model_family, 0, f"huggingface"
-        )
+        testing.save_test_result(to_save, TMP_SAVE_DIR, model_family, 0, f"huggingface")
         # testing.dump_stored_to_file()
 
 
@@ -311,12 +309,8 @@ def test_single_gpu_cuda_graph():
 
 def test_pipe_parallel_cuda_graph(num_gpus: int = 2):
     model_family = ModelFamily("llama", 7, is_critic=False)
-    compare_config_1 = CompareConfig(
-        ParallelismConfig(1, num_gpus, 1, False), True
-    )
-    compare_config_2 = CompareConfig(
-        ParallelismConfig(1, num_gpus, 1, False), False
-    )
+    compare_config_1 = CompareConfig(ParallelismConfig(1, num_gpus, 1, False), True)
+    compare_config_2 = CompareConfig(ParallelismConfig(1, num_gpus, 1, False), False)
     test_accordance(
         model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
     )
@@ -324,12 +318,8 @@ def test_pipe_parallel_cuda_graph(num_gpus: int = 2):
 
 def test_model_parallel_cuda_graph(num_gpus: int = 8):
     model_family = ModelFamily("llama", 7, is_critic=False)
-    compare_config_1 = CompareConfig(
-        ParallelismConfig(num_gpus, 1, 1, False), True
-    )
-    compare_config_2 = CompareConfig(
-        ParallelismConfig(num_gpus, 1, 1, False), False
-    )
+    compare_config_1 = CompareConfig(ParallelismConfig(num_gpus, 1, 1, False), True)
+    compare_config_2 = CompareConfig(ParallelismConfig(num_gpus, 1, 1, False), False)
     test_accordance(
         model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
     )
@@ -337,12 +327,8 @@ def test_model_parallel_cuda_graph(num_gpus: int = 8):
 
 def test_data_parallel_cuda_graph(num_gpus: int = 8):
     model_family = ModelFamily("llama", 7, is_critic=False)
-    compare_config_1 = CompareConfig(
-        ParallelismConfig(1, 1, num_gpus, False), True
-    )
-    compare_config_2 = CompareConfig(
-        ParallelismConfig(1, 1, num_gpus, False), False
-    )
+    compare_config_1 = CompareConfig(ParallelismConfig(1, 1, num_gpus, False), True)
+    compare_config_2 = CompareConfig(ParallelismConfig(1, 1, num_gpus, False), False)
     test_accordance(
         model_family, 256, 64, 128, 128, 10, compare_config_1, compare_config_2
     )

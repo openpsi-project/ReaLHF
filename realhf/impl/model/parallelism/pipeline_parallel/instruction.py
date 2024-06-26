@@ -2,7 +2,6 @@ import sys
 from typing import *
 
 
-
 class PipeInstruction:
     """Base class for all instructions to be executed by the pipeline engine.
 

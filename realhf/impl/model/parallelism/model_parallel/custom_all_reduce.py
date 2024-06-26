@@ -1,6 +1,6 @@
+import dataclasses
 from contextlib import contextmanager, nullcontext
 from typing import Any, List, Optional
-import dataclasses
 
 import torch
 import torch.distributed
@@ -11,7 +11,9 @@ import realhf.base.logging as logging
 
 try:
     import pynvml
+
     from realhf._C.custom_all_reduce import custom_ar
+
     @contextmanager
     def _nvml():
         try:
@@ -61,9 +63,7 @@ def graph_capture():
     """
     stream = torch.cuda.Stream()
     graph_capture_context = GraphCaptureContext(stream)
-    maybe_ca_context = (
-        nullcontext() if _CA_HANDLE is None else _CA_HANDLE.capture()
-    )
+    maybe_ca_context = nullcontext() if _CA_HANDLE is None else _CA_HANDLE.capture()
     with torch.cuda.stream(stream), maybe_ca_context:
         yield graph_capture_context
 
@@ -90,9 +90,7 @@ def graph_capture():
     """
     stream = torch.cuda.Stream()
     graph_capture_context = GraphCaptureContext(stream)
-    maybe_ca_context = (
-        nullcontext() if _CA_HANDLE is None else _CA_HANDLE.capture()
-    )
+    maybe_ca_context = nullcontext() if _CA_HANDLE is None else _CA_HANDLE.capture()
     with torch.cuda.stream(stream), maybe_ca_context:
         yield graph_capture_context
 
@@ -133,9 +131,7 @@ def init_custom_ar() -> None:
             "disable_custom_all_reduce=True explicitly."
         )
         return
-    _CA_HANDLE = CustomAllreduce(
-        mp_rank, mp_world_size, full_nvlink=full_nvlink
-    )
+    _CA_HANDLE = CustomAllreduce(mp_rank, mp_world_size, full_nvlink=full_nvlink)
 
 
 def get_handle() -> Optional["CustomAllreduce"]:
@@ -220,9 +216,7 @@ class CustomAllreduce:
         )
         # This is a pre-registered IPC buffer. In eager mode, input tensors
         # are first copied into this buffer before allreduce is performed
-        self.buffer = torch.empty(
-            max_size, dtype=torch.uint8, device=self.device
-        )
+        self.buffer = torch.empty(max_size, dtype=torch.uint8, device=self.device)
         # This is a buffer for storing the tuples of pointers pointing to
         # IPC buffers from all ranks. Each registered tuple has size of
         # 8*world_size bytes where world_size is at most 8. Allocating 8MB

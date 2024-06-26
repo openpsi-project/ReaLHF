@@ -1,9 +1,9 @@
-from realhf.api.core import data_api, system_api
-from realhf.base import constants, logging
 import realhf.api.core.system_api
 import realhf.base.namedarray as namedarray
 import realhf.impl.dataset
 import realhf.impl.model
+from realhf.api.core import data_api, system_api
+from realhf.base import constants, logging
 
 logger = logging.getLogger("tests.test_load_data")
 

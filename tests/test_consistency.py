@@ -1,19 +1,16 @@
-from typing import *
 import math
 import os
 import shutil
+from typing import *
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
-import torch.nn.functional as F
 import transformers
 
-from realrlhf.api.core.config import ModelFamily
-from realrlhf.api.core.model_api import ReaLModelConfig
-from realrlhf.base import constants, logging
-from realrlhf.impl.model.nn.real_llm_api import add_helper_functions
-import realrlhf.base.testing as testing
+from realhf.api.core.config import ModelFamily
+from realhf.api.core.model_api import ReaLModelConfig
+from realhf.base import constants, logging, testing
+from realhf.impl.model.nn.real_llm_api import add_helper_functions
 
 logger = logging.getLogger("tests.test_saveload")
 
@@ -85,9 +82,9 @@ def test_consistency(model_family_names: List[str]):
             getattr(model, f"from_{model_family_name}")(save_path, False)
 
             # load hf
-            hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-                save_path
-            ).to(torch.float32)
+            hf_model = transformers.AutoModelForCausalLM.from_pretrained(save_path).to(
+                torch.float32
+            )
             hf_model.eval()
 
             max_seqlen = 128
@@ -97,9 +94,7 @@ def test_consistency(model_family_names: List[str]):
             )
             # input_lens = torch.randint(1, max_seqlen, (bs,), dtype=torch.int32)
             input_lens = torch.full((bs,), max_seqlen, dtype=torch.int32)
-            attention_mask = (
-                torch.arange(max_seqlen)[None, :] < input_lens[:, None]
-            )
+            attention_mask = torch.arange(max_seqlen)[None, :] < input_lens[:, None]
 
             logits1 = hf_model(
                 input_ids=input_ids, attention_mask=attention_mask

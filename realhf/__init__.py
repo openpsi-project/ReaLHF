@@ -3,9 +3,11 @@
 # realhf.api.quickstart.model.ModelTrainEvalConfig.
 from .api.core.dfg import MFCDef
 from .api.core.model_api import ModelInterface, ReaLModelConfig
-from .api.quickstart.dataset import (PairedComparisonDatasetConfig,
-                                     PromptAnswerDatasetConfig,
-                                     PromptOnlyDatasetConfig)
+from .api.quickstart.dataset import (
+    PairedComparisonDatasetConfig,
+    PromptAnswerDatasetConfig,
+    PromptOnlyDatasetConfig,
+)
 from .api.quickstart.device_mesh import AllocationConfig
 from .api.quickstart.model import (
     ModelTrainEvalConfig,

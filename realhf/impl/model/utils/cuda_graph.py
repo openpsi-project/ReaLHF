@@ -1,9 +1,9 @@
-from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import dataclasses
 import gc
 import os
 import time
+from contextlib import nullcontext
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 
@@ -40,9 +40,7 @@ def capture_func(
     input_buffer: Dict[str, Any],
     force_recapture: bool = False,
     no_grad: bool = False,
-) -> Tuple[
-    torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]
-]:
+) -> Tuple[torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
     """Capture a function with cuda graph, store the graph and input/output buffers by name.
     The input/output metadata should match the inputs and outputs of function.
 
@@ -74,8 +72,7 @@ def capture_func(
     if not custom_all_reduce.is_initialized():
         custom_all_reduce.init_custom_ar()
     assert (
-        custom_all_reduce.is_initialized()
-        or constants.model_parallel_world_size() == 1
+        custom_all_reduce.is_initialized() or constants.model_parallel_world_size() == 1
     )
     assert not constants.sequence_parallel()
 
@@ -85,9 +82,7 @@ def capture_func(
     # input_buffer_cache = clone_buffer(input_buffer)
 
     with custom_all_reduce.graph_capture(), maybe_no_grad:
-        print(
-            f"rank {torch.distributed.get_rank()}: Capturing CUDA graph for {name}"
-        )
+        print(f"rank {torch.distributed.get_rank()}: Capturing CUDA graph for {name}")
         func(**input_buffer)
         torch.cuda.synchronize()
 

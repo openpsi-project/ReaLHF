@@ -3,10 +3,7 @@ from typing import *
 import torch
 import transformers
 
-from realhf.api.core.model_api import (
-    ReaLModelConfig,
-    register_hf_family,
-)
+from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
 from realhf.base.constants import use_te_impl
 
 

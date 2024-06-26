@@ -9,6 +9,7 @@ import torch.distributed
 import torch.utils.checkpoint
 import transformers
 
+import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import model_api
 
 # import realhf.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
@@ -18,7 +19,6 @@ from realhf.impl.model.utils.functional import mask_eos_token
 from realhf.impl.model.utils.logits_warper import top_k_top_p_logits
 from realhf.impl.model.utils.padding import index_first_axis, unpad_input
 from realrlhf.api.core import model_api
-import realhf.impl.model.utils.cuda_graph as cuda_graph
 
 if TYPE_CHECKING:
     from .real_llm_api import ReaLModel
@@ -187,21 +187,13 @@ def prepare(
             constants.max_prompt_len() + gconfig.max_new_tokens,
             module.config.hidden_dim // module.config.head_dim + 10,
         )
-        k_cache_handle = cuda_graph.input_buffer_handle(
-            cuda_graph_name, "k_caches"
-        )
-        v_cache_handle = cuda_graph.input_buffer_handle(
-            cuda_graph_name, "v_caches"
-        )
+        k_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "k_caches")
+        v_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "v_caches")
         k_cache_handle = None
         v_cache_handle = None
         if k_cache_handle is not None and v_cache_handle is not None:
-            k_cache = k_cache_handle[layer_idx - min_layer_index][
-                :bs, :kvcache_seqlen
-            ]
-            v_cache = v_cache_handle[layer_idx - min_layer_index][
-                :bs, :kvcache_seqlen
-            ]
+            k_cache = k_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
+            v_cache = v_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
         else:
             k_cache = torch.zeros(
                 (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
@@ -325,24 +317,18 @@ def generate(
     while not terminate:
         # the next round of inference
         if graph is not None:
-            input_buffers["input_ids"][:bs].copy_(
-                next_tokens, non_blocking=True
-            )
+            input_buffers["input_ids"][:bs].copy_(next_tokens, non_blocking=True)
             input_buffers["position_ids"][:bs].copy_(
                 cache_seqlens.unsqueeze(-1), non_blocking=True
             )
-            input_buffers["cache_seqlens"][:bs].copy_(
-                cache_seqlens, non_blocking=True
-            )
+            input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
             # K/v cache will be changed in-place with flash attention.
             graph.replay()
             logits = output_buffers["output"][:bs].squeeze(1)
         else:
             ys[0].packed_input_ids = next_tokens
             ys[0].packed_position_ids = None
-            x.cu_seqlens = torch.arange(
-                bs + 1, dtype=torch.int32, device=device
-            )
+            x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=device)
             x.max_seqlen = 1
             # K/v cache will be changed in-place with flash attention.
             logits = model(x, ys)[0].pp_output.squeeze(dim=1)
@@ -350,10 +336,8 @@ def generate(
         cache_seqlens += (
             1  # The global handle. This will increase all handles in ys by 1.
         )
-        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = (
-            genstep(
-                logits, tokenizer, unfinished_sequences, generated_idx, gconfig
-            )
+        next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
+            logits, tokenizer, unfinished_sequences, generated_idx, gconfig
         )
         gen_token_ph.append(next_tokens)
         gen_logprob_ph.append(logprob)

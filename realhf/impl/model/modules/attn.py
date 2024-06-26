@@ -16,8 +16,11 @@ from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
 
 try:
-    from flash_attn import (flash_attn_func, flash_attn_varlen_func,
-                            flash_attn_with_kvcache)
+    from flash_attn import (
+        flash_attn_func,
+        flash_attn_varlen_func,
+        flash_attn_with_kvcache,
+    )
 except ModuleNotFoundError:
     pass
 import realhf.base.logging as logging

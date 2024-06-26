@@ -3,10 +3,12 @@ import math
 from typing import *
 
 try:
-    from megatron.core.distributed.distributed_data_parallel import \
-        DistributedDataParallel as MegatronDDP
-    from megatron.core.optimizer.distrib_optimizer import \
-        DistributedOptimizer as MegatronDistOptim
+    from megatron.core.distributed.distributed_data_parallel import (
+        DistributedDataParallel as MegatronDDP,
+    )
+    from megatron.core.optimizer.distrib_optimizer import (
+        DistributedOptimizer as MegatronDistOptim,
+    )
 except ImportError or ModuleNotFoundError:
     # dummy class for type hint, due to missing files in megatron CPU installation
     class MegatronDDP:

@@ -2,9 +2,7 @@ import dataclasses
 
 from omegaconf import MISSING
 
-from realhf.api.core.dfg import (MFCDef, 
-                                 ModelInterface,
-                                 ModelInterfaceType)
+from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
 from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
@@ -65,9 +63,7 @@ class GenerationConfig(CommonExperimentConfig):
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
     )
-    allocation: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
+    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
     @property
     def models(self):

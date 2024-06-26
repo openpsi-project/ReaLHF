@@ -1,6 +1,6 @@
 import dataclasses
-from typing import *
 import os
+from typing import *
 
 from deepspeed.runtime.engine import MEMORY_OPT_ALLREDUCE_SIZE, DeepSpeedEngine
 from deepspeed.runtime.zero.config import ZeroStageEnum
@@ -419,30 +419,28 @@ class PipeGenInstrSet:
             # only replay decoding phase
             bs = ys[0].cache_seqlens.shape[0]
             if is_first_stage:
-                cuda_graph.input_buffer_handle(cuda_graph_name, "input_ids")[
-                    :bs
-                ].copy_(ys[0].packed_input_ids, non_blocking=True)
+                cuda_graph.input_buffer_handle(cuda_graph_name, "input_ids")[:bs].copy_(
+                    ys[0].packed_input_ids, non_blocking=True
+                )
             if not is_first_stage:
-                cuda_graph.input_buffer_handle(
-                    cuda_graph_name, "hidden_states"
-                ).copy_(x.pp_input, non_blocking=True)
-                cuda_graph.input_buffer_handle(
-                    cuda_graph_name, "cu_seqlens"
-                ).copy_(x.cu_seqlens, non_blocking=True)
+                cuda_graph.input_buffer_handle(cuda_graph_name, "hidden_states").copy_(
+                    x.pp_input, non_blocking=True
+                )
+                cuda_graph.input_buffer_handle(cuda_graph_name, "cu_seqlens").copy_(
+                    x.cu_seqlens, non_blocking=True
+                )
                 # cuda_graph.input_buffer_handle(cuda_graph_name, "max_seqlen").copy_(
                 #     torch.tensor(x.max_seqlen), non_blocking=True
                 # )
-            cuda_graph.input_buffer_handle(cuda_graph_name, "position_ids")[
-                :bs
-            ].copy_(ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True)
-            cuda_graph.input_buffer_handle(cuda_graph_name, "cache_seqlens")[
-                :bs
-            ].copy_(ys[0].cache_seqlens, non_blocking=True)
+            cuda_graph.input_buffer_handle(cuda_graph_name, "position_ids")[:bs].copy_(
+                ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
+            )
+            cuda_graph.input_buffer_handle(cuda_graph_name, "cache_seqlens")[:bs].copy_(
+                ys[0].cache_seqlens, non_blocking=True
+            )
 
             graph.replay()
-            x.pp_output = cuda_graph.output_buffer_handle(
-                cuda_graph_name, "output"
-            )
+            x.pp_output = cuda_graph.output_buffer_handle(cuda_graph_name, "output")
 
         tensor_buffer.put("batch_output_x", micro_batch_id, x)
 
@@ -454,8 +452,8 @@ class PipeGenInstrSet:
         if not tensor_buffer.get("kv_cache_reserved", micro_batch_id):
             # KV cache is attached to x and ys.
             assert constants.pipe_parallel_world_size() >= 2
-            x, ys, cache_seqlens, graph, input_buffers, output_buffers = (
-                prepare(module, gconfig, x, ys, cuda_graph_name)
+            x, ys, cache_seqlens, graph, input_buffers, output_buffers = prepare(
+                module, gconfig, x, ys, cuda_graph_name
             )
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
