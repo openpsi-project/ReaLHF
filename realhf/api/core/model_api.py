@@ -95,6 +95,7 @@ class ReaLModelConfig:
     scale_attn_by_inverse_layer_idx: bool = True
     # llama does not use attention bias and uses special MLP/LayerNorm layers
     use_attention_bias: bool = True
+    use_attn_proj_bias: bool = True
     layer_norm_type: Optional[str] = None
     mlp_type: Optional[str] = None
     # rotary embedding
@@ -114,6 +115,11 @@ class ReaLModelConfig:
 
     def __post_init__(self):
         assert not self.share_embeddings_and_output_weights
+
+    @property
+    def tied_embedding(self):
+        # FIXME: temporary patch
+        return self.share_embeddings_and_output_weights
 
 
 def load_hf_tokenizer(

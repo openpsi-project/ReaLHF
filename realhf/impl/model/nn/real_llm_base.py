@@ -110,6 +110,7 @@ class ReaLModelBlock(nn.Module):
         super().__init__()
         if dtype is None:
             dtype = torch.float16
+        self.config = config
         self.layer_index = layer_index
         self.attn = CausalSelfAttentionLayer(
             hidden_dim=config.hidden_dim,
@@ -122,6 +123,7 @@ class ReaLModelBlock(nn.Module):
             scale_attn_by_inverse_layer_idx=config.scale_attn_by_inverse_layer_idx,
             layer_norm_type=config.layer_norm_type,
             use_attention_bias=config.use_attention_bias,
+            use_attn_proj_bias=config.use_attn_proj_bias,
             apply_rotary=config.apply_rotary,
             rotary_base=config.rotary_base,
             rotary_interleaved=config.rotary_interleaved,
@@ -241,6 +243,7 @@ class VocabPositionEmbedding(nn.Module):
     ):
         super().__init__()
         self.n_positions = config.n_positions
+        self.hidden_dim = config.hidden_dim
 
         model_parallel = constants.model_parallel_world_size() > 1
         if model_parallel:
@@ -262,14 +265,6 @@ class VocabPositionEmbedding(nn.Module):
             )
 
         self.embed_drop = nn.Dropout(config.embd_pdrop)
-
-        self.self_attention_mask = torch.tril(
-            torch.ones(
-                (config.n_positions, config.n_positions),
-                dtype=torch.bool,
-                device=device,
-            )
-        )
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         # Set position ids.
@@ -387,7 +382,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
     if config.layer_norm_type is None:
         # nn.LayerNorm
         ln_count = 2 * config.hidden_dim
-    elif config.layer_norm_type == "rms":
+    elif config.layer_norm_type in ["gemma", "rms"]:
         # Llama RMSNorm
         ln_count = config.hidden_dim
     else:
@@ -402,7 +397,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
 
     # attention projection
     count += config.hidden_dim * config.hidden_dim
-    if config.use_attention_bias:
+    if config.use_attn_proj_bias:
         count += config.hidden_dim
     # NOTE: we ignore the parameters of RotoaryEmbedding here
 
@@ -423,22 +418,21 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
 def real_model_tblock_param_keys(
     config: model_api.ReaLModelConfig, idx: int
 ) -> List[str]:
-    keys = [
-        f"{idx + 1}.attn.c_attn.ln.weight",
-        f"{idx + 1}.attn.c_attn.q_attn.weight",
-        f"{idx + 1}.attn.c_attn.k_attn.weight",
-        f"{idx + 1}.attn.c_attn.v_attn.weight",
-    ]
+    # NOTE: The order matters, we should not change the order of keys.
+    keys = [f"{idx + 1}.attn.c_attn.ln.weight"]
     if config.layer_norm_type is None:
         keys += [f"{idx + 1}.attn.c_attn.ln.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.q_attn.weight"]
     if config.use_attention_bias:
-        keys += [
-            f"{idx + 1}.attn.c_attn.q_attn.bias",
-            f"{idx + 1}.attn.c_attn.k_attn.bias",
-            f"{idx + 1}.attn.c_attn.v_attn.bias",
-        ]
+        keys += [f"{idx + 1}.attn.c_attn.q_attn.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.k_attn.weight"]
+    if config.use_attention_bias:
+        keys += [f"{idx + 1}.attn.c_attn.k_attn.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.v_attn.weight"]
+    if config.use_attention_bias:
+        keys += [f"{idx + 1}.attn.c_attn.v_attn.bias"]
     keys += [f"{idx + 1}.attn.c_proj.weight"]
-    if config.use_attention_bias:
+    if config.use_attn_proj_bias:
         keys += [f"{idx + 1}.attn.c_proj.bias"]
     keys += [f"{idx + 1}.mlp.ln.weight"]
     if config.layer_norm_type is None:
@@ -446,8 +440,8 @@ def real_model_tblock_param_keys(
     if config.mlp_type is None:
         keys += [
             f"{idx + 1}.mlp.c_fc.weight",
-            f"{idx + 1}.mlp.c_proj.weight",
             f"{idx + 1}.mlp.c_fc.bias",
+            f"{idx + 1}.mlp.c_proj.weight",
             f"{idx + 1}.mlp.c_proj.bias",
         ]
     elif config.mlp_type == "llama":

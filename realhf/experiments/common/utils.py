@@ -91,7 +91,7 @@ def make_train_backend_config(
                 enable_bf16=model_cfg.enable_bf16,
                 enable_fp16=model_cfg.enable_fp16,
                 use_zero_optimization=model_cfg.zero_stage > 0,
-                overlap_grad_reduce=model_cfg.zero_stage > 1,
+                overlap_grad_reduce=model_cfg.zero_stage > 0,
                 overlap_param_gather=model_cfg.zero_stage > 2,
             ),
         )

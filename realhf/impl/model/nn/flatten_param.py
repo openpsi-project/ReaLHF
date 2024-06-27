@@ -1,9 +1,9 @@
 import dataclasses
+import math
 from typing import *
 
 import numpy as np
 import torch
-import math
 
 from realhf.api.core import model_api
 from realhf.api.core.config import ModelName
@@ -85,9 +85,7 @@ def slice_intervals(
         return torch.cat([tensor[start:end] for start, end in intervals_cpu])
 
     interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(
-        interval_sizes.cumsum(0)[:-1], (1, 0), value=0
-    )
+    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
     assert tensor.dtype == torch.half
     return interval_op_cuda.slice_intervals_cuda_half(
         tensor,
@@ -115,9 +113,7 @@ def set_intervals(
         assert offset == src.shape[0]
         return
     interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(
-        interval_sizes.cumsum(0)[:-1], (1, 0), value=0
-    )
+    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
     interval_op_cuda.set_intervals_cuda_half(
         src,
         dst,
@@ -134,13 +130,15 @@ def build_param_spec(
     config: model_api.ReaLModelConfig,
     dp_size: int,
     mp_size: int,
-    pp_size:int,
+    pp_size: int,
     sequence_parallel: bool,
     bucket_size: int = 40000000,
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     # TODO: omit parameters that do not require gradient?
     if len(layer_indices) == 0:
         return {}, 0
+
+    disable_bucketing = 0 not in layer_indices
 
     sd_keys = []
     for layer_idx in layer_indices:
@@ -182,9 +180,7 @@ def build_param_spec(
 
     param_spec = {}
     for k in sd_keys:
-        shape = get_real_model_param_shape(
-            k, config, mp_size, sequence_parallel
-        )
+        shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
         numel = int(np.prod(shape))
         data_end_index = data_start_index + numel
 
@@ -197,12 +193,22 @@ def build_param_spec(
         )
         bucket_params.add(k)
         if (
-            data_end_index - bucket_data_start_index
-        ) >= bucket_size or _requires_new_allreduce_bucket(k):
+            not disable_bucketing
+            and (data_end_index - bucket_data_start_index) >= bucket_size
+        ) or _requires_new_allreduce_bucket(k):
             data_end_index = _create_fake_bucket(data_end_index)
+        import torch.distributed as dist
+
+        if dist.get_rank() == 0:
+            print(">>>>>>>>>>>>>>>>>", k, data_end_index)
         data_start_index = data_end_index
+
     if len(bucket_params) > 0:
         data_end_index = _create_fake_bucket(data_end_index)
+    import torch.distributed as dist
+
+    if dist.get_rank() == 0:
+        print(">>>>>>>>>>>>>>>>>", data_end_index)
 
     return param_spec, data_end_index
 
@@ -237,9 +243,7 @@ def param_intervals_from_keys(
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
-                get_real_model_param_shape(
-                    k, config, mp_size, sequence_parallel
-                ),
+                get_real_model_param_shape(k, config, mp_size, sequence_parallel),
                 portion_rank,
                 portion_size,
                 config,

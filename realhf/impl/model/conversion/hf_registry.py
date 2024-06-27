@@ -10,7 +10,7 @@ import transformers
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging
-from realhf.base.saveload_utils import split_state_dict_into_shards
+from realhf.base.saveload_utils import load_safetensor, split_state_dict_into_shards
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_parallel import (
     mp_merge_key,
@@ -48,6 +48,8 @@ class HFModelRegistry:
             )
         config = self.config_from_hf_converter(hf_config)
         config.is_critic = is_critic
+        if config.is_critic:
+            config.tied_embedding = False
         return config
 
     def config_to_hf(
@@ -61,6 +63,7 @@ class HFModelRegistry:
         load_dir: str,
         init_critic_from_actor: bool = False,
     ):
+        # TODO: expand odd vocab size to support tensor parallel
         # NOTE: moving this upwards will result in circular import
 
         tik = time.perf_counter()
@@ -85,17 +88,37 @@ class HFModelRegistry:
         if os.path.exists(os.path.join(load_dir, "pytorch_model.bin.index.json")):
             with open(os.path.join(load_dir, "pytorch_model.bin.index.json"), "r") as f:
                 hf_sd_mapping = json.load(f)["weight_map"]
-            files_to_load = set(hf_sd_mapping[name] for name in required_hf_sd_names)
-        else:
+            files_to_load = set()
+            for name in required_hf_sd_names:
+                if name in hf_sd_mapping:
+                    files_to_load.add(hf_sd_mapping[name])
+        elif os.path.exists(os.path.join(load_dir, "model.safetensors.index.json")):
+            with open(os.path.join(load_dir, "model.safetensors.index.json"), "r") as f:
+                hf_sd_mapping = json.load(f)["weight_map"]
+            files_to_load = set()
+            for name in required_hf_sd_names:
+                if name in hf_sd_mapping:
+                    files_to_load.add(hf_sd_mapping[name])
+        elif os.path.exists(os.path.join(load_dir, "pytorch_model.bin")):
             files_to_load = ["pytorch_model.bin"]
+        elif os.path.exists(os.path.join(load_dir, "model.safetensors")):
+            files_to_load = ["model.safetensors"]
+        else:
+            raise ValueError(
+                f"Could not find model file in {load_dir}. "
+                "Make sure you have downloaded the model correctly."
+            )
         setup_time = time.perf_counter() - tik
 
         load_times, partition_times = [], []
         state_dict = {}
         for fn in files_to_load:
             load_tik = time.perf_counter()
-            # set map_location to be CPU is a little bit faster
-            sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
+            if fn.endswith(".safetensors"):
+                sd = load_safetensor(os.path.join(load_dir, fn))
+            else:
+                # set map_location to be CPU is a little bit faster
+                sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
             partition_tik = time.perf_counter()
             sd = {k: v for k, v in sd.items() if k in required_hf_sd_names}
             sd = self.sd_from_hf_converter(sd, model.config)
@@ -110,11 +133,13 @@ class HFModelRegistry:
             partition_times.append(time.perf_counter() - partition_tik)
 
         copy_tik = time.perf_counter()
-        if (
-            init_critic_from_actor
-            and f"{model.config.n_layers + 1}.weight" in state_dict
-        ):
-            state_dict.pop(f"{model.config.n_layers + 1}.weight")
+        if init_critic_from_actor and constants.is_last_pipe_stage():
+            if f"{model.config.n_layers + 1}.weight" in state_dict:
+                state_dict.pop(f"{model.config.n_layers + 1}.weight")
+            assert len(state_dict) == len(model.state_dict()) - 1, (
+                len(state_dict),
+                len(model.state_dict()),
+            )
             model.load_state_dict(state_dict, strict=False)
         else:
             try:
@@ -126,6 +151,7 @@ class HFModelRegistry:
                     f"in the model config if you are initializing "
                     f"a critic model from a regular LLM? Err: {e}"
                 )
+                raise e
 
         # Some logging info
         copy_time = time.perf_counter() - copy_tik
@@ -224,7 +250,8 @@ class HFModelRegistry:
         # Save tokenizer and huggingface model config.
         if pp_rank == 0 and dp_rank == 0 and mp_rank == 0:
             hf_config.save_pretrained(save_dir)
-            tokenizer.save_pretrained(save_dir)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(save_dir)
 
         # Dump parameters to disk.
         if len(pp_stage_n_shards) == 1 and pp_stage_n_shards[0] == 1:
@@ -287,7 +314,9 @@ class HFModelRegistry:
         metadata_t = t1 - tik
         gather_cpu_t = t2 - t1
         dump_t = t3 - t2
-        logger.info(
-            f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, gather/cpu copy cost={gather_cpu_t:.2f}s, "
-            f"dump cost={dump_t:.2f}s"
-        )
+        if os.getenv("REAL_LOG_SAVE_TIME", None) == "1":
+            logger.info(
+                f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, "
+                f"gather/cpu copy cost={gather_cpu_t:.2f}s, "
+                f"dump cost={dump_t:.2f}s"
+            )

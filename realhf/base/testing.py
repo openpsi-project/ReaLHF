@@ -2,26 +2,21 @@ import dataclasses
 import gc
 import multiprocessing as mp
 import os
-import pickle
 import queue
 import random
 import time
 import traceback
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict
 
 import pynvml
 import torch
-import torch.utils.data
-import transformers
+import torch.distributed as dist
 
-import realhf.api.core.data_api as data_api
-import realhf.api.core.model_api as model_api
-import realhf.api.core.system_api as system_api
+from realhf.api.core import config
 from realhf.api.core.config import ModelFamily
 from realhf.base import constants, gpu_utils, name_resolve, namedarray, names, topology
 from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
-# mp.set_start_method("spawn", force=True)  # Otherwise a CUDA reinitialization error will be thrown
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
 _DEFAULT_TRIAL_NAME = "test"
@@ -64,15 +59,6 @@ class StandaloneTestingProcess(mp.Process):
 
     def run(self) -> None:
         assert not torch.cuda.is_initialized()
-
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
-        os.environ["REAL_MODE"] = "LOCAL"
-        os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
-
-        # isolate cuda devices
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(self.rank)
-        # os.environ["CUDA_VISIBLE_DEVICES"] = str(self.rank+2) if self.rank in [0, 1] else str(self.rank+4)
-        os.environ["GPU_DEVICES_ISOLATED"] = str(1)
         torch.cuda.set_device(0)
 
         self.barrier.wait()
@@ -111,8 +97,8 @@ def init_global_constants(
     model_name=None,
     msid2mwid=None,
     sequence_parallel=False,
-    max_prompt_len=None,
     gradient_checkpointing=True,
+    max_prompt_len=None,
 ):
     model_name = model_name if model_name is not None else MODEL_NAME
 
@@ -137,7 +123,11 @@ def init_global_constants(
         constants.set_parallelism_group(
             model_name=model_name, pgroup=wg, ranks=wg_ranks
         )
-        grid = ParallelGrid(process_group=wg, topology=topo)
+        grid = ParallelGrid(
+            process_group=wg,
+            topology=topo,
+            rank_mapping=constants.rank_mapping_of_model(model_name),
+        )
         constants.set_grid(model_name=model_name, grid=grid)
 
 
@@ -146,6 +136,10 @@ class LocalMultiProcessTest:
     1. Defining a barrier and a queue for all sub-processes.
     2. Error handling after launch.
     """
+
+    # NOTE: This is necessary for running pytest, otherwise
+    # pytest will exit early before subprocesses terminate.
+    mp.set_start_method("spawn", force=True)
 
     def __init__(
         self,
@@ -158,10 +152,13 @@ class LocalMultiProcessTest:
     ):
         self.barrier = mp.Barrier(world_size)
         self.err_queue = mp.Queue(world_size)
-        self.expr_name = expr_name
-        self.trial_name = trial_name
-        self.processes = [
-            StandaloneTestingProcess(
+        os.environ["REAL_MODE"] = "LOCAL"
+        os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+        os.environ["GPU_DEVICES_ISOLATED"] = str(1)
+        self.processes = []
+        for rank in range(world_size):
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
+            p = StandaloneTestingProcess(
                 rank,
                 world_size,
                 self.barrier,
@@ -172,14 +169,10 @@ class LocalMultiProcessTest:
                 trial_name=trial_name,
                 **kwargs,
             )
-            for rank in range(world_size)
-        ]
+            p.start()
+            self.processes.append(p)
 
     def launch(self):
-        clear_name_resolve(self.expr_name, self.trial_name)
-        assert not torch.cuda.is_initialized()
-        [p.start() for p in self.processes]
-        assert not torch.cuda.is_initialized()
         while any([p.is_alive() for p in self.processes]):
             try:
                 err = self.err_queue.get_nowait()
@@ -196,6 +189,107 @@ def clear_name_resolve(expr_name=None, trial_name=None):
     name_resolve.clear_subtree(
         names.trial_root(experiment_name=expr_name, trial_name=trial_name)
     )
+
+
+def make_finetune_spec(
+    bs_per_device,
+    total_train_epochs=1,
+    total_train_steps=10,
+    steps_per_epoch=10,
+    max_seq_len=1024,
+):
+    import realhf.api.core.model_api as model_api
+
+    finetune_spec = model_api.FinetuneSpec(
+        total_train_epochs=total_train_epochs,
+        total_train_steps=total_train_steps,
+        steps_per_epoch=steps_per_epoch,
+    )
+    return finetune_spec
+
+
+def random_sentence(min_len=100, max_len=128):
+    words = [
+        "the",
+        "quick",
+        "brown",
+        "fox",
+        "jumped",
+        "over",
+        "the",
+        "lazy",
+        "dog",
+    ]
+    sentence_length = random.randint(min_len, max_len)
+    return " ".join(random.choices(words, k=sentence_length))
+    # return "Output less than 50 words:"
+
+
+def make_input(tokenizer, device, s):
+    tokenizer.padding_side = "left"
+    prompts = tokenizer(s, return_tensors="pt", padding=True)
+
+    input_ids, attention_mask = prompts["input_ids"], prompts["attention_mask"]
+    input_ids = input_ids.to(device)
+    attention_mask = attention_mask.to(device)
+
+    # print(f"make input input_ids.shape {input_ids.shape}")
+
+    return input_ids, attention_mask
+
+
+def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
+    random.seed(seed)
+    whole_batch = [random_sentence() for _ in range(batch_size)]
+    dp_batch = whole_batch[
+        batch_size
+        // dp_worldsize
+        * dp_rank : batch_size
+        // dp_worldsize
+        * (dp_rank + 1)
+    ]
+    return make_input(tokenizer, device, dp_batch)
+
+
+def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
+    from realhf.impl.model.utils.padding import unpad_input
+
+    if dp_rank == None:
+        assert num_dp == None
+        dp_rank = constants.data_parallel_rank()
+        num_dp = constants.data_parallel_world_size()
+    input_ids, attention_mask = make_batch(
+        tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed
+    )
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    prompt_mask = torch.zeros_like(packed_input_ids)
+    data = namedarray.NamedArray(
+        packed_input_ids=packed_input_ids,
+        cu_seqlens=cu_seqlens,
+        prompts=input_ids,
+        prompt_mask=prompt_mask.bool(),
+        prompt_att_mask=attention_mask,
+    )
+    return data
+
+
+def random_sample(bs, seq_len, vocab_size):
+    import torch
+
+    from realhf.impl.model.utils.padding import unpad_input
+
+    input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
+    attention_mask = torch.ones_like(input_ids)
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    prompt_mask = torch.zeros_like(packed_input_ids)
+    data = namedarray.NamedArray(
+        packed_input_ids=packed_input_ids,
+        cu_seqlens=cu_seqlens,
+        prompts=input_ids,
+        prompt_mask=prompt_mask.bool(),
+        prompt_att_mask=attention_mask,
+    )
+    return data
 
 
 def pytorch_memory_burnin(rank):
@@ -254,6 +348,7 @@ def get_llama_config(size):
         size_args = dict(
             n_layers=40,
             n_kv_heads=32,
+            n_q_heads=32,
             head_dim=128,
             hidden_dim=4096,
             intermediate_dim=11008,
@@ -263,6 +358,7 @@ def get_llama_config(size):
         size_args = dict(
             n_layers=40,
             n_kv_heads=40,
+            n_q_heads=40,
             head_dim=128,
             hidden_dim=5120,
             intermediate_dim=13824,
@@ -272,6 +368,7 @@ def get_llama_config(size):
         size_args = dict(
             n_layers=48,
             n_kv_heads=8,
+            n_q_heads=64,
             head_dim=128,
             hidden_dim=8192,
             intermediate_dim=22016,
@@ -281,6 +378,7 @@ def get_llama_config(size):
         size_args = dict(
             n_layers=80,
             n_kv_heads=8,
+            n_q_heads=64,
             head_dim=128,
             hidden_dim=8192,
             intermediate_dim=28672,
@@ -298,256 +396,3 @@ def get_llama_config(size):
         apply_rotary=True,
         **size_args,
     )
-
-
-def make_packed_input_batches(dataset: torch.utils.data.Dataset, batch_size: int):
-    batches = [
-        [dataset[j] for j in range(i, min(i + batch_size, len(dataset)))]
-        for i in range(0, len(dataset), batch_size)
-    ]
-    batches = [data_api.gather_sequences(batch) for batch in batches]
-    return batches
-
-
-def make_huggingface_generate_input_batches(
-    dataset: List[str],
-    tokenizer: transformers.PreTrainedTokenizerFast,
-    max_length: int,
-    batch_size: int,
-):
-    batches = [
-        [dataset[j]["prompt"] for j in range(i, i + batch_size)]
-        for i in range(0, len(dataset), batch_size)
-    ]
-    tokenizer.padding_side = "left"
-    batches = [
-        tokenizer(
-            batch,
-            return_tensors="pt",
-            max_length=max_length,
-            padding=True,
-            truncation=True,
-            return_attention_mask=True,
-        )
-        for batch in batches
-    ]
-    return batches
-
-
-def make_random_input_batches(shape: Tuple[int], n_batches: int, vocab_size: int):
-    batches = [torch.randint(0, vocab_size, shape) for _ in range(n_batches)]
-    return batches
-
-
-def prepare(
-    model_family: ModelFamily,
-    model_path: str,
-    backend_config: system_api.ModelBackend,
-    dataset_config: Optional[system_api.Dataset] = None,
-    device: str = "cuda",
-):
-    import realhf.impl.dataset
-    import realhf.impl.model
-    from realhf.impl.model.nn.real_llm_api import ReaLModel, make_real_model
-
-    with constants.model_scope(MODEL_NAME):
-        if dataset_config is not None:
-            dataset = data_api.make_dataset(
-                dataset_config,
-                seed=1,
-                ddp_rank=constants.data_parallel_rank(),
-                world_size=constants.data_parallel_world_size(),
-                tokenizer_or_tokenizer_name=model_path,
-                experiment_name=_DEFAULT_EXPR_NAME,
-                trial_name=_DEFAULT_TRIAL_NAME,
-            )
-        else:
-            dataset = None
-        model: model_api.Model = make_real_model(
-            MODEL_NAME,
-            device=device,
-            model_path=model_path,
-            is_critic=False,
-            init_critic_from_actor=False,
-            dtype="fp16",
-            hf_model_family=model_family._class,
-        )
-        module: ReaLModel = model.module
-        module.instantiate()
-
-        backend = model_api.make_backend(backend_config)
-        backend.initialize(model, None)
-        return model, dataset, backend
-
-
-def shrink_mconfig(mconfig: model_api.ReaLModelConfig):
-    mconfig.hidden_dim = 128
-    mconfig.head_dim = 16
-    mconfig.n_kv_heads = 1
-    mconfig.intermediate_dim = 256
-    mconfig.n_layers = 2
-    return mconfig
-
-
-def remove_file_cache(path: str):
-    for f in os.listdir(path):
-        if f.endswith(".pkl"):
-            os.remove(os.path.join(path, f))
-
-
-def test_result_file_name(
-    identifier: str,
-    model_family: model_api.ModelFamily,
-    dp_rank: int,
-):
-    assert "-" not in identifier and "-" not in model_family._class
-    return f"{identifier}-{model_family._class}-{model_family.size}-{dp_rank}.pkl"
-
-
-def info_from_file_name(file_name: str):
-    parts = file_name.split("-")
-    assert len(parts) == 4
-    identifier = parts[0]
-    model_class = parts[1]
-    model_size = int(parts[2])
-    dp_rank = int(parts[3].split(".")[0])
-    return identifier, model_class, model_size, dp_rank
-
-
-def save_test_result(
-    result: Any,
-    path: str,
-    model_family: model_api.ModelFamily,
-    dp_rank: int,
-    identifier: str,
-):
-    os.makedirs(path, exist_ok=True)
-    save_path = os.path.join(
-        path, test_result_file_name(identifier, model_family, dp_rank)
-    )
-    with open(save_path, "wb") as f:
-        pickle.dump(result, f)
-
-
-def check_generation_consistency(
-    path: str, model_family: model_api.ModelFamily, identifiers: List[str]
-):
-    dp_rank_counter = {identifier: 0 for identifier in identifiers}
-    for f in os.listdir(path):
-        if not f.endswith(".pkl"):
-            continue
-        identifier, _, _, _ = info_from_file_name(f)
-        if identifier in identifiers:
-            dp_rank_counter[identifier] += 1
-
-    results = {}
-    for identifier in identifiers:
-        tmp = []
-        for i in range(dp_rank_counter[identifier]):
-            p = test_result_file_name(identifier, model_family, i)
-            print("loading", p)
-            load_path = os.path.join(path, p)
-            t = pickle.load(open(load_path, "rb"))
-            tmp.append(t)
-        res = torch.cat(tmp, dim=0)
-        print(identifier, res.shape)
-        results[identifier] = res
-
-    baseline_result = results[identifiers[0]]
-    for identifier, result in results.items():
-        if identifier == identifiers[0]:
-            continue
-        matched_seqs = 0
-        matched_tokens = 0
-        for i in range(len(baseline_result)):
-            a = baseline_result[i]
-            b = result[i]
-            assert torch.is_tensor(a) and torch.is_tensor(b)
-            assert a.dim() == 1 and b.dim() == 1, (a.shape, b.shape)
-            gen_len = a.shape[0] if a.shape[0] < b.shape[0] else b.shape[0]
-            b = b[:gen_len]
-            a = a[:gen_len]
-            for j in range(gen_len):
-                if a[j] != b[j]:
-                    print(f"Mismatch at sequence {i} position {j}")
-                    break
-                matched_tokens += 1
-            else:
-                # print(f"Batch {i} sequence {j} check passed")
-                matched_seqs += 1
-        print(
-            f"{identifiers[0]} and {identifier} Matched {matched_seqs}/{len(baseline_result)} "
-            f"sequences and {matched_tokens}/{len(baseline_result) * gen_len} tokens"
-        )
-
-
-COMPARE_TENSOR_PATH = "profile_result/compare_tensor/"
-_TMP_TENSOR_STORAGE = {}
-_COMPARE_RUN_IDENTIFIER = None
-
-
-def set_compare_run_identifier(identifier: str):
-    global _COMPARE_RUN_IDENTIFIER
-    _COMPARE_RUN_IDENTIFIER = identifier
-
-
-def store_tensor_to_compare(
-    tensor: torch.Tensor,
-    tensor_name: str,
-):
-    assert _COMPARE_RUN_IDENTIFIER is not None
-    assert tensor_name not in _TMP_TENSOR_STORAGE
-    _TMP_TENSOR_STORAGE[tensor_name] = tensor
-
-
-def dump_stored_to_file():
-    if len(_TMP_TENSOR_STORAGE) == 0:
-        return
-    os.makedirs(COMPARE_TENSOR_PATH, exist_ok=True)
-    mp = constants.model_parallel_rank()
-    pp = constants.pipe_parallel_rank()
-    dp = constants.data_parallel_rank()
-    fn = _COMPARE_RUN_IDENTIFIER + f"_dp{dp}_pp{pp}_mp{mp}.pkl"
-    with open(os.path.join(COMPARE_TENSOR_PATH, fn), "wb") as f:
-        pickle.dump(_TMP_TENSOR_STORAGE, f)
-
-
-def compare_two_runs(run_id1, run_id2, mp=1, dp=1, pp=1):
-    import itertools
-
-    os.makedirs(os.path.join(COMPARE_TENSOR_PATH, "logs"), exist_ok=True)
-    for mpr, dpr, ppr in itertools.product(range(mp), range(dp), range(pp)):
-        log_path = os.path.join(
-            COMPARE_TENSOR_PATH,
-            f"logs/{run_id1}_{run_id2}_dp{dpr}_pp{ppr}_mp{mpr}.log",
-        )
-        fn1 = run_id1 + f"_dp{dpr}_pp{ppr}_mp{mpr}.pkl"
-        fn2 = run_id2 + f"_dp{dpr}_pp{ppr}_mp{mpr}.pkl"
-        ts1 = pickle.load(open(os.path.join(COMPARE_TENSOR_PATH, fn1), "rb"))
-        ts2 = pickle.load(open(os.path.join(COMPARE_TENSOR_PATH, fn2), "rb"))
-        assert ts1.keys() == ts2.keys()
-
-        with open(log_path, "w") as f:
-            print(f"Comparing {fn1} and {fn2}")
-            f.write(f"dp{dp}_pp{pp}_mp{mp}:\n")
-
-            match_count = 0
-            for k in ts1.keys():
-                match = torch.allclose(ts1[k], ts2[k], atol=1e-2, rtol=1e-3)
-                print(f"tensor {k} shape {ts1[k].shape}")
-                f.write(f"tensor {k} shape {ts1[k].shape}\n\n")
-                if match:
-                    print(f"tensor {k} matches")
-                    f.write(f"tensor {k} matches\n\n")
-                    f.write(f"max diff: {torch.max(torch.abs(ts1[k] - ts2[k]))}\n\n")
-                    match_count += 1
-                else:
-                    # torch.set_printoptions(precision=4)
-                    print(f"tensor {k} does not match")
-                    f.write(
-                        f"tensor {k} does not match\n"
-                        f"max diff: {torch.max(torch.abs(ts1[k] - ts2[k]))}\n\n"
-                    )
-
-            f.write(f"Matched {match_count}/{len(ts1)} tensors")
-            print(f"Matched {match_count}/{len(ts1)} tensors")

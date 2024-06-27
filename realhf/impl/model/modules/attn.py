@@ -43,6 +43,7 @@ class CausalSelfAttentionLayer(nn.Module):
         scale_attn_by_inverse_layer_idx: bool,
         # llama does not require attention bias
         use_attention_bias: bool,
+        use_attn_proj_bias: bool,
         # layer norm type is special for llama
         layer_norm_type: Optional[str] = None,
         # rotary embedding
@@ -82,7 +83,7 @@ class CausalSelfAttentionLayer(nn.Module):
             self.c_proj = RowParallelLinear(
                 hidden_dim,
                 hidden_dim,
-                bias=use_attention_bias,
+                bias=use_attn_proj_bias,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -91,7 +92,7 @@ class CausalSelfAttentionLayer(nn.Module):
             self.c_proj = nn.Linear(
                 hidden_dim,
                 hidden_dim,
-                bias=use_attention_bias,
+                bias=use_attn_proj_bias,
                 dtype=dtype,
                 device=device,
             )

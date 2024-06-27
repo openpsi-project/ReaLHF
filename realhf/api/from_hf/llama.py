@@ -9,11 +9,17 @@ from realhf.base import constants
 
 
 def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
-
     new_state_dict = {}
     for k, v in state_dict.items():
         if k == "model.embed_tokens.weight":
-            new_state_dict["0.wte.weight"] = v
+            if constants.is_first_pipe_stage():
+                new_state_dict["0.wte.weight"] = v
+            if (
+                constants.is_last_pipe_stage()
+                and config.tied_embedding
+                and not config.is_critic
+            ):
+                new_state_dict[f"{config.n_layers + 1}.weight"] = v
         elif k == "lm_head.weight":
             new_state_dict[f"{config.n_layers + 1}.weight"] = v
         elif k == "model.norm.weight":
@@ -103,7 +109,8 @@ def to_llama_state_dict(
         if i == 0:
             new_sd["model.embed_tokens.weight"] = state_dict["0.wte.weight"]
         elif i == config.n_layers + 1:
-            new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
+            if config.is_critic or not config.tied_embedding:
+                new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
         else:
             new_sd[f"model.layers.{i-1}.input_layernorm.weight"] = state_dict[
                 f"{i}.attn.c_attn.ln.weight"
@@ -132,6 +139,20 @@ def to_llama_state_dict(
             new_sd[f"model.layers.{i-1}.self_attn.v_proj.weight"] = state_dict[
                 f"{i}.attn.c_attn.v_attn.weight"
             ]
+            if config.use_attention_bias:
+                new_sd[f"model.layers.{i-1}.self_attn.q_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.q_attn.bias"
+                ]
+                new_sd[f"model.layers.{i-1}.self_attn.k_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.k_attn.bias"
+                ]
+                new_sd[f"model.layers.{i-1}.self_attn.v_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.v_attn.bias"
+                ]
+            if config.use_attn_proj_bias:
+                new_sd[f"model.layers.{i-1}.self_attn.o_proj.bias"] = state_dict[
+                    f"{i}.attn.c_proj.bias"
+                ]
             new_sd[f"model.layers.{i-1}.self_attn.rotary_emb.inv_freq"] = 1.0 / (
                 config.rotary_base
                 ** (
@@ -157,25 +178,30 @@ def llama_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
 
 
 def llama_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
-    names = [
-        f"model.layers.{idx}.input_layernorm.weight",
-        f"model.layers.{idx}.mlp.down_proj.weight",
-        f"model.layers.{idx}.mlp.gate_proj.weight",
-        f"model.layers.{idx}.mlp.up_proj.weight",
-        f"model.layers.{idx}.post_attention_layernorm.weight",
-        f"model.layers.{idx}.self_attn.k_proj.weight",
-        f"model.layers.{idx}.self_attn.o_proj.weight",
-        f"model.layers.{idx}.self_attn.q_proj.weight",
-        # f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
-        f"model.layers.{idx}.self_attn.v_proj.weight",
-    ]
-    if idx == config.n_layers - 1:
-        names += ["model.norm.weight"]
+    names = []
+    for k in ["weight", "bias"]:
+        names += [
+            f"model.layers.{idx}.input_layernorm.{k}",
+            f"model.layers.{idx}.mlp.down_proj.{k}",
+            f"model.layers.{idx}.mlp.gate_proj.{k}",
+            f"model.layers.{idx}.mlp.up_proj.{k}",
+            f"model.layers.{idx}.post_attention_layernorm.{k}",
+            f"model.layers.{idx}.self_attn.k_proj.{k}",
+            f"model.layers.{idx}.self_attn.o_proj.{k}",
+            f"model.layers.{idx}.self_attn.q_proj.{k}",
+            # f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
+            f"model.layers.{idx}.self_attn.v_proj.{k}",
+        ]
+        if idx == config.n_layers - 1:
+            names += [f"model.norm.{k}"]
     return names
 
 
 def llama_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    return ["lm_head.weight"]
+    if config.tied_embedding and not config.is_critic:
+        return ["model.embed_tokens.weight"]
+    else:
+        return ["lm_head.weight"]
 
 
 def convert_config_llama(
@@ -198,6 +224,7 @@ def convert_config_llama(
         layer_norm_epsilon=hf_config.rms_norm_eps,
         activation_function=hf_config.hidden_act,
         use_attention_bias=hf_config.attention_bias,
+        use_attn_proj_bias=hf_config.attention_bias,
         scale_attn_by_inverse_layer_idx=False,
         layer_norm_type="rms",
         mlp_type="llama",
