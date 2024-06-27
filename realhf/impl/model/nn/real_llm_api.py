@@ -124,8 +124,10 @@ class ReaLModel(nn.Module):
         self._param_spec, self._param_size = build_param_spec(
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
-            constants.model_parallel_world_size(),
-            constants.sequence_parallel(),
+            mp_size=constants.model_parallel_world_size(),
+            pp_size=constants.pipe_parallel_world_size(),
+            dp_size=constants.data_parallel_world_size(),
+            sequence_parallel=constants.sequence_parallel(),
         )
         self.contiguous_param = None
 
@@ -525,8 +527,10 @@ class ReaLModel(nn.Module):
         to_param_spec, to_param_size = build_param_spec(
             to_layer_indices,
             to_model_config,
-            to_topo.get_dim("model"),
-            to_topo.sequence_parallel,
+            mp_size=to_topo.get_dim("model"),
+            dp_size=to_topo.get_dim("data"),
+            pp_size=to_topo.get_dim("pipe"),
+            sequence_parallel=to_topo.sequence_parallel,
         )
         if len(to_layer_indices) > 0:
             to_layer_idx_start = min(to_layer_indices)

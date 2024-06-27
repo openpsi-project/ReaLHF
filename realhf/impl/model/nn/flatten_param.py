@@ -3,6 +3,7 @@ from typing import *
 
 import numpy as np
 import torch
+import math
 
 from realhf.api.core import model_api
 from realhf.api.core.config import ModelName
@@ -84,7 +85,9 @@ def slice_intervals(
         return torch.cat([tensor[start:end] for start, end in intervals_cpu])
 
     interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    offsets = torch.nn.functional.pad(
+        interval_sizes.cumsum(0)[:-1], (1, 0), value=0
+    )
     assert tensor.dtype == torch.half
     return interval_op_cuda.slice_intervals_cuda_half(
         tensor,
@@ -112,7 +115,9 @@ def set_intervals(
         assert offset == src.shape[0]
         return
     interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    offsets = torch.nn.functional.pad(
+        interval_sizes.cumsum(0)[:-1], (1, 0), value=0
+    )
     interval_op_cuda.set_intervals_cuda_half(
         src,
         dst,
@@ -127,9 +132,13 @@ def set_intervals(
 def build_param_spec(
     layer_indices: List[int],
     config: model_api.ReaLModelConfig,
+    dp_size: int,
     mp_size: int,
+    pp_size:int,
     sequence_parallel: bool,
+    bucket_size: int = 40000000,
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
+    # TODO: omit parameters that do not require gradient?
     if len(layer_indices) == 0:
         return {}, 0
 
@@ -145,15 +154,57 @@ def build_param_spec(
     # In the reverse order as backpropagation, consistent with Megatron.
     sd_keys = reversed(sd_keys)
 
+    data_start_index = 0
+    bucket_data_start_index = data_start_index
+    bucket_params = set()
+
+    def _requires_new_allreduce_bucket(k):
+        if pp_size == 1:
+            return False
+        if config.is_critic:
+            return False
+        if not config.share_embeddings_and_output_weights:
+            return False
+        return k == f"{config.n_layers + 1}.weight" or k == "0.wte.weight"
+
+    def _pad_to_multiple(x, m):
+        return int(math.ceil(x / m)) * m
+
+    def _create_fake_bucket(data_end_index) -> int:
+        nonlocal bucket_data_start_index, bucket_params
+        data_end_index = _pad_to_multiple(data_end_index, dp_size)
+        # Update bucket metadata.
+        bucket_data_start_index = data_end_index
+        # Re-set bucket_params and increment bucket_id for next bucket.
+        bucket_params = set()
+        # Return the potentially padded data_end_index.
+        return data_end_index
+
     param_spec = {}
-    param_size = 0
     for k in sd_keys:
-        shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
-        param_spec[k] = ContiguousParamSpec(
-            param_size, param_size + int(np.prod(shape)), shape
+        shape = get_real_model_param_shape(
+            k, config, mp_size, sequence_parallel
         )
-        param_size += int(np.prod(shape))
-    return param_spec, param_size
+        numel = int(np.prod(shape))
+        data_end_index = data_start_index + numel
+
+        if _requires_new_allreduce_bucket(k) and len(bucket_params) > 0:
+            _create_fake_bucket(data_start_index)
+        param_spec[k] = ContiguousParamSpec(
+            data_start_index,
+            data_end_index,
+            shape,
+        )
+        bucket_params.add(k)
+        if (
+            data_end_index - bucket_data_start_index
+        ) >= bucket_size or _requires_new_allreduce_bucket(k):
+            data_end_index = _create_fake_bucket(data_end_index)
+        data_start_index = data_end_index
+    if len(bucket_params) > 0:
+        data_end_index = _create_fake_bucket(data_end_index)
+
+    return param_spec, data_end_index
 
 
 def param_intervals_from_keys(
@@ -186,7 +237,9 @@ def param_intervals_from_keys(
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
-                get_real_model_param_shape(k, config, mp_size, sequence_parallel),
+                get_real_model_param_shape(
+                    k, config, mp_size, sequence_parallel
+                ),
                 portion_rank,
                 portion_size,
                 config,

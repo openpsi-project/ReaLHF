@@ -424,8 +424,10 @@ def _derive_reparallelize_comm_plan(
             from_model_param_specs, _ = build_param_spec(
                 from_layer_indices,
                 from_model_config,
-                from_topo.get_dim("model"),
-                from_topo.sequence_parallel,
+                mp_size=from_topo.get_dim("model"),
+                dp_size=from_topo.get_dim("data"),
+                pp_size=from_topo.get_dim("pipe"),
+                sequence_parallel=from_topo.sequence_parallel,
             )
     if constants.has_model_name(to_model_name):
         with constants.model_scope(to_model_name):
@@ -433,8 +435,10 @@ def _derive_reparallelize_comm_plan(
             to_model_param_specs, _ = build_param_spec(
                 to_layer_indices,
                 to_model_config,
-                to_topo.get_dim("model"),
-                to_topo.sequence_parallel,
+                mp_size=to_topo.get_dim("model"),
+                pp_size=to_topo.get_dim("pipe"),
+                dp_size=to_topo.get_dim("data"),
+                sequence_parallel=to_topo.sequence_parallel,
             )
 
     comm_plan = []

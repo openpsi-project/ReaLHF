@@ -29,6 +29,7 @@ from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.backend.utils import MegatronEngine, OptimizerParamScheduler
 from realhf.impl.model.modules.mlp import get_activation_fn
 from realhf.impl.model.nn.real_llm_api import ReaLModel
+from realhf.impl.model.nn.flatten_param import ContiguousParamSpec
 from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 
 WITHIN_MEGATRON_CONTEXT = False
@@ -386,7 +387,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
             real_model.contiguous_param = param_grad_buf.param_data
 
             # Sanity checks.
-            assert real_model._param_size == param_grad_buf.numel
+            assert real_model._param_size == param_grad_buf.numel, (real_model._param_size, param_grad_buf.numel)
             for n, p in real_model.layers.named_parameters():
                 n = ".".join(
                     [
