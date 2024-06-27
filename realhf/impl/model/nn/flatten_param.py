@@ -160,7 +160,7 @@ def build_param_spec(
             return False
         if config.is_critic:
             return False
-        if not config.share_embeddings_and_output_weights:
+        if not config.tied_embedding:
             return False
         return k == f"{config.n_layers + 1}.weight" or k == "0.wte.weight"
 

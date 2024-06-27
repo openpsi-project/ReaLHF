@@ -43,8 +43,7 @@ class PipelineError(Exception):
     pass
 
 
-# FIXME: remove seqlens_cpu here
-def _prepare_input(
+def _split_and_prefill_pipe_input(
     module: ReaLModel,
     tensor_buffer: TensorBuffer,
     num_micro_batches: int,
@@ -53,37 +52,59 @@ def _prepare_input(
     cu_seqlens: torch.Tensor,
     store_kv_cache: bool,
     loss_fn: Optional[Callable] = None,
-    input_lens_for_partition: Optional[torch.Tensor] = None,
     **loss_kwargs,
 ):
-    """Prepare input for train or inference
-    split all input tensors into micro batches for pipeline parallel
+    """Prepare input for pipelined train or inference.
+    Basically, splitting all input tensors into micro batches for pipeline parallel.
 
     Args:
         packed_input_ids (torch.Tensor): packed input ids of shape [total_seq_len]
         cu_seqlens (torch.Tensor): cu_seqlens of shape [batch_size]
     """
-    if input_lens_for_partition is not None:
-        n_groups = input_lens_for_partition.shape[0]
-        group_input_lens = (cu_seqlens[1:] - cu_seqlens[:-1]).view(n_groups, -1)
-        data = NamedArray(
-            packed_input_ids=packed_input_ids,
-            group_input_lens=group_input_lens,
-            input_lens=input_lens_for_partition,
-        )
-        n_seqs = input_lens_for_partition.shape[0]
-    else:
-        data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=cu_seqlens)
-        n_seqs = cu_seqlens.shape[0] - 1
-    data.register_metadata(seqlens=seqlens_cpu)
-
-    # split into sequences
     n_mbs = num_micro_batches
-    assert n_seqs >= n_mbs
+
+    # If the number of actual sequences is larger than the number of recorded lengths,
+    # it means that we group several adjacent sequences together.
+    # The group length is marked by seqlens_cpu and the sequence boundary is marked by cu_seqlens.
+    grouped_partition = (cu_seqlens.shape[0] != len(seqlens_cpu) + 1)
+
+    if grouped_partition:
+        assert (cu_seqlens.shape[0] - 1) % len(seqlens_cpu) == 0
+        group_size = (cu_seqlens.shape[0] - 1) // len(seqlens_cpu)
+        assert group_size >= 2
+        actual_seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
+
+    # Partition according to seqlens_cpu.
+    assert len(seqlens_cpu) >= n_mbs
+    partition_min_size = len(seqlens_cpu) // n_mbs
+    data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=torch.nn.functional.pad(torch.tensor(seqlens_cpu, dtype=torch.int32, device=module.device).cumsum(0), (1,0)))
+    data.register_metadata(seqlens=seqlens_cpu)
     splitted, partitions = data_api.split_sequences(
-        data, n_mbs, min_size=n_seqs // n_mbs, return_partitions=True
+        data, n_mbs, min_size=partition_min_size, return_partitions=True,
     )
-    batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
+
+    if loss_fn is not None:
+        loss_input_data = NamedArray(**loss_kwargs)
+        loss_input_data.register_metadata(seqlens=seqlens_cpu)
+        splitted_loss_input = data_api.split_sequences(
+            loss_input_data,
+            n_mbs,
+            min_size=partition_min_size,
+        )
+
+    if not grouped_partition:
+        batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
+    else:
+        batch_seqlens = [actual_seqlens[start * group_size:end * group_size].cpu().numpy().tolist() for start, end in partitions]
+        for x, y in zip(splitted, batch_seqlens):
+            x.pop_metadata("seqlens")
+            x.register_metadata(seqlens=y)
+            sls = torch.tensor(y, dtype=torch.int32, device=module.device)
+            x['cu_seqlens'] = torch.nn.functional.pad(sls.cumsum(0), (1, 0)).int()
+        if loss_fn is not None:
+            for x, y in zip(splitted_loss_input, batch_seqlens):
+                x.pop_metadata("seqlens")
+                x.register_metadata(seqlens=y)
 
     # Sanity check to ensure that the order of splitted sequences
     # is the same across pipeline parallel ranks.
@@ -112,33 +133,9 @@ def _prepare_input(
                 f"Have you ensured that the order of dataset across ranks is the same?",
             )
 
-    if input_lens_for_partition is not None:
-        splitted = [
-            NamedArray(
-                packed_input_ids=x["packed_input_ids"],
-                cu_seqlens=torch.nn.functional.pad(
-                    x["group_input_lens"].view(-1).cumsum(0), (1, 0)
-                ),
-            )
-            for x in splitted
-        ]
-
-    if loss_fn is not None:
-        for mbid, x in enumerate(splitted):
-            tensor_buffer.put("input_cache", mbid, x)
-
-        loss_input_data = NamedArray(**loss_kwargs)
-        loss_input_data.register_metadata(seqlens=seqlens_cpu)
-        splitted_loss_input = data_api.split_sequences(
-            loss_input_data,
-            num_micro_batches,
-            min_size=n_seqs // num_micro_batches,
-        )
-        for mbid, x in enumerate(splitted_loss_input):
-            tensor_buffer.put("loss_inputs", mbid, x)
-
     mb_seq_lens = []
 
+    # Store partitioned inputs into tensor buffer for later use.
     def input_to_pipe_model_input(input: NamedArray, mbid: int):
         max_seqlen = int(max(batch_seqlens[mbid]))
 
@@ -187,6 +184,10 @@ def _prepare_input(
         )
         tensor_buffer.put("pipe_transfer_infos", mbid, others_cache)
 
+    if loss_fn is not None:
+        for mbid, (x1, x2) in enumerate(zip(splitted, splitted_loss_input)):
+            tensor_buffer.put("input_cache", mbid, x1)
+            tensor_buffer.put("loss_inputs", mbid, x2)
 
 def _exec_pipe_schedule(
     module: ReaLModel,
@@ -1008,7 +1009,6 @@ class PipelineRunner:
         seqlens_cpu: List[int],
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
     ):
         """Run one forward step over a batch of tokens and return the logits."""
@@ -1018,7 +1018,7 @@ class PipelineRunner:
 
         tensor_buffer = TensorBuffer()
 
-        _prepare_input(
+        _split_and_prefill_pipe_input(
             module=self.module,
             tensor_buffer=tensor_buffer,
             num_micro_batches=num_micro_batches,
@@ -1026,7 +1026,6 @@ class PipelineRunner:
             packed_input_ids=packed_input_ids,
             cu_seqlens=cu_seqlens,
             store_kv_cache=False,
-            input_lens_for_partition=input_lens_for_partition,
         )
 
         sched = schedule.InferenceSchedule(
@@ -1074,7 +1073,7 @@ class PipelineRunner:
 
         tensor_buffer = TensorBuffer()
 
-        _prepare_input(
+        _split_and_prefill_pipe_input(
             module=self.module,
             tensor_buffer=tensor_buffer,
             num_micro_batches=num_micro_batches,
@@ -1169,7 +1168,6 @@ class PipelineRunner:
         cu_seqlens: torch.Tensor,
         loss_fn: Callable,
         version_steps: int,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
@@ -1188,7 +1186,7 @@ class PipelineRunner:
             tensor_buffer.put("version_steps", i, version_steps)
             tensor_buffer.put("loss_fn", i, loss_fn)
 
-        _prepare_input(
+        _split_and_prefill_pipe_input(
             module=self.module,
             tensor_buffer=tensor_buffer,
             num_micro_batches=num_micro_batches,
@@ -1197,7 +1195,6 @@ class PipelineRunner:
             cu_seqlens=cu_seqlens,
             store_kv_cache=False,
             loss_fn=loss_fn,
-            input_lens_for_partition=input_lens_for_partition,
             **loss_fn_kwargs,
         )
 
@@ -1248,7 +1245,6 @@ class PipelineRunner:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         loss_fn: Callable,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
@@ -1260,7 +1256,7 @@ class PipelineRunner:
             tensor_buffer.put("num_micro_batches", i, num_micro_batches)
             tensor_buffer.put("loss_fn", i, loss_fn)
 
-        _prepare_input(
+        _split_and_prefill_pipe_input(
             module=self.module,
             tensor_buffer=tensor_buffer,
             num_micro_batches=num_micro_batches,
@@ -1269,7 +1265,6 @@ class PipelineRunner:
             cu_seqlens=cu_seqlens,
             store_kv_cache=False,
             loss_fn=loss_fn,
-            input_lens_for_partition=input_lens_for_partition,
             **loss_fn_kwargs,
         )
 

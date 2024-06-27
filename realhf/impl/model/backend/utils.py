@@ -289,7 +289,7 @@ class OptimizerParamScheduler(object):
                 "weight decay incr style",
             )
 
-
+@torch.no_grad()
 def _step_megatron_distrib_optimizer_internal(optim: MegatronDistOptim):
     # NOTE: patching this function to use the correct model parallel group
 
@@ -316,7 +316,7 @@ def _step_megatron_distrib_optimizer_internal(optim: MegatronDistOptim):
             dist.all_reduce(
                 optim.found_inf,
                 op=dist.ReduceOp.MAX,
-                group=constants.grid().ds_model_proc_group,
+                group=constants.parallelism_group(),
             )
 
             # Check for nan.
@@ -348,7 +348,7 @@ def _step_megatron_distrib_optimizer_internal(optim: MegatronDistOptim):
             params,
             grads_for_norm,
             clip_grad,
-            model_parallel_group=constants.grid().ds_model_proc_group,
+            model_parallel_group=constants.parallelism_group(),
         )
 
     def count_zeros(optim: MegatronDistOptim) -> float:
@@ -356,7 +356,7 @@ def _step_megatron_distrib_optimizer_internal(optim: MegatronDistOptim):
         params = optim.get_parameters()
         return count_zeros_fp32(
             params,
-            model_parallel_group=constants.grid().ds_model_proc_group,
+            model_parallel_group=constants.parallelism_group(),
         )
 
     # Clip the main gradients.

@@ -109,7 +109,6 @@ class ReaLDeepSpeedEngine:
         cu_seqlens: torch.Tensor,
         loss_fn: Callable,
         version_steps: int,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
@@ -121,7 +120,6 @@ class ReaLDeepSpeedEngine:
                 cu_seqlens=cu_seqlens,
                 loss_fn=loss_fn,
                 version_steps=version_steps,
-                input_lens_for_partition=input_lens_for_partition,
                 num_micro_batches=num_micro_batches,
                 **loss_fn_kwargs,
             )
@@ -148,7 +146,6 @@ class ReaLDeepSpeedEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         loss_fn: Callable,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
@@ -158,7 +155,6 @@ class ReaLDeepSpeedEngine:
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
                 loss_fn=loss_fn,
-                input_lens_for_partition=input_lens_for_partition,
                 num_micro_batches=num_micro_batches,
                 **loss_fn_kwargs,
             )

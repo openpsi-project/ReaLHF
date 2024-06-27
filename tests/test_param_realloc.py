@@ -132,7 +132,10 @@ def setup_constants_and_param_realloc(
     from_sequence_parallel,
     to_sequence_parallel,
 ):
-    from realhf.impl.model.comm.param_realloc import set_trainable, setup_param_realloc
+    from realhf.impl.model.comm.param_realloc import (
+        set_trainable,
+        setup_param_realloc,
+    )
 
     from_num_pp, from_num_dp, from_num_mp = from_pp_dp_mp
     to_num_pp, to_num_dp, to_num_mp = to_pp_dp_mp
@@ -289,10 +292,13 @@ def _test_para_realloc(
     to_pp_dp_mp: Tuple,
     from_sequence_parallel: bool,
     to_sequence_parallel: bool,
+    n_iterations: int,
 ):
     # os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
     from realhf.impl.model.backend.megatron import ReaLMegatronEngine
-    from realhf.impl.model.interface.sft_interface import compute_packed_sft_loss
+    from realhf.impl.model.interface.sft_interface import (
+        compute_packed_sft_loss,
+    )
 
     from_model_name = ModelName("param_realloc_test", 0)
     to_model_name = ModelName("param_realloc_test", 1)
@@ -320,7 +326,8 @@ def _test_para_realloc(
     # Creat model 2
     if (
         dist.get_rank()
-        >= dist.get_world_size() - to_pp_dp_mp[0] * to_pp_dp_mp[1] * to_pp_dp_mp[2]
+        >= dist.get_world_size()
+        - to_pp_dp_mp[0] * to_pp_dp_mp[1] * to_pp_dp_mp[2]
     ):
         to_model = create_model(
             tmp_dir=tmp_path,
@@ -349,7 +356,6 @@ def _test_para_realloc(
     prev_to_model_param = None
     prev_to_model_sd = None
 
-    n_iterations = 4
     for i in range(n_iterations):
         if from_model is not None:
             vocab_size = from_model.config.vocab_size
@@ -452,7 +458,9 @@ def _test_para_realloc(
                 )
                 train_engine.eval()
 
-                p = train_engine.engine.ddp.module.contiguous_param.clone().detach()
+                p = (
+                    train_engine.engine.ddp.module.contiguous_param.clone().detach()
+                )
 
                 with constants.model_scope(from_model_name):
                     train_engine: ReaLMegatronEngine
@@ -465,12 +473,15 @@ def _test_para_realloc(
                             if not is_critic
                             else compute_critic_loss
                         ),
-                        num_micro_batches=constants.pipe_parallel_world_size() * 2,
+                        num_micro_batches=constants.pipe_parallel_world_size()
+                        * 2,
                         version_steps=i,
                         **loss_fn_kwargs,
                     )
 
-                p_ = train_engine.engine.ddp.module.contiguous_param.clone().detach()
+                p_ = (
+                    train_engine.engine.ddp.module.contiguous_param.clone().detach()
+                )
                 # After training, the parameters should have changed.
                 assert not torch.allclose(p, p_)
 
@@ -491,6 +502,9 @@ def _test_para_realloc(
         dist.barrier()
 
 
+parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
+
+
 @pytest.mark.skipif(
     not torch.cuda.is_available() or torch.cuda.device_count() < 8,
     reason="This test requires at least 8 GPUs to run.",
@@ -499,8 +513,8 @@ def _test_para_realloc(
 @pytest.mark.distributed
 @pytest.mark.parametrize("model_family_name", ["gpt2", "llama"])
 @pytest.mark.parametrize("is_critic", [False, True])
-@pytest.mark.parametrize("from_pp_dp_mp", [(4, 1, 1)])
-@pytest.mark.parametrize("to_pp_dp_mp", [(8, 1, 1)])
+@pytest.mark.parametrize("from_pp_dp_mp", parallelism)
+@pytest.mark.parametrize("to_pp_dp_mp", parallelism)
 @pytest.mark.parametrize("from_sequence_parallel", [False])
 @pytest.mark.parametrize("to_sequence_parallel", [False])
 def test_param_realloc(
@@ -511,6 +525,10 @@ def test_param_realloc(
     from_sequence_parallel: bool,
     to_sequence_parallel: bool,
 ):
+    if from_sequence_parallel and from_pp_dp_mp[-1] == 1:
+        return
+    if to_sequence_parallel and to_pp_dp_mp[-1] == 1:
+        return
     expr_name = uuid.uuid4()
     trial_name = uuid.uuid4()
     clear_name_resolve(expr_name=expr_name, trial_name=trial_name)
@@ -528,17 +546,7 @@ def test_param_realloc(
         to_pp_dp_mp=to_pp_dp_mp,
         from_sequence_parallel=from_sequence_parallel,
         to_sequence_parallel=to_sequence_parallel,
+        n_iterations=2,
     )
     test_impl.launch()
     shutil.rmtree(tmp_dir)
-
-
-def decompose_to_three_factors(n: int):
-    factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
-        if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
-                if (n // i) % j == 0:
-                    k = (n // i) // j
-                    factors += list(set(itertools.permutations([i, j, k])))
-    return factors
