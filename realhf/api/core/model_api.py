@@ -125,11 +125,6 @@ class ReaLModelConfig:
         if self.head_dim is None:
             self.head_dim = self.hidden_dim // self.n_q_heads
 
-    @property
-    def tied_embedding(self):
-        # FIXME: temporary patch
-        return self.share_embeddings_and_output_weights
-
 
 def load_hf_tokenizer(
     model_name_or_path: str,
