@@ -7,14 +7,14 @@ import torch.distributed as dist
 from megatron.core.distributed.distributed_data_parallel import (
     DistributedDataParallel as MegatronDDP,
 )
+from megatron.core.optimizer.clip_grads import clip_grad_norm_fp32, count_zeros_fp32
 from megatron.core.optimizer.distrib_optimizer import (
     DistributedOptimizer as MegatronDistOptim,
+)
+from megatron.core.optimizer.distrib_optimizer import (
     MixedPrecisionOptimizer as MegatronMixedPrecOptim,
 )
-from megatron.core.optimizer.clip_grads import (
-    clip_grad_norm_fp32,
-    count_zeros_fp32,
-)
+
 from realhf.base import constants, logging
 
 if TYPE_CHECKING:
@@ -85,9 +85,7 @@ class OptimizerParamScheduler(object):
         self.wd_incr_style = wd_incr_style
 
         self.override_opt_param_scheduler = override_opt_param_scheduler
-        self.use_checkpoint_opt_param_scheduler = (
-            use_checkpoint_opt_param_scheduler
-        )
+        self.use_checkpoint_opt_param_scheduler = use_checkpoint_opt_param_scheduler
         if self.override_opt_param_scheduler:
             assert not self.use_checkpoint_opt_param_scheduler, (
                 "both override and " "use-checkpoint are set."
@@ -95,9 +93,7 @@ class OptimizerParamScheduler(object):
 
         # Set the learning rate
         self.step(0)
-        self.log_rank_0(
-            "> learning rate decay style: {}".format(self.lr_decay_style)
-        )
+        self.log_rank_0("> learning rate decay style: {}".format(self.lr_decay_style))
 
     def log_rank_0(self, msg):
         if constants.parallelism_rank() == 0:
@@ -188,9 +184,7 @@ class OptimizerParamScheduler(object):
         for param_group in self.optimizer.param_groups:
             new_lr = self.get_lr(param_group)
             param_group["lr"] = new_lr * param_group.get("lr_mult", 1.0)
-            param_group["weight_decay"] = new_wd * param_group.get(
-                "wd_mult", 1.0
-            )
+            param_group["weight_decay"] = new_wd * param_group.get("wd_mult", 1.0)
 
     def step(self, increment):
         """Set lr for all parameters groups."""
@@ -199,9 +193,7 @@ class OptimizerParamScheduler(object):
         for param_group in self.optimizer.param_groups:
             new_lr = self.get_lr(param_group)
             param_group["lr"] = new_lr * param_group.get("lr_mult", 1.0)
-            param_group["weight_decay"] = new_wd * param_group.get(
-                "wd_mult", 1.0
-            )
+            param_group["weight_decay"] = new_wd * param_group.get("wd_mult", 1.0)
 
     def state_dict(self):
         state_dict = {
@@ -222,9 +214,7 @@ class OptimizerParamScheduler(object):
         """Auxiliary function for checking the values in the checkpoint and
         setting them."""
         if self.override_opt_param_scheduler:
-            self.log_rank_0(
-                " > overriding {} value to {}".format(name, cls_value)
-            )
+            self.log_rank_0(" > overriding {} value to {}".format(name, cls_value))
             return cls_value
 
         if not self.use_checkpoint_opt_param_scheduler:
@@ -232,9 +222,7 @@ class OptimizerParamScheduler(object):
                 f"OptimizerParamScheduler: class input value {cls_value} and checkpoint"
                 f"value {sd_value} for {name} do not match"
             )
-        self.log_rank_0(
-            " > using checkpoint value {} for {}".format(sd_value, name)
-        )
+        self.log_rank_0(" > using checkpoint value {} for {}".format(sd_value, name))
         return sd_value
 
     def load_state_dict(self, sd):
@@ -446,8 +434,7 @@ def _unflatten_dense_tensors(flat, tensors):
 
 def megatron_all_reduce_layernorm_grads(engine: MegatronEngine):
     if not (
-        constants.sequence_parallel()
-        and constants.model_parallel_world_size() > 1
+        constants.sequence_parallel() and constants.model_parallel_world_size() > 1
     ):
         return
     real_model: ReaLModel = engine.ddp.module
@@ -459,9 +446,7 @@ def megatron_all_reduce_layernorm_grads(engine: MegatronEngine):
             continue
         else:
             assert 0 < i < real_model.config.n_layers + 1
-            layer: ReaLModelBlock = real_model.layers[
-                i - real_model.layer_idx_start
-            ]
+            layer: ReaLModelBlock = real_model.layers[i - real_model.layer_idx_start]
             grads.append(layer.attn.c_attn.ln.weight.main_grad)
             if getattr(layer.attn.c_attn.ln, "bias", None) is not None:
                 grads.append(layer.attn.c_attn.ln.bias.main_grad)

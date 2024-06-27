@@ -17,7 +17,11 @@ import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import data_api
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.base.namedarray import NamedArray
-from realhf.impl.model.backend.utils import MegatronEngine, finalize_grads_megatron,step_megatron_distrb_optimizer
+from realhf.impl.model.backend.utils import (
+    MegatronEngine,
+    finalize_grads_megatron,
+    step_megatron_distrb_optimizer,
+)
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.nn.real_llm_generate import (
@@ -925,7 +929,9 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
         step_id: int,
     ):
         if isinstance(self.engine.optim, DistributedOptimizer):
-            update_successful, grad_norm, num_zeros_in_grad = step_megatron_distrb_optimizer(self.engine.optim)
+            update_successful, grad_norm, num_zeros_in_grad = (
+                step_megatron_distrb_optimizer(self.engine.optim)
+            )
         else:
             update_successful, grad_norm, num_zeros_in_grad = self.engine.optim.step()
 

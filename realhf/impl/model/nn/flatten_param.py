@@ -179,12 +179,9 @@ def build_param_spec(
 
     param_spec = {}
     for k in sd_keys:
-        if (
-            head_param_point_to_embedding
-            and k == f"{config.n_layers + 1}.weight"
-        ):
+        if head_param_point_to_embedding and k == f"{config.n_layers + 1}.weight":
             continue
-        
+
         shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
         numel = int(np.prod(shape))
         data_end_index = data_start_index + numel
@@ -209,9 +206,7 @@ def build_param_spec(
     if len(bucket_params) > 0:
         data_end_index = _create_fake_bucket(data_end_index)
 
-    if (
-            head_param_point_to_embedding
-        ):
+    if head_param_point_to_embedding:
         param_spec[f"{config.n_layers + 1}.weight"] = param_spec["0.wte.weight"]
     return param_spec, data_end_index
 
@@ -308,19 +303,23 @@ def map_param_to_contigous_memory(
     param_spec: Dict[str, ContiguousParamSpec],
     contiguous_param: torch.Tensor,
     layer_idx_offset: int,
-    allocate_only:bool,
+    allocate_only: bool,
 ):
     for local_layer_idx, l in enumerate(layers):
         layer_idx = local_layer_idx + layer_idx_offset
         for k, v in l.named_parameters():
             spec = param_spec[f"{layer_idx}.{k}"]
             old_param_data = v.data
-            target = contiguous_param[
-                spec.start_idx : spec.end_idx
-            ].view(spec.shape)
+            target = contiguous_param[spec.start_idx : spec.end_idx].view(spec.shape)
             if not allocate_only:
                 target.copy_(old_param_data)
             else:
-                if not (head_param_point_to_embedding and layer_idx == config.n_layers + 1):
-                    assert old_param_data.shape == torch.Size([0]), (old_param_data.shape, spec.shape, f"{layer_idx}.{k}")
+                if not (
+                    head_param_point_to_embedding and layer_idx == config.n_layers + 1
+                ):
+                    assert old_param_data.shape == torch.Size([0]), (
+                        old_param_data.shape,
+                        spec.shape,
+                        f"{layer_idx}.{k}",
+                    )
             recursive_getattr(l, k).data = target

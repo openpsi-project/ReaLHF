@@ -14,8 +14,14 @@ def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
         if constants.is_first_pipe_stage():
             new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
             new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
-        if constants.is_last_pipe_stage() and config.tied_embedding and not config.is_critic:
-            new_sd[f"{config.n_layers + 1}.weight"] = state_dict["model.decoder.embed_tokens.weight"]
+        if (
+            constants.is_last_pipe_stage()
+            and config.tied_embedding
+            and not config.is_critic
+        ):
+            new_sd[f"{config.n_layers + 1}.weight"] = state_dict[
+                "model.decoder.embed_tokens.weight"
+            ]
     if "lm_head.weight" in state_dict:
         new_sd[f"{config.n_layers + 1}.weight"] = state_dict["lm_head.weight"]
     if "model.decoder.final_layer_norm.weight" in state_dict:

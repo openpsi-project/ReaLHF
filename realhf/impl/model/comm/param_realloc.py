@@ -419,10 +419,14 @@ def _derive_reparallelize_comm_plan(
     repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
 
     from_model_head_param_point_to_embedding = (
-        from_model_config.tied_embedding and not from_model_config.is_critic and from_topo.get_dim("pipe") == 1
+        from_model_config.tied_embedding
+        and not from_model_config.is_critic
+        and from_topo.get_dim("pipe") == 1
     )
     to_model_head_param_point_to_embedding = (
-        to_model_config.tied_embedding and not to_model_config.is_critic and to_topo.get_dim("pipe") == 1
+        to_model_config.tied_embedding
+        and not to_model_config.is_critic
+        and to_topo.get_dim("pipe") == 1
     )
     if constants.has_model_name(from_model_name):
         with constants.model_scope(from_model_name):

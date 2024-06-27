@@ -2,14 +2,14 @@ import dataclasses
 import itertools
 import json
 import os
+import pathlib
 import shutil
+import uuid
 from typing import *
 
+import pytest
 import torch
 import torch.distributed as dist
-import pathlib
-import pytest
-import uuid
 
 from realhf.api.core.config import ModelFamily, ModelName, ModelShardID
 from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
@@ -65,9 +65,7 @@ def create_model(
     instantiate=True,
 ) -> "ReaLModel":
     # NOTE: import here to avoid initializing CUDA context in the main process
-    from realhf.impl.model.nn.real_llm_api import (
-        ReaLModel,
-    )
+    from realhf.impl.model.nn.real_llm_api import ReaLModel
 
     with constants.model_scope(model_name):
         hf_config = hf_config_factory(model_family_name)
@@ -98,11 +96,9 @@ def get_topo(model_name):
 
 def build_engine(module, model_name, trainable) -> "ReaLMegatronEngine":
     from realhf.api.core import model_api
-    from realhf.impl.model.nn.real_llm_api import add_helper_functions
-    from realhf.impl.model.backend.megatron import (
-        MegatronTrainBackend,
-    )
     from realhf.impl.model.backend.inference import PipelineInferenceBackend
+    from realhf.impl.model.backend.megatron import MegatronTrainBackend
+    from realhf.impl.model.nn.real_llm_api import add_helper_functions
 
     with constants.model_scope(model_name):
         if constants.pipe_parallel_world_size() == 1:
@@ -136,10 +132,7 @@ def setup_constants_and_param_realloc(
     from_sequence_parallel,
     to_sequence_parallel,
 ):
-    from realhf.impl.model.comm.param_realloc import (
-        set_trainable,
-        setup_param_realloc,
-    )
+    from realhf.impl.model.comm.param_realloc import set_trainable, setup_param_realloc
 
     from_num_pp, from_num_dp, from_num_mp = from_pp_dp_mp
     to_num_pp, to_num_dp, to_num_mp = to_pp_dp_mp
@@ -299,9 +292,7 @@ def _test_para_realloc(
 ):
     # os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
     from realhf.impl.model.backend.megatron import ReaLMegatronEngine
-    from realhf.impl.model.interface.sft_interface import (
-        compute_packed_sft_loss,
-    )
+    from realhf.impl.model.interface.sft_interface import compute_packed_sft_loss
 
     from_model_name = ModelName("param_realloc_test", 0)
     to_model_name = ModelName("param_realloc_test", 1)
@@ -329,8 +320,7 @@ def _test_para_realloc(
     # Creat model 2
     if (
         dist.get_rank()
-        >= dist.get_world_size()
-        - to_pp_dp_mp[0] * to_pp_dp_mp[1] * to_pp_dp_mp[2]
+        >= dist.get_world_size() - to_pp_dp_mp[0] * to_pp_dp_mp[1] * to_pp_dp_mp[2]
     ):
         to_model = create_model(
             tmp_dir=tmp_path,
@@ -462,9 +452,7 @@ def _test_para_realloc(
                 )
                 train_engine.eval()
 
-                p = (
-                    train_engine.engine.ddp.module.contiguous_param.clone().detach()
-                )
+                p = train_engine.engine.ddp.module.contiguous_param.clone().detach()
 
                 with constants.model_scope(from_model_name):
                     train_engine: ReaLMegatronEngine
@@ -477,15 +465,12 @@ def _test_para_realloc(
                             if not is_critic
                             else compute_critic_loss
                         ),
-                        num_micro_batches=constants.pipe_parallel_world_size()
-                        * 2,
+                        num_micro_batches=constants.pipe_parallel_world_size() * 2,
                         version_steps=i,
                         **loss_fn_kwargs,
                     )
 
-                p_ = (
-                    train_engine.engine.ddp.module.contiguous_param.clone().detach()
-                )
+                p_ = train_engine.engine.ddp.module.contiguous_param.clone().detach()
                 # After training, the parameters should have changed.
                 assert not torch.allclose(p, p_)
 

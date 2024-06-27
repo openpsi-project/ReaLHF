@@ -56,9 +56,7 @@ def _save_then_load(
         # Create an HF model.
         if not is_critic or init_critic_from_actor:
             if dist.get_rank() == 0:
-                hf_model = transformers.AutoModelForCausalLM.from_config(
-                    hf_config
-                )
+                hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
                 hf_model.save_pretrained(hf_save_path)
         dist.barrier()
 
@@ -113,9 +111,7 @@ def _save_then_load(
 
         # Load saved ReaLModel using HF APIs.
         if not is_critic:
-            hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-                real_save_path
-            )
+            hf_model = transformers.AutoModelForCausalLM.from_pretrained(real_save_path)
             dist.barrier()
             if constants.model_parallel_world_size() == 1:
                 sd3 = HF_MODEL_FAMILY_REGISTRY[model_family_name][
@@ -145,9 +141,7 @@ def _save_then_load(
 )
 @pytest.mark.parametrize("is_critic", [True, False])
 @pytest.mark.parametrize("init_critic_from_actor", [True, False])
-@pytest.mark.parametrize(
-    "pp_dp_mp", [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)]
-)
+@pytest.mark.parametrize("pp_dp_mp", [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)])
 def test_save_then_load(
     model_family_name: str,
     is_critic: bool,

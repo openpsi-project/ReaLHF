@@ -451,9 +451,7 @@ def real_model_tblock_param_keys(
     config: model_api.ReaLModelConfig, idx: int
 ) -> List[str]:
     # NOTE: The order matters, we should not change the order of keys.
-    keys = [
-        f"{idx + 1}.attn.c_attn.ln.weight"
-    ]
+    keys = [f"{idx + 1}.attn.c_attn.ln.weight"]
     if config.layer_norm_type is None:
         keys += [f"{idx + 1}.attn.c_attn.ln.bias"]
     keys += [f"{idx + 1}.attn.c_attn.q_attn.weight"]

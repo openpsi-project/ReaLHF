@@ -54,7 +54,10 @@ class ReaLDeepSpeedEngine:
             )
             num_params = sum([p.numel() for p in model_parameters])
             shared_params = 0
-            if module.shared_embedding_or_output_weights and not module.config.is_critic:
+            if (
+                module.shared_embedding_or_output_weights
+                and not module.config.is_critic
+            ):
                 shared_params = module.shared_embedding_or_output_weight().numel()
             unique_params = num_params - shared_params
 
