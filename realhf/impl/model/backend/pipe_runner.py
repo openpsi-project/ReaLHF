@@ -1132,8 +1132,7 @@ class PipelineRunner:
             terminate_condition=terminate_condition,
         )
 
-        use_cuda_graph = os.environ.get("USE_CUDA_GRAPH", "0") == "1"
-        if use_cuda_graph:
+        if gconfig.use_cuda_graph:
             dist.barrier(group=constants.parallelism_group())
             torch.cuda.synchronize()
 

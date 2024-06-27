@@ -32,6 +32,7 @@ class GenerationConfig:
     top_p: float = 1.0
     top_k: int = 0
     num_samples: int = 1
+    use_cuda_graph: bool = False
 
 
 def genstep(
@@ -214,32 +215,32 @@ def prepare(
         y.v_cache = v_cache
         y.cache_seqlens = cache_seqlens
 
-    # use cuda graph if env var USE_CUDA_GRAPH is set to 1,
-    # otherwise `graph` should be None
-    input_buffers = dict(
-        input_ids=torch.ones((bs,), dtype=torch.long, device="cuda"),
-        position_ids=cache_seqlens.unsqueeze(-1).clone(),
-        k_caches=[y.k_cache for y in ys],
-        v_caches=[y.v_cache for y in ys],
-        cache_seqlens=cache_seqlens.clone(),
-        max_seqlen=x.max_seqlen,
-        cu_seqlens=x.cu_seqlens.clone(),
-        hidden_states=(
-            torch.zeros(
-                (bs, x.pp_input.shape[1]), dtype=x.pp_input.dtype, device="cuda"
-            )
-            if x.pp_input is not None
-            else None
-        ),
-    )
+    graph, input_buffers, output_buffers = None, None, None
+    if gconfig.use_cuda_graph:
+        input_buffers = dict(
+            input_ids=torch.ones((bs,), dtype=torch.long, device="cuda"),
+            position_ids=cache_seqlens.unsqueeze(-1).clone(),
+            k_caches=[y.k_cache for y in ys],
+            v_caches=[y.v_cache for y in ys],
+            cache_seqlens=cache_seqlens.clone(),
+            max_seqlen=x.max_seqlen,
+            cu_seqlens=x.cu_seqlens.clone(),
+            hidden_states=(
+                torch.zeros(
+                    (bs, x.pp_input.shape[1]), dtype=x.pp_input.dtype, device="cuda"
+                )
+                if x.pp_input is not None
+                else None
+            ),
+        )
 
-    graph, input_buffers, output_buffers = cuda_graph.capture_func(
-        cuda_graph_name,
-        module._forward,
-        input_buffers,
-        force_recapture=False,
-        no_grad=True,
-    )
+        graph, input_buffers, output_buffers = cuda_graph.capture_func(
+            cuda_graph_name,
+            module._forward,
+            input_buffers,
+            force_recapture=False,
+            no_grad=True,
+        )
 
     return x, ys, cache_seqlens, graph, input_buffers, output_buffers
 

@@ -19,6 +19,7 @@ from realhf.api.quickstart.model import (
 )
 from realhf.base.topology import PipeModelDataParallelTopology
 from realhf.experiments.common.common import CommonExperimentConfig
+from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.experiments.common.utils import *
 
 logger = logging.getLogger("PPO exp", "colored")
@@ -37,24 +38,8 @@ class PPOHyperparameters:
     Increasing the sampling temperature and enabling
     top-k/top-p sampling can produce good models.
 
-    :param max_new_tokens: Maximum number of new tokens
-        to generate.
-    :type max_new_tokens: int
-    :param min_new_tokens: Minimum number of new tokens
-        to generate.
-    :type min_new_tokens: int
-    :param greedy: Whether to use greedy decoding.
-        PPO may not work if set to True.
-    :type greedy: bool
-    :param top_p: Tokens will be sampled from a
-        vocabulary subset with probability summation
-        larger than p.
-    :type top_p: float
-    :param top_k: Tokens will be sampled from a
-        vocabulary subset with top-k probabilities.
-    :type top_k: int
-    :param temperature: Sampling temperature.
-    :type temperature: float
+    :param gen: Generation hyperparameters.
+    :type gen: GenerationHyperparameters
     :param force_no_logits_mask: Whether to omit logits mask.
         The logits mask will be produced when using top-k or top-p sampling,
         where it is used to mark tokens that are filtered out.
@@ -110,12 +95,9 @@ class PPOHyperparameters:
     :type use_cuda_graph: bool
     """
 
-    max_new_tokens: int = 256
-    min_new_tokens: int = 256
-    greedy: bool = False
-    top_p: float = 0.9
-    top_k: int = 200
-    temperature: float = 1.0
+    gen: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    )
     force_no_logits_mask: bool = False
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
@@ -266,8 +248,6 @@ class PPOConfig(CommonExperimentConfig):
             raise NotImplementedError("SFT LoRA is not supported yet.")
         if self.is_rew_lora or self.rew_lora_path is not None:
             raise NotImplementedError("Rew LoRA is not supported yet.")
-        if self.ppo.use_cuda_graph:
-            os.environ["USE_CUDA_GRAPH"] = "1"
 
         self.ppo_kwargs = dict(
             n_minibatches=self.ppo.ppo_n_minibatches,
@@ -285,12 +265,13 @@ class PPOConfig(CommonExperimentConfig):
         )
 
         self.generation_kwargs = dict(
-            max_new_tokens=self.ppo.max_new_tokens,
-            min_new_tokens=self.ppo.min_new_tokens,
-            greedy=self.ppo.greedy,
-            top_p=self.ppo.top_p,
-            top_k=self.ppo.top_k,
-            temperature=self.ppo.temperature,
+            max_new_tokens=self.ppo.gen.max_new_tokens,
+            min_new_tokens=self.ppo.gen.min_new_tokens,
+            greedy=self.ppo.gen.greedy,
+            top_p=self.ppo.gen.top_p,
+            top_k=self.ppo.gen.top_k,
+            temperature=self.ppo.gen.temperature,
+            use_cuda_graph=self.ppo.gen.use_cuda_graph,
         )
 
     @property

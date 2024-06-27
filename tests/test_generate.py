@@ -46,7 +46,6 @@ def real_model_parallel_generate(
     compare_run_id = "cudagraph" if use_cuda_graph else "noncudagraph"
     testing.set_compare_run_identifier(identifier=compare_run_id)
 
-    os.environ["USE_CUDA_GRAPH"] = "1" if use_cuda_graph else "0"
     from realhf.base.namedarray import NamedArray
     from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 
@@ -89,6 +88,7 @@ def real_model_parallel_generate(
             min_new_tokens=min_new_tokens,
             max_new_tokens=max_new_tokens,
             greedy=True,
+            use_cuda_graph=use_cuda_graph,
         )
         if_save = (
             save_result

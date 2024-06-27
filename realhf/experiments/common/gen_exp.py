@@ -68,10 +68,6 @@ class GenerationConfig(CommonExperimentConfig):
     )
     allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
 
-    def __post_init__(self):
-        if self.gen.use_cuda_graph:
-            os.environ["USE_CUDA_GRAPH"] = "1"
-
     @property
     def models(self):
         return {
@@ -80,17 +76,16 @@ class GenerationConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        generation_kwargs = {
-            "max_new_tokens": self.gen.max_new_tokens,
-            "min_new_tokens": self.gen.min_new_tokens,
-            "greedy": self.gen.greedy,
-            "top_k": self.gen.top_k,
-            "top_p": self.gen.top_p,
-            "temperature": self.gen.temperature,
-        }
-        interface = ModelInterface(
-            "generation", args={"generation_config": generation_kwargs}
+        gen_kwargs = dict(
+            max_new_tokens=self.gen.max_new_tokens,
+            min_new_tokens=self.gen.min_new_tokens,
+            greedy=self.gen.greedy,
+            top_p=self.gen.top_p,
+            top_k=self.gen.top_k,
+            temperature=self.gen.temperature,
+            use_cuda_graph=self.gen.use_cuda_graph,
         )
+        interface = ModelInterface("generation", args={"generation_config": gen_kwargs})
         gen = MFCDef(
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.GENERATE,
