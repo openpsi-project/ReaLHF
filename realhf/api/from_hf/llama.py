@@ -210,6 +210,7 @@ def convert_config_llama(
     return ReaLModelConfig(
         n_layers=hf_config.num_hidden_layers,
         n_kv_heads=hf_config.num_key_value_heads,
+        n_q_heads=hf_config.num_attention_heads,
         hidden_dim=hf_config.hidden_size,
         head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
         intermediate_dim=hf_config.intermediate_size,
@@ -254,7 +255,7 @@ def convert_config_back_llama(
         intermediate_size=config.intermediate_dim,
         num_hidden_layers=config.n_layers,
         num_key_value_heads=config.n_kv_heads,
-        num_attention_heads=config.hidden_dim // config.head_dim,
+        num_attention_heads=config.n_q_heads,
         max_position_embeddings=config.n_positions,
         rms_norm_eps=config.layer_norm_epsilon,
         hidden_act=config.activation_function,

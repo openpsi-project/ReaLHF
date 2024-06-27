@@ -34,18 +34,21 @@ class CausalSelfAttentionLayer(nn.Module):
         self,
         hidden_dim: int,
         n_kv_heads: int,
+        n_q_heads: int,
         head_dim: int,
         resid_pdrop: float,
         attn_pdrop: float,
         layer_index: int,
         layer_norm_epsilon: float,
-        # gpt2 does not scale attn by inverse layer idx, in contrast to starcoder
         scale_attn_by_inverse_layer_idx: bool,
+        scale_attn_weights: bool,
         # llama does not require attention bias
         use_attention_bias: bool,
         use_attn_proj_bias: bool,
         # layer norm type is special for llama
         layer_norm_type: Optional[str] = None,
+        # opt applies layer norm after attn
+        do_layernorm_before: bool = True,
         # rotary embedding
         apply_rotary: bool = False,
         rotary_base: float = 10000.0,
@@ -63,7 +66,6 @@ class CausalSelfAttentionLayer(nn.Module):
         if dtype is None:
             dtype = torch.float16
         assert hidden_dim % head_dim == 0
-        n_q_heads = hidden_dim // head_dim
         self.c_attn = LayerNormQKVLinear(
             input_dim=hidden_dim,
             head_dim=head_dim,
@@ -74,6 +76,7 @@ class CausalSelfAttentionLayer(nn.Module):
             layer_norm_epsilon=layer_norm_epsilon,
             layer_norm_type=layer_norm_type,
             use_attention_bias=use_attention_bias,
+            do_layernorm_before=do_layernorm_before,
             dtype=dtype,
             device=device,
             layer_index=layer_index,
@@ -81,7 +84,7 @@ class CausalSelfAttentionLayer(nn.Module):
 
         if model_parallel:
             self.c_proj = RowParallelLinear(
-                hidden_dim,
+                n_q_heads * head_dim,
                 hidden_dim,
                 bias=use_attn_proj_bias,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
@@ -90,7 +93,7 @@ class CausalSelfAttentionLayer(nn.Module):
             )
         else:
             self.c_proj = nn.Linear(
-                hidden_dim,
+                n_q_heads * head_dim,
                 hidden_dim,
                 bias=use_attn_proj_bias,
                 dtype=dtype,
@@ -118,7 +121,6 @@ class CausalSelfAttentionLayer(nn.Module):
             )
 
         # constant
-        self.h = hidden_dim
         self.nq = n_q_heads
         self.nkv = n_kv_heads
         if self.nq % self.nkv != 0:
@@ -130,6 +132,7 @@ class CausalSelfAttentionLayer(nn.Module):
         self.layer_index = layer_index
 
         self.scale_attn_by_inverse_layer_idx = scale_attn_by_inverse_layer_idx
+        self.scale_attn_weights = scale_attn_weights
 
     def train(self, mode: bool):
         if not mode:
@@ -163,7 +166,8 @@ class CausalSelfAttentionLayer(nn.Module):
         else:
             unscale = 1.0
             scale_factor = 1
-        scale_factor /= self.d**0.5
+        if self.scale_attn_weights:
+            scale_factor /= self.d**0.5
 
         q, k, v = self.c_attn(hidden_states)
 

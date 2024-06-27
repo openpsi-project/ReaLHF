@@ -14,8 +14,16 @@ import torch.distributed as dist
 
 from realhf.api.core import config
 from realhf.api.core.config import ModelFamily
-from realhf.base import constants, gpu_utils, name_resolve, namedarray, names, topology
+from realhf.base import (
+    constants,
+    gpu_utils,
+    name_resolve,
+    namedarray,
+    names,
+    topology,
+)
 from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
+
 
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
@@ -47,8 +55,12 @@ class StandaloneTestingProcess(mp.Process):
         self.err_queue = err_queue
         self.barrier = barrier
 
-        self.expr_name = expr_name if expr_name is not None else _DEFAULT_EXPR_NAME
-        self.trial_name = trial_name if trial_name is not None else _DEFAULT_TRIAL_NAME
+        self.expr_name = (
+            expr_name if expr_name is not None else _DEFAULT_EXPR_NAME
+        )
+        self.trial_name = (
+            trial_name if trial_name is not None else _DEFAULT_TRIAL_NAME
+        )
 
         self.func = func
         self.args = args
@@ -64,7 +76,9 @@ class StandaloneTestingProcess(mp.Process):
         self.barrier.wait()
 
         # init process group
-        gpu_utils.reveal_ddp_identity(self.expr_name, self.trial_name, self.rank)
+        gpu_utils.reveal_ddp_identity(
+            self.expr_name, self.trial_name, self.rank
+        )
         self.barrier.wait()
         from realhf.impl.model.comm.global_comm import setup_global_comm
 
@@ -261,7 +275,9 @@ def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
     input_ids, attention_mask = make_batch(
         tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed
     )
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(
+        input_ids, attention_mask
+    )
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = namedarray.NamedArray(
         packed_input_ids=packed_input_ids,
@@ -280,7 +296,9 @@ def random_sample(bs, seq_len, vocab_size):
 
     input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
     attention_mask = torch.ones_like(input_ids)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
+    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(
+        input_ids, attention_mask
+    )
     prompt_mask = torch.zeros_like(packed_input_ids)
     data = namedarray.NamedArray(
         packed_input_ids=packed_input_ids,

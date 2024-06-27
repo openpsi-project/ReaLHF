@@ -19,7 +19,9 @@ from tests.hf_utils import hf_config_factory
 logger = logging.getLogger("tests.test_hf_consistency")
 
 
-@pytest.mark.parametrize("model_family_name", ["qwen2", "llama"])
+@pytest.mark.parametrize(
+    "model_family_name", ["qwen2", "llama", "gemma", "gpt2", "opt"]
+)
 @torch.no_grad()
 def test_consistency(tmp_path, model_family_name: str):
     if not dist.is_initialized():

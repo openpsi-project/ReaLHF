@@ -22,7 +22,7 @@ def import_module(path: str, pattern: re.Pattern):
         module_path = "realhf." + module_path.replace(os.sep, ".").replace(
             "realhf.", ""
         )
-        logger.info(f"Automatically importing module {module_path}.")
+        # logger.info(f"Automatically importing module {module_path}.")
         importlib.import_module(module_path)
 
 

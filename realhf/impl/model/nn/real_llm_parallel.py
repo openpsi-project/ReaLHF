@@ -203,7 +203,17 @@ def get_real_model_param_shape(
         return (config.vocab_size // mp_size, config.hidden_dim)
     elif "wpe.weight" in k:
         assert config.n_positions % mp_size == 0
-        return (config.n_positions // mp_size, config.hidden_dim)
+        if (config.n_positions + config.abs_position_embedding_offset) % mp_size != 0:
+            raise ValueError(
+                f"The dimenstion of position embedding "
+                f"({config.n_positions} + offset {config.abs_position_embedding_offset}) "
+                f"is not divisible by mp_size ({mp_size}). "
+                "Models like this (e.g. OPT-350m) inherently do not support tensor parallelism."
+            )
+        return (
+            (config.n_positions + config.abs_position_embedding_offset) // mp_size,
+            config.hidden_dim,
+        )
     elif ".ln." in k or ".ln_f." in k:
         return (config.hidden_dim,)
     elif k == f"{config.n_layers + 1}.weight":  # output head
@@ -243,16 +253,16 @@ def get_real_model_param_shape(
                 assert "bias" in k
                 return (config.intermediate_dim // mp_size,)
         if "weight" in k:
-            assert config.hidden_dim // config.head_dim % mp_size == 0
-            return (config.hidden_dim // mp_size, config.hidden_dim)
+            assert config.n_q_heads % mp_size == 0
+            return (config.n_q_heads * config.head_dim // mp_size, config.hidden_dim)
         else:
             assert "bias" in k
-            return (config.hidden_dim // mp_size,)
+            return (config.n_q_heads * config.head_dim // mp_size,)
     elif any([rk in k for rk in ROW_LINEAR_KEYS]):
         if "mlp" in k and "weight" in k:
             return (config.hidden_dim, config.intermediate_dim // mp_size)
         elif "attn" in k and "weight" in k:
-            return (config.hidden_dim, config.hidden_dim // mp_size)
+            return (config.hidden_dim, config.n_q_heads * config.head_dim // mp_size)
         elif "bias" in k:
             return (config.hidden_dim,)
         else:
@@ -301,6 +311,7 @@ def partition_pipeline_layers(
     head_param_counter: Callable[[model_api.ReaLModelConfig], int],
     method: str = "parameters_balanced",
 ) -> Dict[int, Tuple[int, int]]:
+    # TODO: partition according to occupied GPU memory, e.g., logits occupy larger memory
     from deepspeed.runtime import utils as ds_utils
 
     from realhf.base.datapack import partition_balanced as true_partition_balanced

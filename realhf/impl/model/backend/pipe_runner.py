@@ -2,22 +2,12 @@ import dataclasses
 import os
 from typing import *
 
-from deepspeed.runtime.engine import MEMORY_OPT_ALLREDUCE_SIZE, DeepSpeedEngine
-from deepspeed.runtime.zero.config import ZeroStageEnum
-
-try:
-    from megatron.core.distributed.distributed_data_parallel import (
-        DistributedDataParallel as MegatronDDP,
-    )
-    from megatron.core.distributed.finalize_model_grads import finalize_model_grads
-    from megatron.core.optimizer.distrib_optimizer import (
-        DistributedOptimizer as MegatronDistOptim,
-    )
-except ImportError or ModuleNotFoundError:
-    pass
 import torch
 import torch.distributed as dist
 import transformers
+from deepspeed.runtime.engine import MEMORY_OPT_ALLREDUCE_SIZE, DeepSpeedEngine
+from deepspeed.runtime.zero.config import ZeroStageEnum
+from megatron.core.optimizer import DistributedOptimizer
 
 import realhf.base.constants as constants
 import realhf.base.logging as logging
@@ -27,7 +17,7 @@ import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import data_api
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.base.namedarray import NamedArray
-from realhf.impl.model.backend.utils import MegatronEngine
+from realhf.impl.model.backend.utils import MegatronEngine, finalize_grads_megatron,step_megatron_distrb_optimizer
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.nn.real_llm_generate import (
@@ -924,7 +914,7 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
         step_id: int,
     ):
         # self.engine.ddp.start_grad_sync()
-        finalize_model_grads([self.engine.ddp])
+        finalize_grads_megatron(self.engine)
 
     def _exec_optimizer_step(
         self,
@@ -934,13 +924,17 @@ class PipeTrainBackwardReduceInstrSetForMegatron:
         micro_batch_id: int,
         step_id: int,
     ):
-        update_successful, grad_norm, num_zeros_in_grad = self.engine.optim.step()
+        if isinstance(self.engine.optim, DistributedOptimizer):
+            update_successful, grad_norm, num_zeros_in_grad = step_megatron_distrb_optimizer(self.engine.optim)
+        else:
+            update_successful, grad_norm, num_zeros_in_grad = self.engine.optim.step()
 
         version_steps = tensor_buffer.get("version_steps", 0)
         if update_successful:
             self.engine.lr_scheduler.step_absolute(version_steps)
         if constants.data_parallel_rank() == 0 and constants.model_parallel_rank() == 0:
             logger.info(
+                f"Model name {constants.model_name()}, "
                 f"Pipeline rank {constants.pipe_parallel_rank()}. "
                 f"Update success? {update_successful}. "
                 f"Grad Norm: {grad_norm}. "
@@ -1173,6 +1167,7 @@ class PipelineRunner:
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
+        # TODO: return whether update success
         if not torch._C.is_grad_enabled():
             raise RuntimeError(
                 f"train_batch() requires gradients enabled. Use eval_batch() instead."
