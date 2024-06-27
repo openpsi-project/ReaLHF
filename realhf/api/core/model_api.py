@@ -73,10 +73,10 @@ class ReaLModelConfig:
         gradient accumulation in Megatron.
         Currently not supported.
     :type gradient_accumulation_fusion: bool
-    :param share_embeddings_and_output_weights: Whether to share
+    :param tied_embedding: Whether to share
         the embeddings and output weights.
         Currently not supported.
-    :type share_embeddings_and_output_weights: bool
+    :type tied_embedding: bool
     """
 
     ### Architectural configurations. ###
@@ -112,7 +112,7 @@ class ReaLModelConfig:
     abs_position_embedding_offset: int = 0
     do_layernorm_before: bool = True
     # Tied embedding
-    share_embeddings_and_output_weights: bool = False
+    tied_embedding: bool = False
     # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False
 
@@ -120,7 +120,7 @@ class ReaLModelConfig:
     gradient_accumulation_fusion: bool = False
 
     def __post_init__(self):
-        if self.is_critic and self.share_embeddings_and_output_weights:
+        if self.is_critic and self.tied_embedding:
             raise ValueError("Critic model cannot share embeddings and output weights.")
         if self.head_dim is None:
             self.head_dim = self.hidden_dim // self.n_q_heads

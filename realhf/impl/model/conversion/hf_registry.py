@@ -49,7 +49,7 @@ class HFModelRegistry:
         config = self.config_from_hf_converter(hf_config)
         config.is_critic = is_critic
         if config.is_critic:
-            config.share_embeddings_and_output_weights = False
+            config.tied_embedding = False
         return config
 
     def config_to_hf(
@@ -313,7 +313,9 @@ class HFModelRegistry:
         metadata_t = t1 - tik
         gather_cpu_t = t2 - t1
         dump_t = t3 - t2
-        logger.info(
-            f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, gather/cpu copy cost={gather_cpu_t:.2f}s, "
-            f"dump cost={dump_t:.2f}s"
-        )
+        if os.getenv("REAL_LOG_SAVE_TIME", None) == "1":
+            logger.info(
+                f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, "
+                f"gather/cpu copy cost={gather_cpu_t:.2f}s, "
+                f"dump cost={dump_t:.2f}s"
+            )

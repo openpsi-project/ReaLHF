@@ -43,7 +43,7 @@ Model Configurations
 .. autoclass:: realhf.impl.model.nn.real_llm_api.ReaLModel
     :members:
     :undoc-members:
-    :exclude-members: forward, state_dict, load_state_dict, build_reparallelization_plan, build_reparallelized_layers_async, patch_reparallelization, pre_process, post_process, share_embeddings_and_output_weights
+    :exclude-members: forward, state_dict, load_state_dict, build_reparallelization_plan, build_reparallelized_layers_async, patch_reparallelization, pre_process, post_process, shared_embedding_or_output_weight, shared_embedding_or_output_weights
 
 Dataset Configurations
 -----------------------

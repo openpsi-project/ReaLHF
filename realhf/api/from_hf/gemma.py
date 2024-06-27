@@ -47,7 +47,7 @@ def convert_config_gemma(
         apply_rotary=True,
         rotary_base=hf_config.rope_theta,
         rotary_interleaved=False,
-        share_embeddings_and_output_weights=hf_config.tie_word_embeddings,
+        tied_embedding=hf_config.tie_word_embeddings,
         normalize_embed=True,
     )
 
@@ -70,7 +70,7 @@ def convert_config_back_gemma(
         attention_bias=config.use_attention_bias,
         attention_dropout=config.attn_pdrop,
         rope_theta=config.rotary_base,
-        tie_word_embeddings=config.share_embeddings_and_output_weights,
+        tie_word_embeddings=config.tied_embedding,
     )
 
 

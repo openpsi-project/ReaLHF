@@ -481,14 +481,14 @@ def megatron_all_reduce_layernorm_grads(engine: MegatronEngine):
 
 
 def megatron_all_reduce_word_embedding_grads(engine: MegatronEngine):
+    real_model: ReaLModel = engine.ddp.module
+    if not real_model.config.tied_embedding or real_model.config.is_critic:
+        return
     pp_size = constants.pipe_parallel_world_size()
     pp_rank = constants.pipe_parallel_rank()
     if pp_size == 1:
         return
     if pp_rank not in [0, pp_size - 1]:
-        return
-    real_model: ReaLModel = engine.ddp.module
-    if not real_model.share_embeddings_and_output_weights:
         return
 
     if pp_rank == 0:

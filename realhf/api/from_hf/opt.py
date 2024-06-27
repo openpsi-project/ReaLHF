@@ -14,7 +14,7 @@ def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
         if constants.is_first_pipe_stage():
             new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
             new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
-        if constants.is_last_pipe_stage() and config.share_embeddings_and_output_weights and not config.is_critic:
+        if constants.is_last_pipe_stage() and config.tied_embedding and not config.is_critic:
             new_sd[f"{config.n_layers + 1}.weight"] = state_dict["model.decoder.embed_tokens.weight"]
     if "lm_head.weight" in state_dict:
         new_sd[f"{config.n_layers + 1}.weight"] = state_dict["lm_head.weight"]
@@ -62,7 +62,7 @@ def sd_to_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     if constants.is_first_pipe_stage():
         new_sd["model.decoder.embed_tokens.weight"] = state_dict["0.wte.weight"]
         new_sd["model.decoder.embed_positions.weight"] = state_dict["0.wpe.weight"]
-    if config.is_critic or not config.share_embeddings_and_output_weights:
+    if config.is_critic or not config.tied_embedding:
         if constants.is_last_pipe_stage():
             new_sd["lm_head.weight"] = state_dict[f"{config.n_layers + 1}.weight"]
 
@@ -141,7 +141,7 @@ def opt_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[
 
 
 def opt_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    if config.share_embeddings_and_output_weights and not config.is_critic:
+    if config.tied_embedding and not config.is_critic:
         return ["model.decoder.embed_tokens.weight"]
     else:
         return ["lm_head.weight"]
@@ -168,7 +168,7 @@ def convert_config_opt(
         activation_function=hf_config.activation_function,
         use_attention_bias=hf_config.enable_bias,
         use_attn_proj_bias=hf_config.enable_bias,
-        share_embeddings_and_output_weights=hf_config.tie_word_embeddings,
+        tied_embedding=hf_config.tie_word_embeddings,
         scale_attn_by_inverse_layer_idx=False,
         scale_attn_weights=True,
         abs_position_embedding_offset=2,

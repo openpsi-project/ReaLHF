@@ -134,13 +134,30 @@ def _save_then_load(
         assert file_size2 == file_size, (file_size, file_size2)
 
 
-@pytest.mark.skip("This test requires 8 GPUs to run.")
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or torch.cuda.device_count() < 8,
+    reason="This test requires at least 8 GPUs to run.",
+)
+@pytest.mark.slow
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    "model_family_name", ["gemma", "opt", "gpt2", "llama", "qwen2"]
+)
+@pytest.mark.parametrize("is_critic", [True, False])
+@pytest.mark.parametrize("init_critic_from_actor", [True, False])
+@pytest.mark.parametrize(
+    "pp_dp_mp", [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)]
+)
 def test_save_then_load(
     model_family_name: str,
     is_critic: bool,
     init_critic_from_actor: bool,
     pp_dp_mp: Tuple,
 ):
+    if model_family_name == "opt" and pp_dp_mp[-1] > 2:
+        return
+    if not is_critic and init_critic_from_actor:
+        return
     expr_name = uuid.uuid4()
     trial_name = uuid.uuid4()
     clear_name_resolve(expr_name=expr_name, trial_name=trial_name)
@@ -159,48 +176,3 @@ def test_save_then_load(
     )
     test_impl.launch()
     shutil.rmtree(tmp_path)
-
-
-if __name__ == "__main__":
-    import concurrent.futures
-    def run_test_cases():
-        parallelism = [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)]
-        model_families = ["gemma", "opt", "gpt2", "llama", "qwen2"]
-        
-        test_cases = []
-        
-        for is_critic in [True, False]:
-            if is_critic:
-                _init_critic_from_actor = [True, False]
-            else:
-                _init_critic_from_actor = [False]
-            
-            for init_critic_from_actor in _init_critic_from_actor:
-                for pp_dp_mp in parallelism:
-                    for model_family_name in model_families:
-                        if model_family_name == "opt" and pp_dp_mp[-1] > 2:
-                            continue
-                        test_cases.append((model_family_name, is_critic, init_critic_from_actor, pp_dp_mp))
-    
-        return test_cases
-
-    def main():
-        test_cases = run_test_cases()
-        failed_cases = []
-
-        with concurrent.futures.ProcessPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(test_save_then_load, *test_case): test_case for test_case in test_cases}
-
-        for future in concurrent.futures.as_completed(futures):
-            test_case = futures[future]
-            try:
-                future.result()
-            except Exception as exc:
-                failed_cases.append((test_case, exc))
-        
-        if failed_cases:
-            print(f"Failed test cases: {failed_cases}")
-        else:
-            print("Success!")
-    
-    main()

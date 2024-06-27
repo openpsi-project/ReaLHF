@@ -145,7 +145,10 @@ class ReaLMegatronEngine:
                 lambda p: p.requires_grad, self.module.parameters()
             )
             num_params = sum([p.numel() for p in model_parameters])
-            unique_params = num_params
+            shared_params = 0
+            if module.shared_embedding_or_output_weight() is not None:
+                shared_params = module.shared_embedding_or_output_weight().numel()
+            unique_params = num_params - shared_params
 
             params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(
                 self.device
@@ -387,7 +390,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
             real_model.contiguous_param = param_grad_buf.param_data
 
             # Sanity checks.
-            assert real_model._param_size == param_grad_buf.numel
+            assert real_model._param_size == param_grad_buf.numel, (param_grad_buf.numel, real_model._param_size)
             for n, p in real_model.layers.named_parameters():
                 n = ".".join(
                     [

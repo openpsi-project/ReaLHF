@@ -418,6 +418,12 @@ def _derive_reparallelize_comm_plan(
     to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
     repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
 
+    from_model_head_param_point_to_embedding = (
+        from_model_config.tied_embedding and not from_model_config.is_critic and from_topo.get_dim("pipe") == 1
+    )
+    to_model_head_param_point_to_embedding = (
+        to_model_config.tied_embedding and not to_model_config.is_critic and to_topo.get_dim("pipe") == 1
+    )
     if constants.has_model_name(from_model_name):
         with constants.model_scope(from_model_name):
             from_layer_indices = from_layer_mapping[constants.pipe_parallel_rank()]
@@ -425,8 +431,8 @@ def _derive_reparallelize_comm_plan(
                 from_layer_indices,
                 from_model_config,
                 from_topo.get_dim("model"),
-                from_topo.get_dim("pipe"),
                 from_topo.sequence_parallel,
+                head_param_point_to_embedding=from_model_head_param_point_to_embedding,
             )
     if constants.has_model_name(to_model_name):
         with constants.model_scope(to_model_name):
@@ -435,13 +441,15 @@ def _derive_reparallelize_comm_plan(
                 to_layer_indices,
                 to_model_config,
                 to_topo.get_dim("model"),
-                to_topo.get_dim("pipe"),
                 to_topo.sequence_parallel,
+                head_param_point_to_embedding=to_model_head_param_point_to_embedding,
             )
 
     comm_plan = []
 
     src_dp_size = from_topo.get_dim("data")
+    src_pp_size = from_topo.get_dim("pipe")
+    dst_pp_size = to_topo.get_dim("pipe")
 
     # derive a global NCCL communication plan
     for (pp_i, pp_j), layer_indices in repart_strat.items():
@@ -499,6 +507,7 @@ def _derive_reparallelize_comm_plan(
                                 portion_size=max(dst_mp_size // src_mp_size, 1),
                                 portion_rank=sender_mp_portion_id,
                                 sequence_parallel=from_topo.sequence_parallel,
+                                head_param_point_to_embedding=from_model_head_param_point_to_embedding,
                             )
                             if len(param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
                                 param_intervals_cpu = _split_intervals(
@@ -525,6 +534,7 @@ def _derive_reparallelize_comm_plan(
                                 portion_size=max(src_mp_size // dst_mp_size, 1),
                                 portion_rank=receiver_mp_portion_id,
                                 sequence_parallel=to_topo.sequence_parallel,
+                                head_param_point_to_embedding=to_model_head_param_point_to_embedding,
                             )
                             if (
                                 len(receiver_param_intervals_cpu)

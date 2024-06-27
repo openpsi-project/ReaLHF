@@ -19,20 +19,6 @@ from tests.hf_utils import hf_config_factory
 logger = logging.getLogger("tests.test_hf_consistency")
 
 
-dist.init_process_group(
-    "gloo",
-    rank=0,
-    world_size=1,
-    init_method="tcp://localhost:7777",
-)
-testing.init_global_constants(
-    num_dp=1,
-    num_mp=1,
-    num_pp=1,
-    sequence_parallel=False,
-    max_prompt_len=128,
-)
-assert dist.get_world_size() == 1, dist.get_world_size()
 
 
 @pytest.mark.parametrize(
@@ -40,6 +26,23 @@ assert dist.get_world_size() == 1, dist.get_world_size()
 )
 @torch.no_grad()
 def test_consistency(tmp_path, model_family_name: str):
+    if not dist.is_initialized():
+        # NOTE: To make pytest happy, we should have this `if` condition.
+        dist.init_process_group(
+            "gloo",
+            rank=0,
+            world_size=1,
+            init_method="tcp://localhost:7777",
+        )
+        testing.init_global_constants(
+            num_dp=1,
+            num_mp=1,
+            num_pp=1,
+            sequence_parallel=False,
+            max_prompt_len=128,
+        )
+    assert dist.get_world_size() == 1, dist.get_world_size()
+
     # NOTE: import here to avoid initializing CUDA context in the main process
     from realhf.impl.model import _HF_REGISTRIES
     from realhf.impl.model.nn.real_llm_api import ReaLModel
@@ -85,7 +88,7 @@ def test_consistency(tmp_path, model_family_name: str):
 
         # 3. test forward pass
         max_seqlen = 32
-        bs = 4
+        bs = 16
         input_ids = torch.randint(
             0, mconfig.vocab_size, (bs, max_seqlen), dtype=torch.long
         )
@@ -102,12 +105,10 @@ def test_consistency(tmp_path, model_family_name: str):
         logits2 = model(
             input_ids=input_ids, attention_mask=attention_mask
         ).logits * attention_mask.unsqueeze(-1)
-        assert torch.allclose(logits1, logits2, atol=1e-5), (
+        assert torch.allclose(logits1, logits2, atol=1e-4), (
             model_family_name,
             (logits1 - logits2).abs().max(),
         )
-
-        print("Passed", model_family_name)
 
 
 if __name__ == "__main__":

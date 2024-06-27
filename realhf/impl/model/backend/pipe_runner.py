@@ -1147,6 +1147,7 @@ class PipelineRunner:
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
+        # TODO: return whether update success
         if not torch._C.is_grad_enabled():
             raise RuntimeError(
                 f"train_batch() requires gradients enabled. Use eval_batch() instead."

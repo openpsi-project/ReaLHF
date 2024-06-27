@@ -175,7 +175,7 @@ def convert_config_gpt2(
         use_attention_bias=True,
         use_attn_proj_bias=True,
         scale_attn_by_inverse_layer_idx=hf_config.scale_attn_by_inverse_layer_idx,
-        share_embeddings_and_output_weights=True,
+        tied_embedding=True,
         scale_attn_weights=hf_config.scale_attn_weights,
     )
 
