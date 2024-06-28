@@ -1,14 +1,15 @@
-LLAMA_PATH=/lustre/public/pretrained_model_weights/Qwen2-7B-Instruct/
+MODEL_FAMILY=gpt2
+LLAMA_PATH=/lustre/public/pretrained_model_weights/$MODEL_FAMILY/
 CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quickstart sft \
-    experiment_name=quickstart-sft trial_name=release \
+    experiment_name=quickstart-sft trial_name=$MODEL_FAMILY \
     allocation_mode=manual \
     total_train_epochs=8 \
     save_freq_steps=50 eval_freq_epochs=1 \
     model.optimizer.lr_scheduler_type=cosine \
     model.optimizer.lr=1e-5 \
     model.optimizer.warmup_steps_proportion=0.02 \
-    model.type._class=qwen2 \
-    model.type.size=7 \
+    model.type._class=$MODEL_FAMILY \
+    model.type.size=0 \
     model.type.is_critic=False \
     model.path=$LLAMA_PATH \
     model.gradient_checkpointing=True \

@@ -77,7 +77,7 @@ def _split_and_prefill_pipe_input(
     # Partition according to seqlens_cpu.
     assert len(seqlens_cpu) >= n_mbs
     partition_min_size = len(seqlens_cpu) // n_mbs
-    data = NamedArray(packed_input_ids=packed_input_ids, cu_seqlens=torch.nn.functional.pad(torch.tensor(seqlens_cpu, dtype=torch.int32, device=module.device).cumsum(0), (1,0)))
+    data = NamedArray(packed_input_ids=packed_input_ids)
     data.register_metadata(seqlens=seqlens_cpu)
     splitted, partitions = data_api.split_sequences(
         data, n_mbs, min_size=partition_min_size, return_partitions=True,
@@ -96,15 +96,16 @@ def _split_and_prefill_pipe_input(
         batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
     else:
         batch_seqlens = [actual_seqlens[start * group_size:end * group_size].cpu().numpy().tolist() for start, end in partitions]
-        for x, y in zip(splitted, batch_seqlens):
+
+    for x, y in zip(splitted, batch_seqlens):
+        x.pop_metadata("seqlens")
+        x.register_metadata(seqlens=y)
+        sls = torch.tensor(y, dtype=torch.int32, device=module.device)
+        x['cu_seqlens'] = torch.nn.functional.pad(sls.cumsum(0), (1, 0)).int()
+    if loss_fn is not None:
+        for x, y in zip(splitted_loss_input, batch_seqlens):
             x.pop_metadata("seqlens")
             x.register_metadata(seqlens=y)
-            sls = torch.tensor(y, dtype=torch.int32, device=module.device)
-            x['cu_seqlens'] = torch.nn.functional.pad(sls.cumsum(0), (1, 0)).int()
-        if loss_fn is not None:
-            for x, y in zip(splitted_loss_input, batch_seqlens):
-                x.pop_metadata("seqlens")
-                x.register_metadata(seqlens=y)
 
     # Sanity check to ensure that the order of splitted sequences
     # is the same across pipeline parallel ranks.
