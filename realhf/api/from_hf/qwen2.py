@@ -64,6 +64,20 @@ def convert_config_back_qwen2(
     )
 
 
+def qwen2_config_maker():
+    hf_config = transformers.Qwen2Config(
+        vocab_size=200,
+        hidden_size=128,
+        intermediate_size=200,
+        num_hidden_layers=8,
+        num_attention_heads=8,
+        num_key_value_heads=8,
+        hidden_act="silu",
+        rms_norm_eps=1e-5,
+    )
+    return convert_config_qwen2(hf_config)
+
+
 register_hf_family(
     name="qwen2",
     hf_cls_name="Qwen2ForCausalLM",
@@ -74,4 +88,5 @@ register_hf_family(
     embedding_param_names=llama_embedding_layer_names,
     tblock_param_names=llama_transformer_block_param_name,
     head_param_names=llama_output_head_param_name,
+    real_config_maker=qwen2_config_maker,
 )

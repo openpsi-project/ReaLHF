@@ -192,6 +192,19 @@ def to_gpt2_config(config: ReaLModelConfig) -> transformers.GPT2Config:
     )
 
 
+def make_real_config_gpt2() -> ReaLModelConfig:
+    hf_config = transformers.GPT2Config(
+        vocab_size=160,
+        n_positions=200,
+        n_embd=128,
+        n_layer=8,
+        n_head=16,
+        n_inner=512,
+        activation_function="gelu_new",
+    )
+    return convert_config_gpt2(hf_config)
+
+
 register_hf_family(
     name="gpt2",
     hf_cls_name="GPT2LMHeadModel",
@@ -202,4 +215,5 @@ register_hf_family(
     embedding_param_names=gpt2_embedding_layer_names,
     tblock_param_names=gpt2_transformer_block_param_name,
     head_param_names=gpt2_output_head_param_name,
+    real_config_maker=make_real_config_gpt2,
 )

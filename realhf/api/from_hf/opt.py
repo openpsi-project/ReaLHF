@@ -189,6 +189,19 @@ def to_opt_config(config: ReaLModelConfig) -> transformers.OPTConfig:
     )
 
 
+def get_opt_config() -> ReaLModelConfig:
+    c = transformers.OPTConfig(
+        vocab_size=200,
+        max_position_embeddings=200,
+        hidden_size=128,
+        num_hidden_layers=8,
+        num_attention_heads=8,
+        ffn_dim=200,
+        do_layer_norm_before=True,
+    )
+    return convert_config_opt(c)
+
+
 register_hf_family(
     name="opt",
     hf_cls_name="OPTForCausalLM",
@@ -199,4 +212,5 @@ register_hf_family(
     embedding_param_names=opt_embedding_layer_names,
     tblock_param_names=opt_transformer_block_param_name,
     head_param_names=opt_output_head_param_name,
+    real_config_maker=get_opt_config,
 )

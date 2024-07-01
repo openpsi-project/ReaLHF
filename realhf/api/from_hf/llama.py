@@ -260,28 +260,17 @@ def convert_config_back_llama(
 
 
 def make_real_config_llama():
-    return ReaLModelConfig(
-        n_layers=8,
-        n_kv_heads=1,
-        hidden_dim=256,
-        head_dim=32,
-        intermediate_dim=512,
+    hf_config = transformers.LlamaConfig(
         vocab_size=200,
-        n_positions=200,
-        embd_pdrop=0.0,
-        attn_pdrop=0.1,
-        layer_norm_epsilon=1e-5,
-        activation_function="silu",
-        use_attention_bias=False,
-        scale_attn_by_inverse_layer_idx=False,
-        layer_norm_type="rms",
-        mlp_type="llama",
-        apply_rotary=True,
-        rotary_base=10000,
-        rotary_interleaved=False,
-        rotary_scaling=None,
-        rotary_scaling_type=None,
+        hidden_size=128,
+        intermediate_size=200,
+        num_hidden_layers=8,
+        num_attention_heads=8,
+        num_key_value_heads=8,
+        hidden_act="silu",
+        rms_norm_eps=1e-5,
     )
+    return convert_config_llama(hf_config)
 
 
 for name in [

@@ -18,7 +18,6 @@ from realhf.base.testing import (
     clear_name_resolve,
     init_global_constants,
 )
-from tests.hf_utils import hf_config_factory
 
 logger = logging.getLogger("tests.test_saveload")
 
@@ -64,7 +63,7 @@ def _save_then_load(
 
     with constants.model_scope(model_name):
         tokenizer = None
-        hf_config = hf_config_factory(model_family_name)
+        hf_config = getattr(ReaLModel, f"make_{model_family_name}_config")()
 
         mconfig: ReaLModelConfig = getattr(
             ReaLModel, f"config_from_{model_family_name}"

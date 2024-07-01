@@ -20,17 +20,9 @@ from realhf.base.testing import (
     init_global_constants,
     random_sample,
 )
-from tests.hf_utils import hf_config_factory
 
 if TYPE_CHECKING:
-    from realhf.impl.model.backend.inference import (
-        PipelinableInferenceEngine,
-        PipelineInferenceBackend,
-    )
-    from realhf.impl.model.backend.megatron import (
-        MegatronTrainBackend,
-        ReaLMegatronEngine,
-    )
+    from realhf.impl.model.backend.megatron import ReaLMegatronEngine
     from realhf.impl.model.nn.real_llm_api import ReaLModel
 
 
@@ -68,7 +60,7 @@ def create_model(
     from realhf.impl.model.nn.real_llm_api import ReaLModel
 
     with constants.model_scope(model_name):
-        hf_config = hf_config_factory(model_family_name)
+        hf_config = getattr(ReaLModel, f"make_{model_family_name}_config")()
         mconfig: ReaLModelConfig = getattr(
             ReaLModel, f"config_from_{model_family_name}"
         )(hf_config)
