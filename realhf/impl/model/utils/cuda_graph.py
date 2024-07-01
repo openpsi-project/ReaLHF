@@ -48,12 +48,16 @@ def capture_func(
     """Capture a function with cuda graph, store the graph and input/output buffers by name.
     The input/output metadata should match the inputs and outputs of function.
 
-    Args:
-        name: The name of the function.
-        func: The function to be captured.
-        input_metadata: The metadata of input tensors.
-        output_metadata: The metadata of output tensors.
-        force_recapture: Whether to force recapture the function.
+    :param name: The identifier of the CUDAGraph to be captured/reused.
+    :type name: str
+    :param func: The function to be captured.
+    :type func: Callable
+    :param input_buffer: The input buffer of the function.
+    :type input_buffer: Dict[str, Any]
+    :param force_recapture: Whether to force recapture the function.
+    :type force_recapture: bool
+    :param no_grad: Whether to run the function in no_grad context.
+    :type no_grad: bool
     """
     global CUDA_GRAPH_STORAGE
     global CUDA_GRAPH_INPUT_BUFFER

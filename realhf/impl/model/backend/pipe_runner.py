@@ -35,7 +35,8 @@ from realhf.impl.model.nn.real_llm_generate import (
     _gather_gen_output_from_list,
     _gather_minibatch_gen_outputs,
     genstep,
-    prepare,
+    maybe_capture_cudagraph,
+    prepare_generate_inputs,
 )
 from realhf.impl.model.parallelism.pipeline_parallel.instruction import PipeInstruction
 from realhf.impl.model.parallelism.pipeline_parallel.static_schedule import PipeSchedule
@@ -452,9 +453,9 @@ class PipeGenInstrSet:
         if not tensor_buffer.get("kv_cache_reserved", micro_batch_id):
             # KV cache is attached to x and ys.
             assert constants.pipe_parallel_world_size() >= 2
-            x, ys, cache_seqlens, graph, input_buffers, output_buffers = prepare(
-                module, gconfig, x, ys, cuda_graph_name
-            )
+            x, ys = prepare_generate_inputs(module, gconfig, x, ys, cuda_graph_name)
+            if gconfig.use_cuda_graph:
+                graph, _, _ = maybe_capture_cudagraph(module, x, ys, cuda_graph_name)
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
 
@@ -1131,10 +1132,6 @@ class PipelineRunner:
             pipe_schedule=sched,
             terminate_condition=terminate_condition,
         )
-
-        if gconfig.use_cuda_graph:
-            dist.barrier(group=constants.parallelism_group())
-            torch.cuda.synchronize()
 
         if not constants.is_last_pipe_stage():
             return None

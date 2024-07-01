@@ -35,6 +35,7 @@ class HFModelRegistry:
     embedding_param_names: Callable[[model_api.ReaLModelConfig], List[str]]
     tblock_param_names: Callable[[model_api.ReaLModelConfig, int], List[str]]
     head_param_names: Callable[[model_api.ReaLModelConfig], List[str]]
+    real_config_maker: Optional[Callable[..., model_api.ReaLModelConfig]] = None
 
     def config_from_hf(
         self,
@@ -176,7 +177,7 @@ class HFModelRegistry:
             )
 
         n_shards_this_stage = torch.tensor(
-            n_shards_this_stage, dtype=torch.int32, device="cuda"
+            n_shards_this_stage, dtype=torch.int32, device=model.device
         )
         pp_stage_n_shards = [
             torch.zeros_like(n_shards_this_stage) for _ in range(pp_size)
@@ -213,7 +214,7 @@ class HFModelRegistry:
         param_size = sum(
             [value.numel() * value.element_size() for value in hf_sd.values()]
         )
-        param_size = torch.tensor(param_size, dtype=torch.int64, device="cuda")
+        param_size = torch.tensor(param_size, dtype=torch.int64, device=model.device)
         dist.all_reduce(
             param_size,
             op=dist.ReduceOp.SUM,

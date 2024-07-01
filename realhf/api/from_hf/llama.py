@@ -238,6 +238,37 @@ def convert_config_back_llama(
     )
 
 
+def make_real_config_llama(
+    hidden_dim: int,
+    head_dim: int,
+    n_layers: int,
+    intermediate_dim: int,
+    n_kv_heads: int,
+):
+    return ReaLModelConfig(
+        n_layers=n_layers,
+        n_kv_heads=n_kv_heads,
+        hidden_dim=hidden_dim,
+        head_dim=head_dim,
+        intermediate_dim=intermediate_dim,
+        vocab_size=32000,
+        n_positions=4096,
+        embd_pdrop=0.0,
+        attn_pdrop=0.1,
+        layer_norm_epsilon=1e-5,
+        activation_function="silu",
+        use_attention_bias=False,
+        scale_attn_by_inverse_layer_idx=False,
+        layer_norm_type="rms",
+        mlp_type="llama",
+        apply_rotary=True,
+        rotary_base=10000,
+        rotary_interleaved=False,
+        rotary_scaling=None,
+        rotary_scaling_type=None,
+    )
+
+
 for name in [
     "llama",
     "codellama",
@@ -253,4 +284,5 @@ for name in [
         embedding_param_names=llama_embedding_layer_names,
         tblock_param_names=llama_transformer_block_param_name,
         head_param_names=llama_output_head_param_name,
+        real_config_maker=make_real_config_llama,
     )

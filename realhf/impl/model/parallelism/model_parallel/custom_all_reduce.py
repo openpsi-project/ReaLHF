@@ -109,16 +109,14 @@ def init_custom_ar() -> None:
     if mp_world_size > 2 and not full_nvlink:
         logger.warning(
             "Custom allreduce is disabled because it's not supported on"
-            " more than two PCIe-only GPUs. To silence this warning, "
-            "specify disable_custom_all_reduce=True explicitly."
+            " more than two PCIe-only GPUs. "
         )
         return
 
     if mp_world_size not in _SUPPORTED_WORLD_SIZES:
         logger.warn(
             "Custom allreduce is disabled due to an unsupported world size: "
-            "%d. Supported world sizes: %s. To silence this warning, specify"
-            "disable_custom_all_reduce=True explicitly.",
+            "%d. Supported world sizes: %s.",
             mp_world_size,
             str(_SUPPORTED_WORLD_SIZES),
         )
@@ -127,10 +125,10 @@ def init_custom_ar() -> None:
     if not _can_p2p(mp_rank, mp_world_size):
         logger.warn(
             "Custom allreduce is disabled because your platform lacks GPU P2P"
-            " capability. To silence this warning, specify"
-            "disable_custom_all_reduce=True explicitly."
+            " capability. "
         )
         return
+
     _CA_HANDLE = CustomAllreduce(mp_rank, mp_world_size, full_nvlink=full_nvlink)
 
 
@@ -161,15 +159,21 @@ def _is_full_nvlink(rank, world_size):
     return True
 
 
-def _can_p2p(rank: int, world_size: int) -> bool:
-    # FIXME
+def _can_p2p() -> bool:
+    parallelism_world_size = constants.parallelism_group_size()
+    rank = constants.parallelism_rank()
+    assert parallelism_world_size % 2 == 0
+    if parallelism_world_size == 1:
+        return True
+    buf = torch.zeros(1, dtype=torch.int32)
+    try:
+        if rank % 2 == 0:
+            dist.send(torch.tensor([1]), constants.to_global_pg_rank(rank + 1))
+        else:
+            dist.recv(buf, constants.to_global_pg_rank(rank - 1))
+    except:
+        return False
     return True
-    # for i in range(world_size):
-    #     if i == rank:
-    #         continue
-    #     if not torch.cuda.can_device_access_peer(rank, i):
-    #         return False
-    # return True
 
 
 class CustomAllreduce:

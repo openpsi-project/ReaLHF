@@ -150,7 +150,7 @@ def genstep(
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
-def prepare(
+def prepare_generate_inputs(
     module: "ReaLModel",
     gconfig: GenerationConfig,
     x: PipeTransferData,
@@ -187,8 +187,6 @@ def prepare(
         )
         k_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "k_caches")
         v_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "v_caches")
-        k_cache_handle = None
-        v_cache_handle = None
         if k_cache_handle is not None and v_cache_handle is not None:
             k_cache = k_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
             v_cache = v_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
@@ -215,34 +213,43 @@ def prepare(
         y.v_cache = v_cache
         y.cache_seqlens = cache_seqlens
 
-    graph, input_buffers, output_buffers = None, None, None
-    if gconfig.use_cuda_graph:
-        input_buffers = dict(
-            input_ids=torch.ones((bs,), dtype=torch.long, device="cuda"),
-            position_ids=cache_seqlens.unsqueeze(-1).clone(),
-            k_caches=[y.k_cache for y in ys],
-            v_caches=[y.v_cache for y in ys],
-            cache_seqlens=cache_seqlens.clone(),
-            max_seqlen=x.max_seqlen,
-            cu_seqlens=x.cu_seqlens.clone(),
-            hidden_states=(
-                torch.zeros(
-                    (bs, x.pp_input.shape[1]), dtype=x.pp_input.dtype, device="cuda"
-                )
-                if x.pp_input is not None
-                else None
-            ),
-        )
+    return x, ys
 
-        graph, input_buffers, output_buffers = cuda_graph.capture_func(
-            cuda_graph_name,
-            module._forward,
-            input_buffers,
-            force_recapture=False,
-            no_grad=True,
-        )
 
-    return x, ys, cache_seqlens, graph, input_buffers, output_buffers
+def maybe_capture_cudagraph(
+    module: "ReaLModel",
+    x: PipeTransferData,
+    ys: List[PipeCacheData],
+    cuda_graph_name: str,
+):
+    bs = x.cu_seqlens.shape[0] - 1
+    cache_seqlens = ys[0].cache_seqlens
+    input_buffers = dict(
+        input_ids=torch.ones((bs,), dtype=torch.long, device="cuda"),
+        position_ids=cache_seqlens.unsqueeze(-1).clone(),
+        k_caches=[y.k_cache for y in ys],
+        v_caches=[y.v_cache for y in ys],
+        cache_seqlens=cache_seqlens.clone(),
+        max_seqlen=x.max_seqlen,
+        cu_seqlens=x.cu_seqlens.clone(),
+        hidden_states=(
+            torch.zeros(
+                (bs, x.pp_input.shape[1]), dtype=x.pp_input.dtype, device="cuda"
+            )
+            if x.pp_input is not None
+            else None
+        ),
+    )
+
+    graph, input_buffers, output_buffers = cuda_graph.capture_func(
+        cuda_graph_name,
+        module._forward,
+        input_buffers,
+        force_recapture=False,
+        no_grad=True,
+    )
+
+    return graph, input_buffers, output_buffers
 
 
 @torch.no_grad()
@@ -307,9 +314,13 @@ def generate(
     gen_logits_mask_ph.append(logits_mask)
     generated_idx += 1
 
-    x, ys, cache_seqlens, graph, input_buffers, output_buffers = prepare(
-        model, gconfig, x, ys, f"decoding"
-    )
+    cuda_graph_name = "decoding"
+    x, ys = prepare_generate_inputs(model, gconfig, x, ys, cuda_graph_name)
+    graph = None
+    if gconfig.use_cuda_graph:
+        graph, input_buffers, output_buffers = maybe_capture_cudagraph(
+            model, x, ys, cuda_graph_name
+        )
 
     # The main loop.
     while not terminate:
@@ -317,9 +328,11 @@ def generate(
         if graph is not None:
             input_buffers["input_ids"][:bs].copy_(next_tokens, non_blocking=True)
             input_buffers["position_ids"][:bs].copy_(
-                cache_seqlens.unsqueeze(-1), non_blocking=True
+                ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
             )
-            input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
+            input_buffers["cache_seqlens"][:bs].copy_(
+                ys[0].cache_seqlens, non_blocking=True
+            )
             # K/v cache will be changed in-place with flash attention.
             graph.replay()
             logits = output_buffers["output"][:bs].squeeze(1)
@@ -331,7 +344,9 @@ def generate(
             # K/v cache will be changed in-place with flash attention.
             logits = model(x, ys)[0].pp_output.squeeze(dim=1)
 
-        cache_seqlens += (
+        ys[
+            0
+        ].cache_seqlens += (
             1  # The global handle. This will increase all handles in ys by 1.
         )
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(

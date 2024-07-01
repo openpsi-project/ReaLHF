@@ -319,6 +319,7 @@ def register_hf_family(
     embedding_param_names: Callable[[ReaLModelConfig], List[str]],
     tblock_param_names: Callable[[ReaLModelConfig, int], List[str]],
     head_param_names: Callable[[ReaLModelConfig], List[str]],
+    real_config_maker: Optional[Callable[..., ReaLModelConfig]] = None,
 ):
     if name in SUPPORTED_MODELS:
         raise ValueError(f"Model {name} is already registered.")
@@ -335,4 +336,5 @@ def register_hf_family(
         embedding_param_names=embedding_param_names,
         tblock_param_names=tblock_param_names,
         head_param_names=head_param_names,
+        real_config_maker=real_config_maker,
     )
