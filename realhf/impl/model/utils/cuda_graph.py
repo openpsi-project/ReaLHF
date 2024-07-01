@@ -6,9 +6,13 @@ from contextlib import nullcontext
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
+import torch.distributed as dist
 
 import realhf.base.constants as constants
+import realhf.base.logging as logging
 import realhf.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
+
+logger = logging.getLogger("CUDAGraph")
 
 CUDA_GRAPH_STORAGE: Dict[str, torch.cuda.CUDAGraph] = dict()
 CUDA_GRAPH_INPUT_BUFFER: Dict[str, Dict[str, torch.Tensor]] = dict()
@@ -44,17 +48,17 @@ def capture_func(
     """Capture a function with cuda graph, store the graph and input/output buffers by name.
     The input/output metadata should match the inputs and outputs of function.
 
-    Args:
-        name: The name of the function.
-        func: The function to be captured.
-        input_metadata: The metadata of input tensors.
-        output_metadata: The metadata of output tensors.
-        force_recapture: Whether to force recapture the function.
+    :param name: The identifier of the CUDAGraph to be captured/reused.
+    :type name: str
+    :param func: The function to be captured.
+    :type func: Callable
+    :param input_buffer: The input buffer of the function.
+    :type input_buffer: Dict[str, Any]
+    :param force_recapture: Whether to force recapture the function.
+    :type force_recapture: bool
+    :param no_grad: Whether to run the function in no_grad context.
+    :type no_grad: bool
     """
-    use_cuda_graph = os.environ.get("USE_CUDA_GRAPH", "0") == "1"
-    if not use_cuda_graph:
-        return None, None, None
-
     global CUDA_GRAPH_STORAGE
     global CUDA_GRAPH_INPUT_BUFFER
     global CUDA_GRAPH_OUTPUT_BUFFER
@@ -79,10 +83,8 @@ def capture_func(
     maybe_no_grad = nullcontext() if not no_grad else torch.no_grad()
     st = time.monotonic()
 
-    # input_buffer_cache = clone_buffer(input_buffer)
-
     with custom_all_reduce.graph_capture(), maybe_no_grad:
-        print(f"rank {torch.distributed.get_rank()}: Capturing CUDA graph for {name}")
+        logger.info(f"Rank {dist.get_rank()}: Capturing CUDA graph for {name}")
         func(**input_buffer)
         torch.cuda.synchronize()
 
@@ -92,12 +94,10 @@ def capture_func(
 
         torch.cuda.synchronize()
 
-        print(
-            f"rank {torch.distributed.get_rank()}: Capturing CUDA graph {name} "
+        logger.info(
+            f"Rank {dist.get_rank()}: Capturing CUDA graph {name} "
             f"for decoding takes {time.monotonic() - st:.2f} seconds."
         )
-
-    # restore_buffer(input_buffer, input_buffer_cache)
 
     assert torch.is_tensor(output)
     output_buffer = dict(output=output)

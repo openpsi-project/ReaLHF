@@ -5,12 +5,13 @@ import torch
 
 import realhf.api.core.model_api as model_api
 from realhf.base.namedarray import NamedArray, recursive_apply
-from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 
 
 @dataclasses.dataclass
 class GenerationInterface(model_api.ModelInterface):
-    generation_config: Optional[Dict] = None
+    generation_config: model_api.GenerationHyperparameters = dataclasses.field(
+        default_factory=model_api.GenerationHyperparameters
+    )
 
     @torch.no_grad()
     def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
@@ -32,7 +33,7 @@ class GenerationInterface(model_api.ModelInterface):
             tokenizer=model.tokenizer,
             packed_input_ids=packed_prompts,
             cu_seqlens=prompt_cu_seqlens,
-            gconfig=GenerationConfig(**self.generation_config),
+            gconfig=self.generation_config,
         )
         if res is None:
             return None

@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import os
 from typing import *
@@ -25,17 +26,18 @@ import realhf.impl.model.parallelism.pipeline_parallel.p2p as p2p
 import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
 import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import data_api
+from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.base.namedarray import NamedArray
 from realhf.impl.model.backend.utils import MegatronEngine
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.nn.real_llm_generate import (
-    GenerationConfig,
     _gather_gen_output_from_list,
     _gather_minibatch_gen_outputs,
     genstep,
-    prepare,
+    maybe_capture_cudagraph,
+    prepare_generate_inputs,
 )
 from realhf.impl.model.parallelism.pipeline_parallel.instruction import PipeInstruction
 from realhf.impl.model.parallelism.pipeline_parallel.static_schedule import PipeSchedule
@@ -429,9 +431,6 @@ class PipeGenInstrSet:
                 cuda_graph.input_buffer_handle(cuda_graph_name, "cu_seqlens").copy_(
                     x.cu_seqlens, non_blocking=True
                 )
-                # cuda_graph.input_buffer_handle(cuda_graph_name, "max_seqlen").copy_(
-                #     torch.tensor(x.max_seqlen), non_blocking=True
-                # )
             cuda_graph.input_buffer_handle(cuda_graph_name, "position_ids")[:bs].copy_(
                 ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
             )
@@ -452,9 +451,9 @@ class PipeGenInstrSet:
         if not tensor_buffer.get("kv_cache_reserved", micro_batch_id):
             # KV cache is attached to x and ys.
             assert constants.pipe_parallel_world_size() >= 2
-            x, ys, cache_seqlens, graph, input_buffers, output_buffers = prepare(
-                module, gconfig, x, ys, cuda_graph_name
-            )
+            x, ys = prepare_generate_inputs(module, gconfig, x, ys, cuda_graph_name)
+            if gconfig.use_cuda_graph:
+                graph, _, _ = maybe_capture_cudagraph(module, x, ys, cuda_graph_name)
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
 
@@ -1061,7 +1060,9 @@ class PipelineRunner:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        gconfig: GenerationHyperparameters = dataclasses.field(
+            default_factory=GenerationHyperparameters
+        ),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         if constants.sequence_parallel():
@@ -1085,6 +1086,7 @@ class PipelineRunner:
         )
 
         # for elegant generation termination
+        gconfig = copy.deepcopy(gconfig)
         gconfig.max_new_tokens += constants.pipe_parallel_world_size() - 1
 
         for mbid in range(num_micro_batches):
@@ -1131,11 +1133,6 @@ class PipelineRunner:
             pipe_schedule=sched,
             terminate_condition=terminate_condition,
         )
-
-        use_cuda_graph = os.environ.get("USE_CUDA_GRAPH", "0") == "1"
-        if use_cuda_graph:
-            dist.barrier(group=constants.parallelism_group())
-            torch.cuda.synchronize()
 
         if not constants.is_last_pipe_stage():
             return None
