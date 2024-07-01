@@ -40,6 +40,7 @@ python3 -m realhf.apps.quickstart ppo \
     ppo.value_eps_clip=0.2 \
     ppo.reward_output_scaling=10.0 \
     ppo.adv_norm=True ppo.value_norm=True \
+    ppo.gen.use_cuda_graph=True \
     actor_train.device_mesh=\'NODE01:0,1,2,3\' \
     actor_train.parallel.data_parallel_size=2 \
     actor_train.parallel.model_parallel_size=1 \

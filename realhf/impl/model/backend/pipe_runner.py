@@ -437,7 +437,7 @@ class PipeGenInstrSet:
                     x.cu_seqlens, non_blocking=True
                 )
             cuda_graph.input_buffer_handle(cuda_graph_name, "position_ids")[:bs].copy_(
-                ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
+                ys[0].cache_seqlens, non_blocking=True
             )
             cuda_graph.input_buffer_handle(cuda_graph_name, "cache_seqlens")[:bs].copy_(
                 ys[0].cache_seqlens, non_blocking=True

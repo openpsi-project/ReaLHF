@@ -23,7 +23,6 @@ try:
     )
 except ModuleNotFoundError:
     pass
-import realhf.base.logging as logging
 
 logger = logging.getLogger("Attention")
 
@@ -187,13 +186,6 @@ class CausalSelfAttentionLayer(nn.Module):
                 rotary_indices=rotary_indices,
                 seqlen_offsets=cache_seqlens,
             )
-            # HACK: RotaryEmbedding used flash-attention's triton kernel internally, but it will
-            # cause an illegal memory access error when batch size is large. Use pytorch implementation instead.
-            # qk = self.rotary_emb(
-            #     torch.cat([q, k], dim=-2),
-            #     cu_seqlens=cu_seqlens,
-            #     max_seqlen=max_seqlen,
-            # )
             q, k = qk.split((q.shape[-2], k.shape[-2]), dim=-2)
         elif self.apply_rotary:
             self.rotary_emb._update_cos_sin_cache(
