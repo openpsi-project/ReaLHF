@@ -3,44 +3,13 @@ import dataclasses
 from omegaconf import MISSING
 
 from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
+from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
-
-
-@dataclasses.dataclass
-class GenerationHyperparameters:
-    """Generation hyperparameters.
-
-    :param max_new_tokens: The maximum number of new tokens to generate.
-    :type max_new_tokens: int
-    :param min_new_tokens: The minimum number of new tokens to generate.
-    :type min_new_tokens: int
-    :param greedy: Whether to use greedy decoding.
-    :type greedy: bool
-    :param top_k: The number of highest probability tokens to keep.
-    :type top_k: int
-    :param top_p: The cumulative probability of the highest probability tokens to keep.
-    :type top_p: float
-    :param temperature: The temperature of the sampling process.
-    :type temperature: float
-    :param num_samples: The number of samples to generate.
-    :type num_samples: int
-    :param use_cuda_graph: Whether to use CUDA graph.
-    :type use_cuda_graph: bool
-    """
-
-    max_new_tokens: int = 256
-    min_new_tokens: int = 256
-    greedy: bool = False
-    top_p: float = 0.9
-    top_k: int = 200
-    temperature: float = 1.0
-    num_samples: int = 1
-    use_cuda_graph: bool = False
 
 
 @dataclasses.dataclass

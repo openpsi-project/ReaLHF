@@ -19,7 +19,6 @@ from deepspeed.runtime.engine import (
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
-from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 
@@ -197,8 +196,8 @@ class ReaLDeepSpeedEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationHyperparameters = dataclasses.field(
-            default_factory=GenerationHyperparameters
+        gconfig: model_api.GenerationHyperparameters = dataclasses.field(
+            default_factory=model_api.GenerationHyperparameters
         ),
         num_micro_batches: Optional[int] = None,
     ):

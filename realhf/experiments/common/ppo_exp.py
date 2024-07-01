@@ -4,6 +4,7 @@ import torch
 
 import realhf.base.logging as logging
 from realhf.api.core.dfg import MFCDef, ModelFamily, ModelInterface, ModelInterfaceType
+from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import (
@@ -19,7 +20,6 @@ from realhf.api.quickstart.model import (
 )
 from realhf.base.topology import PipeModelDataParallelTopology
 from realhf.experiments.common.common import CommonExperimentConfig
-from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.experiments.common.utils import *
 
 logger = logging.getLogger("PPO exp", "colored")

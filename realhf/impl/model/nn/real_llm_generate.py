@@ -10,9 +10,8 @@ import torch.utils.checkpoint
 import transformers
 
 import realhf.impl.model.utils.cuda_graph as cuda_graph
-from realhf.api.core import model_api
+from realhf.api.core.model_api import GenerationHyperparameters, ReaLModelConfig
 from realhf.base import constants, logging
-from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.utils.functional import mask_eos_token
 from realhf.impl.model.utils.logits_warper import top_k_top_p_logits
@@ -261,7 +260,7 @@ def generate(
     """Generete a sequence with a ReaLModel."""
     bs = cu_seqlens.shape[0] - 1
     device = model.device
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
@@ -522,7 +521,7 @@ def vanilla_packed_generate(
     ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
@@ -589,7 +588,7 @@ def vanilla_cpu_generate(
     ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
     assert str(input_ids.device) == "cpu"
 
     terminate = False

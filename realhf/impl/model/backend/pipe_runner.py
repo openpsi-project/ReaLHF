@@ -26,9 +26,9 @@ import realhf.impl.model.parallelism.pipeline_parallel.p2p as p2p
 import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
 import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import data_api
+from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.base.namedarray import NamedArray
-from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.backend.utils import MegatronEngine
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData

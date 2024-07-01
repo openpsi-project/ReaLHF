@@ -5,13 +5,12 @@ import torch
 
 import realhf.api.core.model_api as model_api
 from realhf.base.namedarray import NamedArray, recursive_apply
-from realhf.experiments.common.gen_exp import GenerationHyperparameters
 
 
 @dataclasses.dataclass
 class GenerationInterface(model_api.ModelInterface):
-    generation_config: GenerationHyperparameters = dataclasses.field(
-        default_factory=GenerationHyperparameters
+    generation_config: model_api.GenerationHyperparameters = dataclasses.field(
+        default_factory=model_api.GenerationHyperparameters
     )
 
     @torch.no_grad()

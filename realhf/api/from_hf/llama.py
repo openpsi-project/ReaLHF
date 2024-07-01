@@ -240,13 +240,13 @@ def convert_config_back_llama(
 
 def make_real_config_llama():
     return ReaLModelConfig(
-        n_layers=4,
+        n_layers=8,
         n_kv_heads=1,
         hidden_dim=256,
         head_dim=32,
         intermediate_dim=512,
-        vocab_size=32000,
-        n_positions=4096,
+        vocab_size=200,
+        n_positions=200,
         embd_pdrop=0.0,
         attn_pdrop=0.1,
         layer_norm_epsilon=1e-5,

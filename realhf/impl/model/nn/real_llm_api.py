@@ -14,7 +14,6 @@ from realhf.api.core import model_api
 from realhf.api.core.config import ModelName
 from realhf.base import constants, logging, topology
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
-from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.comm.global_comm import NCCLProcessGroupInfo
 from realhf.impl.model.comm.param_realloc import (
     ReparallelizeReceiverStep,
@@ -738,8 +737,8 @@ def generate_helper(
     packed_input_ids: Optional[torch.Tensor] = None,
     cu_seqlens: Optional[torch.Tensor] = None,
     max_seqlen: Optional[int] = None,
-    gconfig: GenerationHyperparameters = dataclasses.field(
-        default_factory=GenerationHyperparameters
+    gconfig: model_api.GenerationHyperparameters = dataclasses.field(
+        default_factory=model_api.GenerationHyperparameters
     ),
 ) -> DuckGenerationOutput:
     assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)

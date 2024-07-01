@@ -25,7 +25,6 @@ import transformers
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging
-from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.backend.utils import MegatronEngine, OptimizerParamScheduler
 from realhf.impl.model.modules.mlp import get_activation_fn
@@ -307,8 +306,8 @@ class ReaLMegatronEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationHyperparameters = dataclasses.field(
-            default_factory=GenerationHyperparameters
+        gconfig: model_api.GenerationHyperparameters = dataclasses.field(
+            default_factory=model_api.GenerationHyperparameters
         ),
         num_micro_batches: Optional[int] = None,
     ):

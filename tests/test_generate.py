@@ -192,8 +192,8 @@ def real_model_generate(
     save_result_path: str,
     test_params: GenerateTestParams,
 ):
+    from realhf.api.core.model_api import GenerationHyperparameters
     from realhf.base.namedarray import NamedArray
-    from realhf.experiments.common.gen_exp import GenerationHyperparameters
 
     assert not test_params.huggingface
     parallel = test_params.parallel
@@ -352,6 +352,8 @@ real_pp_cudagraph = GenerateTestParams(
         (real_3d_parallel, real_3d_parallel_cudagraph, 0.8, 0.8),
     ],
 )
+@pytest.mark.slow
+@pytest.mark.distributed
 @pytest.mark.skipif(
     not torch.cuda.is_available() or len(_available_model_classes) == 0,
     reason="either no GPUs or no model weights found",

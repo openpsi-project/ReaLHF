@@ -14,7 +14,6 @@ import realhf.base.logging as logging
 import realhf.impl.model.utils.ppo_functional as ppo_functional
 from realhf.api.core import data_api
 from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
-from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output
 from realhf.impl.model.utils.functional import (
@@ -117,8 +116,8 @@ def _ppo_actor_loss_from_model_outputs(
 class PPOActorInterface(model_api.ModelInterface):
     n_minibatches: int = 4
 
-    generation_config: GenerationHyperparameters = dataclasses.field(
-        default_factory=GenerationHyperparameters
+    generation_config: model_api.GenerationHyperparameters = dataclasses.field(
+        default_factory=model_api.GenerationHyperparameters
     )
 
     kl_ctl: float = 0.1
