@@ -89,23 +89,26 @@ def slice_intervals(
     # assert len(intervals) == len(intervals_cpu)
     # assert len(set([x[0] for x in intervals_cpu])) == len(intervals_cpu)
 
-    # res = torch._C._nn.flatten_dense_tensors([tensor[start:end] for start, end in intervals_cpu])
-    if len(intervals_cpu) == 1:
-        return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
-    elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
-        return torch.cat([tensor[start:end] for start, end in intervals_cpu])
-
-    interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-    assert tensor.dtype == torch.half
-    return interval_op_cuda.slice_intervals_cuda_half(
-        tensor,
-        intervals,
-        interval_sizes,
-        offsets,
-        max_interval_size,
-        output_size,
+    res = torch._C._nn.flatten_dense_tensors(
+        [tensor[start:end] for start, end in intervals_cpu]
     )
+    return res
+    # if len(intervals_cpu) == 1:
+    #     return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
+    # elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+    #     return torch.cat([tensor[start:end] for start, end in intervals_cpu])
+
+    # interval_sizes = intervals[:, 1] - intervals[:, 0]
+    # offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    # assert tensor.dtype == torch.half
+    # return interval_op_cuda.slice_intervals_cuda_half(
+    #     tensor,
+    #     intervals,
+    #     interval_sizes,
+    #     offsets,
+    #     max_interval_size,
+    #     output_size,
+    # )
 
 
 def set_intervals(
@@ -116,28 +119,32 @@ def set_intervals(
     max_interval_size: int,
 ):
     assert len(dst.shape) == len(src.shape) == 1
-    assert sum(intervals[:, 1] - intervals[:, 0]) == src.shape[0]
-    assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
-    if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
-        offset = 0
-        for i, j in intervals_cpu:
-            assert i >= 0
-            assert j <= dst.shape[0], (j, dst.shape[0])
-            dst[i:j] = src[offset : offset + j - i]
-            offset += j - i
-        assert offset == src.shape[0]
-        return
-    interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-    interval_op_cuda.set_intervals_cuda_half(
-        src,
-        dst,
-        intervals,
-        interval_sizes,
-        offsets,
-        max_interval_size,
+    assert sum(intervals[:, 1] - intervals[:, 0]) == src.shape[0], (
+        src.shape[0],
+        (intervals[:, 1] - intervals[:, 0]),
+        (intervals[:, 1] - intervals[:, 0]).sum(),
     )
+    assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
+    # if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+    offset = 0
+    for i, j in intervals_cpu:
+        assert i >= 0
+        assert j <= dst.shape[0], (j, dst.shape[0])
+        dst[i:j] = src[offset : offset + j - i]
+        offset += j - i
+    assert offset == src.shape[0]
     return
+    # interval_sizes = intervals[:, 1] - intervals[:, 0]
+    # offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    # interval_op_cuda.set_intervals_cuda_half(
+    #     src,
+    #     dst,
+    #     intervals,
+    #     interval_sizes,
+    #     offsets,
+    #     max_interval_size,
+    # )
+    # return
 
 
 def param_size_from_keys(
@@ -151,7 +158,11 @@ def param_size_from_keys(
 ) -> Tuple[List[int], int]:
     param_size = 0
     for k in sd_keys:
-        if head_param_point_to_embedding and k == f"{config.n_layers + 1}.weight":
+        if (
+            head_param_point_to_embedding
+            and k == f"{config.n_layers + 1}.weight"
+            and "0.wte.weight" in sd_keys
+        ):
             continue
         new_shape = mp_partition_key(
             k,
@@ -294,12 +305,25 @@ def param_intervals_from_keys(
     #                 end = param_spec[k].end_idx
     #         return [(start, end)]
 
+    param_size = param_size_from_keys(
+        config=config,
+        src_mp_size=mp_size,
+        sequence_parallel=sequence_parallel,
+        sd_keys=sd_keys,
+        src2dst_tp_size=portion_size,
+        src2dst_tp_rank=portion_rank,
+        head_param_point_to_embedding=head_param_point_to_embedding,
+    )
+
+    interval_size = 0
     intervals = []
-    interval_size = param_size = 0
     for k in sd_keys:
-        if head_param_point_to_embedding and k == f"{config.n_layers + 1}.weight":
+        if (
+            head_param_point_to_embedding
+            and k == f"{config.n_layers + 1}.weight"
+            and "0.wte.weight" in sd_keys
+        ):
             continue
-        param_size += int(np.prod(param_spec[k].shape))
         if (
             model_name,
             k.split(".", 1)[1],

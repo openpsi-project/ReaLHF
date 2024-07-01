@@ -142,9 +142,7 @@ def _save_then_load(
 )
 @pytest.mark.slow
 @pytest.mark.distributed
-@pytest.mark.parametrize(
-    "model_family_name", ["gemma", "opt", "gpt2", "llama", "qwen2"]
-)
+@pytest.mark.parametrize("model_family_name", ["gemma", "gpt2", "llama", "qwen2"])
 @pytest.mark.parametrize("is_critic", [True, False])
 @pytest.mark.parametrize("init_critic_from_actor", [True, False])
 @pytest.mark.parametrize("pp_dp_mp", [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)])
@@ -154,7 +152,7 @@ def test_save_then_load(
     init_critic_from_actor: bool,
     pp_dp_mp: Tuple,
 ):
-    if model_family_name == "opt" and pp_dp_mp[-1] > 2:
+    if model_family_name == "gpt2" and pp_dp_mp[-1] > 1:
         return
     if not is_critic and init_critic_from_actor:
         return

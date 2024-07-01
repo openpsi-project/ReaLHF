@@ -142,6 +142,10 @@ class HFModelRegistry:
             load_times.append(partition_tik - load_tik)
             partition_times.append(time.perf_counter() - partition_tik)
 
+        for k, v in state_dict.items():
+            if v.isnan().any() or v.isinf().any():
+                raise ValueError(f"Loaded checkpoint {k} has NaN or Inf. Aborted.")
+
         # Remap embedding weights to the last layer if tied_embedding is True.
         if (
             model.config.tied_embedding
@@ -263,6 +267,10 @@ class HFModelRegistry:
 
         hf_sd = self.sd_to_hf_converter(cpu_sd, model.config)
         hf_config = self.config_to_hf_converter(model.config)
+
+        for k, v in hf_sd.items():
+            if v.isnan().any() or v.isinf().any():
+                raise ValueError(f"Saving checkpoint {k} with NaN or Inf. Aborted.")
 
         param_size = sum(
             [value.numel() * value.element_size() for value in hf_sd.values()]

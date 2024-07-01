@@ -537,7 +537,7 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
     not torch.cuda.is_available() or torch.cuda.device_count() < 8,
     reason="This test requires at least 8 GPUs to run.",
 )
-@pytest.mark.parametrize("model_family_name", ["opt"])
+@pytest.mark.parametrize("model_family_name", ["gpt2"])
 @pytest.mark.parametrize("is_critic", [False])
 @pytest.mark.parametrize("from_pp_dp_mp", [(4, 2, 1)])
 @pytest.mark.parametrize("to_pp_dp_mp", [(1, 4, 2)])

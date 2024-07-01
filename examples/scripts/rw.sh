@@ -1,4 +1,4 @@
-MODEL_FAMILY=gpt2
+MODEL_FAMILY=opt
 SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/$MODEL_FAMILY/default/epoch7epochstep5globalstep50/
 CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quickstart rw \
     experiment_name=quickstart-rw trial_name=$MODEL_FAMILY \
@@ -10,8 +10,8 @@ CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quicks
     model.type.is_critic=True \
     model.path=$SFT_MODEL_PATH \
     n_nodes=1 \
-    allocation.parallel.pipeline_parallel_size=4 \
-    allocation.parallel.model_parallel_size=1 \
+    allocation.parallel.pipeline_parallel_size=2 \
+    allocation.parallel.model_parallel_size=2 \
     allocation.parallel.data_parallel_size=2 \
     allocation.parallel.use_sequence_parallel=True \
     model.gradient_checkpointing=True \
