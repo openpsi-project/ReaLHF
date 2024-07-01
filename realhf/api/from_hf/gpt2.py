@@ -5,7 +5,6 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
-from realhf.base import constants
 
 
 def sd_from_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
@@ -17,14 +16,11 @@ def sd_from_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
         state_dict = new_sd
 
     new_sd = {}
-    pp_rank = constants.pipe_parallel_rank()
-    pp_size = constants.pipe_parallel_world_size()
-    if pp_rank == 0 and "wte.weight" in state_dict:
+    if "wte.weight" in state_dict:
         new_sd["0.wte.weight"] = state_dict["wte.weight"]
+    if "wpe.weight" in state_dict:
         new_sd["0.wpe.weight"] = state_dict["wpe.weight"]
-    if pp_rank == pp_size - 1 and "wte.weight" in state_dict and not config.is_critic:
-        new_sd[f"{config.n_layers + 1}.weight"] = state_dict["wte.weight"]
-    if pp_rank == pp_size - 1 and config.is_critic and "lm_head.weight" in state_dict:
+    if "lm_head.weight" in state_dict:
         new_sd[f"{config.n_layers + 1}.weight"] = state_dict["lm_head.weight"]
     if "ln_f.weight" in state_dict:
         new_sd[f"{config.n_layers}.ln_f.weight"] = state_dict["ln_f.weight"]
@@ -71,15 +67,13 @@ def sd_to_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     ).view(1, 1, max_positions, max_positions)
 
     new_sd = {}
-    pp_rank = constants.pipe_parallel_rank()
-    if pp_rank == 0:
-        assert "0.wte.weight" in state_dict
+    if "0.wte.weight" in state_dict:
         new_sd["wte.weight"] = state_dict["0.wte.weight"]
         new_sd["wpe.weight"] = state_dict["0.wpe.weight"]
     if f"{config.n_layers}.ln_f.weight" in state_dict:
         new_sd["ln_f.weight"] = state_dict[f"{config.n_layers}.ln_f.weight"]
         new_sd["ln_f.bias"] = state_dict[f"{config.n_layers}.ln_f.bias"]
-    if config.is_critic and f"{config.n_layers + 1}.weight" in state_dict:
+    if f"{config.n_layers + 1}.weight" in state_dict:
         new_sd["lm_head.weight"] = state_dict[f"{config.n_layers + 1}.weight"]
     for i in range(config.n_layers):
         if not any(k.startswith(f"{i+1}.") for k in state_dict):

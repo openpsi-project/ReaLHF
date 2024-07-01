@@ -65,6 +65,11 @@ def test_consistency(tmp_path, model_family_name: str):
 
         real_sd = model.state_dict()
 
+        if mconfig.tied_embedding and not mconfig.is_critic:
+            assert torch.allclose(
+                real_sd["0.wte.weight"], real_sd[f"{mconfig.n_layers + 1}.weight"]
+            ), "wte and lm_head should be tied"
+
         save_dir = tmp_path / "model"
         if os.path.exists(save_dir):
             shutil.rmtree(save_dir)
@@ -77,7 +82,7 @@ def test_consistency(tmp_path, model_family_name: str):
         real_sd_ = _HF_REGISTRIES[model_family_name].sd_from_hf_converter(
             hf_model.state_dict(), mconfig
         )
-        for k in real_sd:
+        for k in real_sd_:
             assert torch.allclose(real_sd[k], real_sd_[k], atol=1e-5), (
                 k,
                 real_sd[k],

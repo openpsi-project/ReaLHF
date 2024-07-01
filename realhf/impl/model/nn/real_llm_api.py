@@ -683,7 +683,7 @@ class ReaLModel(nn.Module):
 
         # The following tensor holds the contiguous memory of incoming parameters
         # If this process is not a receiver, to_param_size is 0 and it's an empty tensor.
-        to_contiguous_param = torch.empty(
+        to_contiguous_param = torch.zeros(
             rtgt.to_param_size,
             dtype=self.dtype,
             device="cuda",

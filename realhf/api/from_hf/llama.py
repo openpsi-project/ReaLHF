@@ -5,21 +5,14 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
-from realhf.base import constants
+from realhf.base.constants import use_te_impl
 
 
 def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     new_state_dict = {}
     for k, v in state_dict.items():
         if k == "model.embed_tokens.weight":
-            if constants.is_first_pipe_stage():
-                new_state_dict["0.wte.weight"] = v
-            if (
-                constants.is_last_pipe_stage()
-                and config.tied_embedding
-                and not config.is_critic
-            ):
-                new_state_dict[f"{config.n_layers + 1}.weight"] = v
+            new_state_dict["0.wte.weight"] = v
         elif k == "lm_head.weight":
             new_state_dict[f"{config.n_layers + 1}.weight"] = v
         elif k == "model.norm.weight":
@@ -43,7 +36,7 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
                     name = name.replace(k1, k2)
             new_state_dict[f"{block_idx + 1}.{name}"] = v
 
-    if constants.use_te_impl():
+    if use_te_impl():
         state_dict = new_state_dict
         new_state_dict = {}
         te_replace_pairs = [
@@ -71,7 +64,7 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
 def to_llama_state_dict(
     state_dict: Dict[str, torch.Tensor], config: ReaLModelConfig
 ) -> Dict:
-    if constants.use_te_impl():
+    if use_te_impl():
         # remove all extra states
         keys = list(state_dict.keys())
         for k in keys:

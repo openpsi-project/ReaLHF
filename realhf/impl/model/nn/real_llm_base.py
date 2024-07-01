@@ -507,7 +507,7 @@ def keys_from_layer_indices(
 ) -> List[str]:
     # assert _is_integer_list_contiguous(layer_indices)
     sd_keys = []
-    for layer_idx in layer_indices:
+    for layer_idx in sorted(layer_indices):
         if layer_idx == 0:
             sd_keys += real_model_embedding_param_keys(config)
         elif layer_idx == config.n_layers + 1:

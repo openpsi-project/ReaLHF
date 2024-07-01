@@ -96,11 +96,13 @@ def _split_and_prefill_pipe_input(
         batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
     else:
         batch_seqlens = [actual_seqlens[start * group_size:end * group_size].cpu().numpy().tolist() for start, end in partitions]
+    assert all(all(x > 0 for x in sls) for sls in batch_seqlens)
 
     for x, y in zip(splitted, batch_seqlens):
         x.pop_metadata("seqlens")
         x.register_metadata(seqlens=y)
         sls = torch.tensor(y, dtype=torch.int32, device=module.device)
+        assert torch.all(sls > 0), sls
         x['cu_seqlens'] = torch.nn.functional.pad(sls.cumsum(0), (1, 0)).int()
     if loss_fn is not None:
         for x, y in zip(splitted_loss_input, batch_seqlens):

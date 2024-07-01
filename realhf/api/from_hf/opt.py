@@ -4,24 +4,15 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
-from realhf.base import constants
 
 
 def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     new_sd = {}
 
     if "model.decoder.embed_tokens.weight" in state_dict:
-        if constants.is_first_pipe_stage():
-            new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
-            new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
-        if (
-            constants.is_last_pipe_stage()
-            and config.tied_embedding
-            and not config.is_critic
-        ):
-            new_sd[f"{config.n_layers + 1}.weight"] = state_dict[
-                "model.decoder.embed_tokens.weight"
-            ]
+        new_sd["0.wte.weight"] = state_dict["model.decoder.embed_tokens.weight"]
+    if "model.decoder.embed_positions.weight" in state_dict:
+        new_sd["0.wpe.weight"] = state_dict["model.decoder.embed_positions.weight"]
     if "lm_head.weight" in state_dict:
         new_sd[f"{config.n_layers + 1}.weight"] = state_dict["lm_head.weight"]
     if "model.decoder.final_layer_norm.weight" in state_dict:
@@ -65,12 +56,11 @@ def sd_from_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
 
 def sd_to_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     new_sd = {}
-    if constants.is_first_pipe_stage():
+    if "0.wte.weight" in state_dict:
         new_sd["model.decoder.embed_tokens.weight"] = state_dict["0.wte.weight"]
         new_sd["model.decoder.embed_positions.weight"] = state_dict["0.wpe.weight"]
-    if config.is_critic or not config.tied_embedding:
-        if constants.is_last_pipe_stage():
-            new_sd["lm_head.weight"] = state_dict[f"{config.n_layers + 1}.weight"]
+    if "lm_head.weight" in state_dict:
+        new_sd["lm_head.weight"] = state_dict[f"{config.n_layers + 1}.weight"]
 
     if f"{config.n_layers}.ln_f.weight" in state_dict:
         new_sd["model.decoder.final_layer_norm.weight"] = state_dict[
