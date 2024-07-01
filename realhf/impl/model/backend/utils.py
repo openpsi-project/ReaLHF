@@ -289,6 +289,7 @@ class OptimizerParamScheduler(object):
                 "weight decay incr style",
             )
 
+
 @torch.no_grad()
 def _step_megatron_distrib_optimizer_internal(optim: MegatronDistOptim):
     # NOTE: patching this function to use the correct model parallel group

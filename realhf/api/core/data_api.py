@@ -4,13 +4,13 @@ import functools
 import inspect
 import json
 import os
+import random
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import torch.utils.data
 import transformers
-import random
 
 from realhf.api.core import model_api, system_api
 from realhf.base import datapack, logging, namedarray
@@ -317,7 +317,12 @@ def split_sequences(
                 "kl_rewards",
                 "returns",
             ]:
-                assert v.shape[0] == total_seqlens - n_seqs, (k, v.shape, total_seqlens, n_seqs)
+                assert v.shape[0] == total_seqlens - n_seqs, (
+                    k,
+                    v.shape,
+                    total_seqlens,
+                    n_seqs,
+                )
                 sp[k] = v[short1offsets[i] : short1offsets[i] + short1batch_seqlens[i]]
             elif not torch.is_tensor(src[k]):
                 # for constant, preserve value for each splitted instance

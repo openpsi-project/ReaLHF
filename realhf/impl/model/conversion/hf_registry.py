@@ -87,7 +87,11 @@ class HFModelRegistry:
 
         # Load embedding weights as well if tied_embedding is True.
         required_hf_sd_names = set(required_hf_sd_names)
-        if model.config.tied_embedding and not model.config.is_critic and constants.is_last_pipe_stage():
+        if (
+            model.config.tied_embedding
+            and not model.config.is_critic
+            and constants.is_last_pipe_stage()
+        ):
             required_hf_sd_names.union(self.embedding_param_names(model.config))
 
         if os.path.exists(os.path.join(load_dir, "pytorch_model.bin.index.json")):
@@ -138,10 +142,16 @@ class HFModelRegistry:
             partition_times.append(time.perf_counter() - partition_tik)
 
         # Remap embedding weights to the last layer if tied_embedding is True.
-        if model.config.tied_embedding and not model.config.is_critic and constants.is_last_pipe_stage():
-            state_dict[f'{model.config.n_layers + 1}.weight'] = state_dict['0.wte.weight']
-        if not constants.is_first_pipe_stage() and '0.wte.weight' in state_dict:
-            state_dict.pop('0.wte.weight')
+        if (
+            model.config.tied_embedding
+            and not model.config.is_critic
+            and constants.is_last_pipe_stage()
+        ):
+            state_dict[f"{model.config.n_layers + 1}.weight"] = state_dict[
+                "0.wte.weight"
+            ]
+        if not constants.is_first_pipe_stage() and "0.wte.weight" in state_dict:
+            state_dict.pop("0.wte.weight")
 
         copy_tik = time.perf_counter()
         if init_critic_from_actor and constants.is_last_pipe_stage():
@@ -232,7 +242,11 @@ class HFModelRegistry:
         sd = model.state_dict()
         cpu_sd = {}
         for k, v in sd.items():
-            if (model.config.tied_embedding and not model.config.is_critic and k == f"{model.config.n_layers + 1}.weight"):
+            if (
+                model.config.tied_embedding
+                and not model.config.is_critic
+                and k == f"{model.config.n_layers + 1}.weight"
+            ):
                 continue
             if (
                 "k_attn" in k or "v_attn" in k

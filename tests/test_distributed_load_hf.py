@@ -1,3 +1,4 @@
+import json
 import os
 import pathlib
 import shutil
@@ -8,7 +9,6 @@ import pytest
 import torch
 import torch.distributed as dist
 import transformers
-import json
 
 from realhf.api.core.config import ModelFamily
 from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
@@ -22,6 +22,7 @@ from tests.hf_utils import hf_config_factory
 
 logger = logging.getLogger("tests.test_saveload")
 
+
 def _load_all_pytorch_bin(path: pathlib.Path):
     if os.path.exists(path / "pytorch_model.bin.index.json"):
         with open(path / "pytorch_model.bin.index.json", "r") as f:
@@ -32,6 +33,7 @@ def _load_all_pytorch_bin(path: pathlib.Path):
     else:
         sd = torch.load(path / "pytorch_model.bin", map_location="cpu")
     return sd
+
 
 def _save_then_load(
     tmp_path: pathlib.Path,

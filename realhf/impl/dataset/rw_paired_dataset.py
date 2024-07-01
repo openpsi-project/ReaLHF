@@ -107,7 +107,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
     @property
     def util(self):
         return self._util
-    
+
     def __len__(self):
         return len(self.pos_answer_tokens)
 

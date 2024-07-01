@@ -349,9 +349,6 @@ def _split_intervals(intervals, K):
     return result
 
 
-
-
-
 def _derive_reparallelize_comm_plan(
     from_model_name: ModelName,
     to_model_name: ModelName,

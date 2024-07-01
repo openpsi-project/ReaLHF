@@ -66,7 +66,7 @@ def _split_and_prefill_pipe_input(
     # If the number of actual sequences is larger than the number of recorded lengths,
     # it means that we group several adjacent sequences together.
     # The group length is marked by seqlens_cpu and the sequence boundary is marked by cu_seqlens.
-    grouped_partition = (cu_seqlens.shape[0] != len(seqlens_cpu) + 1)
+    grouped_partition = cu_seqlens.shape[0] != len(seqlens_cpu) + 1
 
     if grouped_partition:
         assert (cu_seqlens.shape[0] - 1) % len(seqlens_cpu) == 0
@@ -80,7 +80,10 @@ def _split_and_prefill_pipe_input(
     data = NamedArray(packed_input_ids=packed_input_ids)
     data.register_metadata(seqlens=seqlens_cpu)
     splitted, partitions = data_api.split_sequences(
-        data, n_mbs, min_size=partition_min_size, return_partitions=True,
+        data,
+        n_mbs,
+        min_size=partition_min_size,
+        return_partitions=True,
     )
 
     if loss_fn is not None:
@@ -95,7 +98,10 @@ def _split_and_prefill_pipe_input(
     if not grouped_partition:
         batch_seqlens = [seqlens_cpu[start:end] for start, end in partitions]
     else:
-        batch_seqlens = [actual_seqlens[start * group_size:end * group_size].cpu().numpy().tolist() for start, end in partitions]
+        batch_seqlens = [
+            actual_seqlens[start * group_size : end * group_size].cpu().numpy().tolist()
+            for start, end in partitions
+        ]
     assert all(all(x > 0 for x in sls) for sls in batch_seqlens)
 
     for x, y in zip(splitted, batch_seqlens):
@@ -103,7 +109,7 @@ def _split_and_prefill_pipe_input(
         x.register_metadata(seqlens=y)
         sls = torch.tensor(y, dtype=torch.int32, device=module.device)
         assert torch.all(sls > 0), sls
-        x['cu_seqlens'] = torch.nn.functional.pad(sls.cumsum(0), (1, 0)).int()
+        x["cu_seqlens"] = torch.nn.functional.pad(sls.cumsum(0), (1, 0)).int()
     if loss_fn is not None:
         for x, y in zip(splitted_loss_input, batch_seqlens):
             x.pop_metadata("seqlens")
@@ -191,6 +197,7 @@ def _split_and_prefill_pipe_input(
         for mbid, (x1, x2) in enumerate(zip(splitted, splitted_loss_input)):
             tensor_buffer.put("input_cache", mbid, x1)
             tensor_buffer.put("loss_inputs", mbid, x2)
+
 
 def _exec_pipe_schedule(
     module: ReaLModel,

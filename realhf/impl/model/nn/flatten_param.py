@@ -76,8 +76,14 @@ def slice_intervals(
     assert len(tensor.shape) == 1
     assert sum(intervals[:, 1] - intervals[:, 0]) == output_size
     assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
-    assert intervals[:, 0].min().item() >= 0, (intervals[:, 0].min().item(), tensor.shape[0])
-    assert intervals[:, 1].max().item() <= tensor.shape[0], (tensor.shape[0], intervals[:, 1].max().item())
+    assert intervals[:, 0].min().item() >= 0, (
+        intervals[:, 0].min().item(),
+        tensor.shape[0],
+    )
+    assert intervals[:, 1].max().item() <= tensor.shape[0], (
+        tensor.shape[0],
+        intervals[:, 1].max().item(),
+    )
 
     # NOTE: these following assertions will take ten years to finish.
     # assert len(intervals) == len(intervals_cpu)
@@ -133,6 +139,7 @@ def set_intervals(
     )
     return
 
+
 def param_size_from_keys(
     config: model_api.ReaLModelConfig,
     src_mp_size: int,
@@ -156,6 +163,7 @@ def param_size_from_keys(
         )
         param_size += int(np.prod(new_shape))
     return param_size
+
 
 def build_param_spec(
     layer_indices: List[int],

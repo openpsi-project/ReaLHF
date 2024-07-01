@@ -138,10 +138,7 @@ def setup_constants_and_param_realloc(
     from_sequence_parallel,
     to_sequence_parallel,
 ):
-    from realhf.impl.model.comm.param_realloc import (
-        set_trainable,
-        setup_param_realloc,
-    )
+    from realhf.impl.model.comm.param_realloc import set_trainable, setup_param_realloc
 
     from_num_pp, from_num_dp, from_num_mp = from_pp_dp_mp
     to_num_pp, to_num_dp, to_num_mp = to_pp_dp_mp
@@ -335,9 +332,7 @@ def _test_para_realloc(
 ):
     # os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
     from realhf.impl.model.backend.megatron import ReaLMegatronEngine
-    from realhf.impl.model.interface.sft_interface import (
-        compute_packed_sft_loss,
-    )
+    from realhf.impl.model.interface.sft_interface import compute_packed_sft_loss
 
     from_model_name = ModelName("param_realloc_test", 0)
     to_model_name = ModelName("param_realloc_test", 1)
