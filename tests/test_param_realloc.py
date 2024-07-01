@@ -18,7 +18,7 @@ from realhf.base.testing import (
     LocalMultiProcessTest,
     clear_name_resolve,
     init_global_constants,
-    random_sample,
+    make_random_packed_batches,
 )
 
 if TYPE_CHECKING:
@@ -60,10 +60,9 @@ def create_model(
     from realhf.impl.model.nn.real_llm_api import ReaLModel
 
     with constants.model_scope(model_name):
-        hf_config = getattr(ReaLModel, f"make_{model_family_name}_config")()
         mconfig: ReaLModelConfig = getattr(
-            ReaLModel, f"config_from_{model_family_name}"
-        )(hf_config)
+            ReaLModel, f"make_{model_family_name}_config"
+        )()
         mconfig.is_critic = is_critic
 
         # initialize model
@@ -225,9 +224,9 @@ def _check_tied_embedding_weights(model_name, model: "ReaLModel"):
             return
 
         if constants.is_first_pipe_stage():
-            w1 = w = model.layers[0].wte.weight.float()
+            w1 = w = model.layers[0].wte.weight
         if constants.is_last_pipe_stage():
-            w2 = w = model.layers[-1].weight.float()
+            w2 = w = model.layers[-1].weight
 
         if constants.pipe_parallel_world_size() == 1:
             if model.config.tied_embedding and not model.config.is_critic:
@@ -235,7 +234,7 @@ def _check_tied_embedding_weights(model_name, model: "ReaLModel"):
             else:
                 assert w1.data_ptr() != w2.data_ptr()
         else:
-            w_ = w.clone().detach().float()
+            w_ = w.clone().detach()
             dist.all_reduce(
                 w_,
                 op=dist.ReduceOp.SUM,
@@ -394,15 +393,19 @@ def _test_para_realloc(
         vocab_size = _v.item()
 
         # Synchronize the data across all ranks.
-        x = random_sample(bs=32, seq_len=32, vocab_size=vocab_size)
-        packed_input_ids = x["packed_input_ids"].cuda()
+        x = make_random_packed_batches(
+            n_batches=1,
+            batch_size=32,
+            seq_len=32,
+            vocab_size=vocab_size,
+            dp_rank=0,
+            dp_size=1,
+        )[0]
+        packed_input_ids = x["packed_prompts"].cuda()
         dist.all_reduce(packed_input_ids, op=dist.ReduceOp.MAX)
-        cu_seqlens = x["cu_seqlens"].cuda()
-        assert torch.allclose(
-            cu_seqlens,
-            torch.linspace(0, 32 * 32, 33, device="cuda", dtype=cu_seqlens.dtype),
-        )
-        prompt_mask = x["prompt_mask"].cuda()
+        input_lens = torch.tensor(x.metadata["seqlens"], dtype=torch.int, device="cuda")
+        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+        prompt_mask = torch.zeros_like(packed_input_ids, dtype=torch.bool)
         assert torch.all(prompt_mask == 0)
         input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         seqlens_cpu = input_lens.cpu().numpy().tolist()
@@ -539,8 +542,8 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
 )
 @pytest.mark.parametrize("model_family_name", ["gpt2"])
 @pytest.mark.parametrize("is_critic", [False])
-@pytest.mark.parametrize("from_pp_dp_mp", [(4, 2, 1)])
-@pytest.mark.parametrize("to_pp_dp_mp", [(1, 4, 2)])
+@pytest.mark.parametrize("from_pp_dp_mp", [(4, 1, 1)])
+@pytest.mark.parametrize("to_pp_dp_mp", [(2, 2, 2)])
 @pytest.mark.parametrize("from_sequence_parallel", [False])
 @pytest.mark.parametrize("to_sequence_parallel", [False])
 @pytest.mark.parametrize("skip_saveload", [True])
@@ -581,14 +584,3 @@ def test_param_realloc(
     )
     test_impl.launch()
     shutil.rmtree(tmp_dir)
-
-
-if __name__ == "__main__":
-    test_param_realloc(
-        model_family_name="gpt2",
-        is_critic=False,
-        from_pp_dp_mp=(2, 2, 1),
-        to_pp_dp_mp=(4, 2, 1),
-        from_sequence_parallel=False,
-        to_sequence_parallel=False,
-    )

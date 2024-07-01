@@ -7,7 +7,7 @@ import torch
 
 from realhf.api.core import model_api
 from realhf.api.core.config import ModelName
-from realhf.base import constants, logging
+from realhf.base import logging
 
 try:
     import realhf._C.interval_op_cuda as interval_op_cuda
@@ -18,18 +18,14 @@ except ImportError:
     )
 
 from .real_llm_base import (
-    real_model_embed_param_count,
     real_model_embedding_param_keys,
-    real_model_head_param_count,
     real_model_head_param_keys,
-    real_model_tblock_param_count,
     real_model_tblock_param_keys,
 )
 from .real_llm_parallel import (
     get_real_model_param_shape,
     intervals_partition_fn,
     mp_partition_key,
-    partition_pipeline_layers,
     shape_partition_fn,
 )
 

@@ -63,11 +63,9 @@ def _save_then_load(
 
     with constants.model_scope(model_name):
         tokenizer = None
-        hf_config = getattr(ReaLModel, f"make_{model_family_name}_config")()
-
         mconfig: ReaLModelConfig = getattr(
-            ReaLModel, f"config_from_{model_family_name}"
-        )(hf_config)
+            ReaLModel, f"make_{model_family_name}_config"
+        )()
         mconfig.is_critic = is_critic
 
         # load from hf model or create a new critic model
