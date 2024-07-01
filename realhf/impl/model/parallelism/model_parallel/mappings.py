@@ -2,7 +2,9 @@
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
 import torch
+import torch.distributed
 
+import realhf.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
 from realhf.base import constants
 
 from .utils import split_tensor_along_last_dim
@@ -16,8 +18,13 @@ def _reduce(input_):
         return input_
 
     # All-reduce.
+    if custom_all_reduce.is_initialized():
+        out = custom_all_reduce.get_handle().custom_all_reduce(input_)
+        if out is not None:
+            return out
+        # else:
+        #     print("inside _reduce custom all reduce return None")
     torch.distributed.all_reduce(input_, group=constants.model_parallel_group())
-
     return input_
 
 

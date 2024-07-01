@@ -95,6 +95,10 @@ def get_repo_path():
 
 
 def main_start(args, recover_count: int = 0):
+    if recover_count == 0:
+        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
+    experiment = config_package.make_experiment(args.experiment_name)
+
     if args.mode == "ray" and args.image_name is None:
         raise ValueError(
             "--image_name must be specified when using ray cluster. "
@@ -153,10 +157,6 @@ def main_start(args, recover_count: int = 0):
     os.environ["REAL_PACKAGE_PATH"] = repo_path
 
     # setup experiments
-    if recover_count == 0:
-        constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
-
-    experiment = config_package.make_experiment(args.experiment_name)
     if args.allocation_mode == "search":
         experiment._search()
 
@@ -464,7 +464,6 @@ def main():
         required=True,
         help="name of the experiment",
     )
-
     subparser.add_argument(
         "--trial_name", "-f", type=str, required=True, help="name of the trial"
     )

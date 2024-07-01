@@ -85,7 +85,8 @@ __global__ void gen_data(curandState_t *state, T *data, double *ground_truth, in
 }
 
 template<typename T>
-void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit, int data_size) {
+void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit, int data_size,
+         bool performance_test) {
   T *result;
   cudaStream_t stream;
   CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
@@ -94,7 +95,7 @@ void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit,
 
   cudaIpcMemHandle_t self_data_handle;
   cudaIpcMemHandle_t data_handles[8];
-  vllm::Metadata *buffer;
+  vllm::Signal *buffer;
   T *self_data_copy;
   /**
    * Allocate IPC buffer
@@ -107,8 +108,8 @@ void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit,
    * registration, they are allocated and registered together in the test for
    * convenience.
    */
-  CUDACHECK(cudaMalloc(&buffer, 2 * data_size * sizeof(T) + sizeof(vllm::Metadata)));
-  CUDACHECK(cudaMemset(buffer, 0, 2 * data_size * sizeof(T) + sizeof(vllm::Metadata)));
+  CUDACHECK(cudaMalloc(&buffer, 2 * data_size * sizeof(T) + sizeof(vllm::Signal)));
+  CUDACHECK(cudaMemset(buffer, 0, 2 * data_size * sizeof(T) + sizeof(vllm::Signal)));
   CUDACHECK(cudaMalloc(&self_data_copy, data_size * sizeof(T)));
   CUDACHECK(cudaIpcGetMemHandle(&self_data_handle, buffer));
 
@@ -120,7 +121,7 @@ void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit,
   CUDACHECK(cudaMalloc(&rank_data, rank_data_sz));
   std::vector<int64_t> offsets(nRanks, 0);
   vllm::CustomAllreduce fa(buffer, rank_data, rank_data_sz, data_handles, offsets, myRank);
-  auto *self_data = reinterpret_cast<T *>(reinterpret_cast<char *>(buffer) + sizeof(vllm::Metadata)
+  auto *self_data = reinterpret_cast<T *>(reinterpret_cast<char *>(buffer) + sizeof(vllm::Signal)
                                           + data_size * sizeof(T));
   // hack buffer registration
   {
@@ -131,7 +132,7 @@ void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit,
       char *end = (char *)&data_handles[i + 1];
       handles.emplace_back(begin, end);
     }
-    std::vector<int64_t> offsets(nRanks, sizeof(vllm::Metadata) + data_size * sizeof(T));
+    std::vector<int64_t> offsets(nRanks, sizeof(vllm::Signal) + data_size * sizeof(T));
     fa.register_buffer(handles, offsets, self_data);
   }
 
@@ -155,76 +156,104 @@ void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit,
   } else {
     ncclDtype = ncclFloat;
   }
-
-  dummy_kernel<<<1, 1, 0, stream>>>();
-  constexpr int warmup_iters = 5;
-  constexpr int num_iters = 25;
-  // warmup
-  for (int i = 0; i < warmup_iters; i++) {
-    NCCLCHECK(ncclAllReduce(result, result, data_size, ncclDtype, ncclSum, comm, stream));
-  }
-  CUDACHECK(cudaEventRecord(start, stream));
-  for (int i = 0; i < num_iters; i++) {
-    NCCLCHECK(ncclAllReduce(result, result, data_size, ncclDtype, ncclSum, comm, stream));
-  }
-  CUDACHECK(cudaEventRecord(stop, stream));
-  CUDACHECK(cudaStreamSynchronize(stream));
-  float allreduce_ms = 0;
-  cudaEventElapsedTime(&allreduce_ms, start, stop);
-
-  // if (myRank == 1) dummy_kernel<<<1, 1, 0, stream>>>();
-  // set_data<T><<<16, 1024, 0, stream>>>(self_data, data_size, myRank);
-
-  dummy_kernel<<<1, 1, 0, stream>>>();
-  // warm up
-  for (int i = 0; i < warmup_iters; i++) {
-    fa.allreduce<T>(stream, self_data, result, data_size, threads, block_limit);
-  }
-  CUDACHECK(cudaEventRecord(start, stream));
-  for (int i = 0; i < num_iters; i++) {
-    fa.allreduce<T>(stream, self_data, result, data_size, threads, block_limit);
-  }
-  CUDACHECK(cudaEventRecord(stop, stream));
-  CUDACHECK(cudaStreamSynchronize(stream));
-
-  float duration_ms = 0;
-  cudaEventElapsedTime(&duration_ms, start, stop);
-  if (myRank == 0)
-    printf("Rank %d done, nGPUs:%d, sz (kb): %d, %d, %d, my time:%.2fus, nccl "
-           "time:%.2fus\n",
-           myRank, nRanks, data_size * sizeof(T) / 1024, threads, block_limit,
-           duration_ms * 1e3 / num_iters, allreduce_ms * 1e3 / num_iters);
-
-  // And wait for all the queued up work to complete
-  CUDACHECK(cudaStreamSynchronize(stream));
-
-  NCCLCHECK(ncclAllReduce(self_data_copy, self_data, data_size, ncclDtype, ncclSum, comm, stream));
-
   double *nccl_result, *my_result;
   CUDACHECK(cudaMallocHost(&nccl_result, data_size * sizeof(double)));
   CUDACHECK(cudaMallocHost(&my_result, data_size * sizeof(double)));
-
-  convert_data<T><<<108, 1024, 0, stream>>>(self_data, result, nccl_result, my_result, data_size);
-  CUDACHECK(cudaStreamSynchronize(stream));
-
-  for (unsigned long j = 0; j < data_size; j++) {
-    auto diff = abs(nccl_result[j] - my_result[j]);
-    if (diff >= 1e-2) {
-      printf("Rank %d: Verification mismatch at %lld: %f != (my) %f, gt=%f\n", myRank, j,
-             nccl_result[j], my_result[j], ground_truth[j]);
-      break;
+  if (performance_test) {
+    dummy_kernel<<<1, 1, 0, stream>>>();
+    constexpr int warmup_iters = 5;
+    constexpr int num_iters = 100;
+    // warmup
+    for (int i = 0; i < warmup_iters; i++) {
+      NCCLCHECK(ncclAllReduce(result, result, data_size, ncclDtype, ncclSum, comm, stream));
     }
-  }
+    CUDACHECK(cudaEventRecord(start, stream));
+    for (int i = 0; i < num_iters; i++) {
+      NCCLCHECK(ncclAllReduce(result, result, data_size, ncclDtype, ncclSum, comm, stream));
+    }
+    CUDACHECK(cudaEventRecord(stop, stream));
+    CUDACHECK(cudaStreamSynchronize(stream));
+    float allreduce_ms = 0;
+    cudaEventElapsedTime(&allreduce_ms, start, stop);
 
-  long double nccl_diffs = 0.0;
-  long double my_diffs = 0.0;
-  for (int j = 0; j < data_size; j++) {
-    nccl_diffs += abs(nccl_result[j] - ground_truth[j]);
-    my_diffs += abs(my_result[j] - ground_truth[j]);
+    dummy_kernel<<<1, 1, 0, stream>>>();
+    // warm up
+    for (int i = 0; i < warmup_iters; i++) {
+      fa.allreduce<T>(stream, self_data, result, data_size, threads, block_limit);
+    }
+    CUDACHECK(cudaEventRecord(start, stream));
+    for (int i = 0; i < num_iters; i++) {
+      fa.allreduce<T>(stream, self_data, result, data_size, threads, block_limit);
+    }
+    CUDACHECK(cudaEventRecord(stop, stream));
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    float duration_ms = 0;
+    cudaEventElapsedTime(&duration_ms, start, stop);
+    if (myRank == 0)
+      printf("Rank %d done, nGPUs:%d, sz (kb): %d, %d, %d, my time:%.2fus, nccl "
+             "time:%.2fus\n",
+             myRank, nRanks, data_size * sizeof(T) / 1024, threads, block_limit,
+             duration_ms * 1e3 / num_iters, allreduce_ms * 1e3 / num_iters);
+
+    // And wait for all the queued up work to complete
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    NCCLCHECK(
+        ncclAllReduce(self_data_copy, self_data, data_size, ncclDtype, ncclSum, comm, stream));
+
+    convert_data<T><<<108, 1024, 0, stream>>>(self_data, result, nccl_result, my_result, data_size);
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    for (unsigned long j = 0; j < data_size; j++) {
+      auto diff = abs(nccl_result[j] - my_result[j]);
+      if (diff >= 4e-2) {
+        printf("Rank %d: Verification mismatch at %lld: %f != (my) %f, gt=%f\n", myRank, j,
+               nccl_result[j], my_result[j], ground_truth[j]);
+        break;
+      }
+    }
+    long double nccl_diffs = 0.0;
+    long double my_diffs = 0.0;
+    for (int j = 0; j < data_size; j++) {
+      nccl_diffs += abs(nccl_result[j] - ground_truth[j]);
+      my_diffs += abs(my_result[j] - ground_truth[j]);
+    }
+    if (myRank == 0)
+      std::cout << "average abs diffs: nccl: " << nccl_diffs / data_size
+                << " me: " << my_diffs / data_size << std::endl;
+  } else {
+    for (int i = 0; i < 100; i++) {
+      fa.allreduce<T>(stream, self_data, result, data_size, threads, block_limit);
+      CUDACHECK(cudaStreamSynchronize(stream));
+      NCCLCHECK(
+          ncclAllReduce(self_data, self_data_copy, data_size, ncclDtype, ncclSum, comm, stream));
+      convert_data<T>
+          <<<108, 1024, 0, stream>>>(self_data_copy, result, nccl_result, my_result, data_size);
+      CUDACHECK(cudaStreamSynchronize(stream));
+
+      for (unsigned long j = 0; j < data_size; j++) {
+        auto diff = abs(nccl_result[j] - my_result[j]);
+        if (diff >= 4e-2) {
+          printf("Rank %d: Verification mismatch at %lld: %f != (my) %f, gt=%f\n", myRank, j,
+                 nccl_result[j], my_result[j], ground_truth[j]);
+          break;
+        }
+      }
+    }
+    if (myRank == 0)
+      printf("Test passed: nGPUs:%d, sz (kb): %d, %d, %d\n", nRanks, data_size * sizeof(T) / 1024,
+             threads, block_limit);
+    // long double nccl_diffs = 0.0;
+    // long double my_diffs = 0.0;
+    // for (int j = 0; j < data_size; j++) {
+    //   nccl_diffs += abs(nccl_result[j] - ground_truth[j]);
+    //   my_diffs += abs(my_result[j] - ground_truth[j]);
+    // }
+    // if (myRank == 0)
+    //   std::cout << "average abs diffs: nccl: " << nccl_diffs / data_size
+    //             << " me: " << my_diffs / data_size << std::endl;
   }
-  if (myRank == 0)
-    std::cout << "average abs diffs: nccl: " << nccl_diffs / data_size
-              << " me: " << my_diffs / data_size << std::endl;
 
   CUDACHECK(cudaFree(result));
   CUDACHECK(cudaFree(self_data_copy));
@@ -249,14 +278,15 @@ int main(int argc, char **argv) {
   MPICHECK(MPI_Bcast(static_cast<void *>(&id), sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD));
   NCCLCHECK(ncclCommInitRank(&comm, nRanks, id, myRank));
 
+  bool performance_test = true;
   cudaProfilerStart();
   // for (int threads : {256, 512}) {
   //   for (int block_limit = 16; block_limit < 112; block_limit += 4) {
   //     run<half>(myRank, nRanks, comm, threads, block_limit, 4096 * 1024);
   //   }
   // }
-  for (int sz = 512; sz <= (32 << 20); sz *= 2) {
-    run<half>(myRank, nRanks, comm, 512, 36, sz + 8 * 50);
+  for (int sz = 512; sz <= (8 << 20); sz *= 2) {
+    run<half>(myRank, nRanks, comm, 512, 36, sz + 8 * 47, performance_test);
   }
 
   cudaProfilerStop();

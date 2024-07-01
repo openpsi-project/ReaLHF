@@ -15,10 +15,7 @@ import realhf.impl.model.utils.ppo_functional as ppo_functional
 from realhf.api.core import data_api
 from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
 from realhf.impl.model.nn.real_llm_api import ReaLModel
-from realhf.impl.model.nn.real_llm_generate import (
-    GenerationConfig,
-    concat_prompt_to_generation_output,
-)
+from realhf.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output
 from realhf.impl.model.utils.functional import (
     apply_logits_mask,
     gather_packed_shifted_log_probs,
@@ -119,7 +116,9 @@ def _ppo_actor_loss_from_model_outputs(
 class PPOActorInterface(model_api.ModelInterface):
     n_minibatches: int = 4
 
-    generation_config: Optional[Dict] = None
+    generation_config: model_api.GenerationHyperparameters = dataclasses.field(
+        default_factory=model_api.GenerationHyperparameters
+    )
 
     kl_ctl: float = 0.1
 
@@ -149,7 +148,6 @@ class PPOActorInterface(model_api.ModelInterface):
     value_norm_eps: float = 1e-5
 
     def __post_init__(self):
-        super().__post_init__()
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None
@@ -205,7 +203,7 @@ class PPOActorInterface(model_api.ModelInterface):
             tokenizer=model.tokenizer,
             packed_input_ids=packed_prompts,
             cu_seqlens=prompt_cu_seqlens,
-            gconfig=GenerationConfig(**self.generation_config),
+            gconfig=self.generation_config,
         )
         if res is None:
             return None
@@ -275,7 +273,7 @@ class PPOActorInterface(model_api.ModelInterface):
         if logits is None:
             return None
 
-        logits /= GenerationConfig(**self.generation_config).temperature
+        logits /= self.generation_config.temperature
         if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
             apply_logits_mask(logits, data["packed_logits_mask"])
         logprobs = gather_packed_shifted_log_probs(
@@ -559,7 +557,6 @@ class PPOCriticInterface(model_api.ModelInterface):
     value_norm_eps: float = 1e-5
 
     def __post_init__(self):
-        super().__post_init__()
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
             assert self.adaptive_kl_horizon is not None

@@ -332,6 +332,10 @@ def model_parallel_group():
     return grid().get_tensor_model_parallel_group()
 
 
+def model_parallel_cpu_group():
+    return grid().get_tensor_model_parallel_cpu_group()
+
+
 def data_parallel_rank() -> int:
     return grid().get_data_parallel_rank()
 

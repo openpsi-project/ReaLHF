@@ -445,9 +445,13 @@ class ParallelGrid:
         self.model_groups = self._topo.get_axis_comm_lists("model")
         for g in self.model_groups:
             proc_group = new_or_get_group(ranks=[rank_mapping[x] for x in g])
+            cpu_group = new_or_get_group(
+                ranks=[rank_mapping[x] for x in g], backend="gloo"
+            )
             if self.global_rank in g:
                 self.slice_group = g
                 self.slice_proc_group = proc_group
+                self.cpu_mp_group = cpu_group
 
         # Create tp+dp group to be consistent with Megatron.
         self.tp_dp_proc_group = None
@@ -563,6 +567,10 @@ class ParallelGrid:
 
     def get_tensor_model_parallel_group(self):
         return self.slice_proc_group
+
+    def get_tensor_model_parallel_cpu_group(self):
+        # for custom all reduce
+        return self.cpu_mp_group
 
 
 class FakeGrid:

@@ -1,7 +1,10 @@
+import os
+
 import torch
 
 import realhf.base.logging as logging
 from realhf.api.core.dfg import MFCDef, ModelFamily, ModelInterface, ModelInterfaceType
+from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import (
@@ -35,24 +38,8 @@ class PPOHyperparameters:
     Increasing the sampling temperature and enabling
     top-k/top-p sampling can produce good models.
 
-    :param max_new_tokens: Maximum number of new tokens
-        to generate.
-    :type max_new_tokens: int
-    :param min_new_tokens: Minimum number of new tokens
-        to generate.
-    :type min_new_tokens: int
-    :param greedy: Whether to use greedy decoding.
-        PPO may not work if set to True.
-    :type greedy: bool
-    :param top_p: Tokens will be sampled from a
-        vocabulary subset with probability summation
-        larger than p.
-    :type top_p: float
-    :param top_k: Tokens will be sampled from a
-        vocabulary subset with top-k probabilities.
-    :type top_k: int
-    :param temperature: Sampling temperature.
-    :type temperature: float
+    :param gen: Generation hyperparameters.
+    :type gen: GenerationHyperparameters
     :param force_no_logits_mask: Whether to omit logits mask.
         The logits mask will be produced when using top-k or top-p sampling,
         where it is used to mark tokens that are filtered out.
@@ -106,12 +93,9 @@ class PPOHyperparameters:
     :type value_norm_eps: float
     """
 
-    max_new_tokens: int = 256
-    min_new_tokens: int = 256
-    greedy: bool = False
-    top_p: float = 0.9
-    top_k: int = 200
-    temperature: float = 1.0
+    gen: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    )
     force_no_logits_mask: bool = False
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
@@ -277,15 +261,6 @@ class PPOConfig(CommonExperimentConfig):
             value_norm_eps=self.ppo.value_norm_eps,
         )
 
-        self.generation_kwargs = dict(
-            max_new_tokens=self.ppo.max_new_tokens,
-            min_new_tokens=self.ppo.min_new_tokens,
-            greedy=self.ppo.greedy,
-            top_p=self.ppo.top_p,
-            top_k=self.ppo.top_k,
-            temperature=self.ppo.temperature,
-        )
-
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
         # role to config
@@ -303,7 +278,7 @@ class PPOConfig(CommonExperimentConfig):
             "ppo_actor",
             args={
                 **copy.deepcopy(self.ppo_kwargs),
-                "generation_config": self.generation_kwargs,
+                "generation_config": self.ppo.gen,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
                 "force_no_logits_mask": self.ppo.force_no_logits_mask,
                 "adv_norm": self.ppo.adv_norm,

@@ -6,6 +6,7 @@ import sys
 import hydra
 
 import realhf.experiments.common.dpo_exp
+import realhf.experiments.common.gen_exp
 import realhf.experiments.common.ppo_exp
 import realhf.experiments.common.rw_exp
 import realhf.experiments.common.sft_exp

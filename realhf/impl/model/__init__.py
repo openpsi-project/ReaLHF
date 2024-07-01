@@ -6,10 +6,13 @@ import torch
 
 # Import all HuggingFace model implementations.
 import realhf.api.from_hf
+import realhf.base.logging as logging
 from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY
 from realhf.base.importing import import_module
 from realhf.impl.model.conversion.hf_registry import HFModelRegistry
 from realhf.impl.model.nn.real_llm_api import ReaLModel
+
+logger = logging.getLogger("model init")
 
 # Import all model implementations.
 _p = re.compile(r"^(?!.*__init__).*\.py$")
@@ -59,6 +62,17 @@ def _config_to_hf(registry_name, config):
     return r.config_to_hf(config)
 
 
+def _make_real_config(registry_name):
+    r = _HF_REGISTRIES[registry_name]
+    if r.real_config_maker is not None:
+        return r.real_config_maker()
+    raise NotImplementedError(
+        f"`real_config_maker` not implemented for {registry_name}. "
+        f"Please implement and register `real_config_maker` "
+        f"in realhf.api.from_hf.{registry_name} to make customized ReaLModelConfig."
+    )
+
+
 for name, helpers in HF_MODEL_FAMILY_REGISTRY.items():
     _HF_REGISTRIES[name] = r = HFModelRegistry(**helpers)
 
@@ -73,3 +87,7 @@ for name, helpers in HF_MODEL_FAMILY_REGISTRY.items():
 
     _config_to_hf_ = functools.partial(_config_to_hf, name)
     setattr(ReaLModel, f"config_to_{name}", staticmethod(_config_to_hf_))
+
+    # make a ReaLModelConfig from only parameters related to model size, used for testing
+    _make_real_config_ = functools.partial(_make_real_config, name)
+    setattr(ReaLModel, f"make_{name}_config", staticmethod(_make_real_config_))

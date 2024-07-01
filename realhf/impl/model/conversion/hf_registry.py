@@ -35,6 +35,7 @@ class HFModelRegistry:
     embedding_param_names: Callable[[model_api.ReaLModelConfig], List[str]]
     tblock_param_names: Callable[[model_api.ReaLModelConfig, int], List[str]]
     head_param_names: Callable[[model_api.ReaLModelConfig], List[str]]
+    real_config_maker: Optional[Callable] = None
 
     def config_from_hf(
         self,
@@ -141,7 +142,7 @@ class HFModelRegistry:
     def save(
         self,
         model: ReaLModel,
-        tokenizer: transformers.PreTrainedTokenizer,
+        tokenizer: Optional[transformers.PreTrainedTokenizer],
         save_dir: str,
     ):
         tik = time.perf_counter()
@@ -176,7 +177,7 @@ class HFModelRegistry:
             )
 
         n_shards_this_stage = torch.tensor(
-            n_shards_this_stage, dtype=torch.int32, device="cuda"
+            n_shards_this_stage, dtype=torch.int32, device=model.device
         )
         pp_stage_n_shards = [
             torch.zeros_like(n_shards_this_stage) for _ in range(pp_size)
@@ -213,7 +214,7 @@ class HFModelRegistry:
         param_size = sum(
             [value.numel() * value.element_size() for value in hf_sd.values()]
         )
-        param_size = torch.tensor(param_size, dtype=torch.int64, device="cuda")
+        param_size = torch.tensor(param_size, dtype=torch.int64, device=model.device)
         dist.all_reduce(
             param_size,
             op=dist.ReduceOp.SUM,
@@ -224,7 +225,8 @@ class HFModelRegistry:
         # Save tokenizer and huggingface model config.
         if pp_rank == 0 and dp_rank == 0 and mp_rank == 0:
             hf_config.save_pretrained(save_dir)
-            tokenizer.save_pretrained(save_dir)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(save_dir)
 
         # Dump parameters to disk.
         if len(pp_stage_n_shards) == 1 and pp_stage_n_shards[0] == 1:

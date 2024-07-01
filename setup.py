@@ -224,7 +224,7 @@ if _is_cuda():
         },
         libraries=["cuda"] if _is_cuda() else [],
     )
-    # ext_modules.append(cr_extension)
+    ext_modules.append(cr_extension)
 
     interval_extension = CUDAExtension(
         name="realhf._C.interval_op_cuda",

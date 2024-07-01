@@ -6,14 +6,11 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
-from realhf.api.core import model_api
-
-# import realhf.impl.model.parallelism.model_parallel.custom_all_reduce as custom_all_reduce
+import realhf.impl.model.utils.cuda_graph as cuda_graph
+from realhf.api.core.model_api import GenerationHyperparameters, ReaLModelConfig
 from realhf.base import constants, logging
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.utils.functional import mask_eos_token
@@ -26,23 +23,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger("ReaLModel Generation")
 
 
-@dataclasses.dataclass
-class GenerationConfig:
-    min_new_tokens: int = 1
-    max_new_tokens: int = 10
-    temperature: float = 1.0
-    greedy: bool = True
-    top_p: float = 1.0
-    top_k: int = 0
-    num_samples: int = 1
-
-
 def genstep(
     next_token_logits: torch.Tensor,
     tokenizer: transformers.PreTrainedTokenizerFast,
     unfinished_sequences: torch.Tensor,
     generated_idx: Union[torch.IntTensor, int],
-    gconfig: GenerationConfig,
+    gconfig: GenerationHyperparameters,
 ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], bool, torch.Tensor]:
     """Advance generation by one step given logits.
 
@@ -52,7 +38,7 @@ def genstep(
         unfinished_sequences (torch.Tensor): Bool tensor indicator of whether a sequence is finished.
             Shape [bs].
         generated_idx (int): The token index to be generated.
-        gconfig (GenerationConfig): .
+        gconfig (GenerationHyperparameters): .
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor, torch.Tensor, bool, torch.Tensor]:
@@ -152,108 +138,57 @@ def genstep(
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
-# _DECODING_CUDA_GRAPH: torch.cuda.CUDAGraph = None
-# _DECODING_CUDA_GRAPH_BS: int = None
-# _DECODING_CUDA_GRAPH_SEQLEN: int = None
-# _DECODING_CUDA_GRAPH_INPUT_BUFFER: Dict[str, torch.Tensor] = None
-# _DECODING_CUDA_GRAPH_OUTPUT_BUFFER: Dict[str, torch.Tensor] = None
-
-# @torch.no_grad()
-# def get_decoding_cuda_graph(
-#     model: "ReaLModel",
-#     bs: int,
-#     k_caches: List[torch.Tensor],
-#     v_caches: List[torch.Tensor],
-#     cache_seqlens: torch.Tensor,
-#     force_recapture: bool = False,
-# ) -> Tuple[torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-#     global _DECODING_CUDA_GRAPH
-#     global _DECODING_CUDA_GRAPH_BS
-#     global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-#     global _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
-#     global _DECODING_CUDA_GRAPH_SEQLEN
-#     if k_caches[0] is None:
-#         # In case the first layer is the embedding layer, which does not have kv cache.
-#         seqlen = k_caches[1].shape[1]
-#     else:
-#         seqlen = k_caches[0].shape[1]
-#     if not force_recapture and _DECODING_CUDA_GRAPH is not None:
-#         assert _DECODING_CUDA_GRAPH_BS >= bs
-#         assert _DECODING_CUDA_GRAPH_SEQLEN >= seqlen
-#         return _DECODING_CUDA_GRAPH, _DECODING_CUDA_GRAPH_INPUT_BUFFER, _DECODING_CUDA_GRAPH_OUTPUT_BUFFER
-
-#     input_buffers = dict(
-#         input_ids=torch.ones(bs, 1, dtype=torch.long, device=model.device),
-#         position_ids=cache_seqlens.clone()[:, None],
-#         k_caches=k_caches,
-#         v_caches=v_caches,
-#         # NOTE: here cache_seqlens should be the real cache_seqlens, otherwise k/v cache will be changed in-place during capturing
-#         cache_seqlens=cache_seqlens.clone(),
-#         max_seqlen=None,
-#         cu_seqlens=None,
-#         hidden_states=None,
-#     )
-#     assert custom_all_reduce.is_initialized()
-#     with custom_all_reduce.capture():
-#         torch.cuda.synchronize()
-#         # Build a CUDAGraph for decoding inference.
-#         model._forward(**input_buffers)
-#         torch.cuda.synchronize()
-
-#         graph = torch.cuda.CUDAGraph()
-#         with torch.cuda.graph(graph):
-#             output = model._forward(**input_buffers)
-#         torch.cuda.synchronize()
-
-#     output_buffers = dict(logits=output)
-#     gc.collect()
-#     torch.cuda.empty_cache()
-
-#     _DECODING_CUDA_GRAPH = graph
-#     _DECODING_CUDA_GRAPH_INPUT_BUFFER = input_buffers
-#     _DECODING_CUDA_GRAPH_OUTPUT_BUFFER = output_buffers
-#     _DECODING_CUDA_GRAPH_BS = bs
-#     _DECODING_CUDA_GRAPH_SEQLEN = seqlen
-#     return graph, input_buffers, output_buffers
-
-
-def init_kv_cache(
+def prepare_generate_inputs(
     module: "ReaLModel",
-    gconfig: GenerationConfig,
+    gconfig: GenerationHyperparameters,
     x: PipeTransferData,
     ys: List[PipeCacheData],
+    cuda_graph_name: str,
 ):
     cu_seqlens = x.cu_seqlens
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    assert constants.pipe_parallel_world_size() >= 2
+    # assert constants.pipe_parallel_world_size() >= 2
     layer_indices = range(module.layer_idx_start, module.layer_idx_end)
+    min_layer_index = module.layer_idx_start
+    bs = input_lens.shape[0]
+    cache_seqlens = input_lens.clone().to(dtype=torch.int32)
+
+    block_ys = ys
+    assert len(layer_indices) == len(block_ys), (len(block_ys), layer_indices)
     if constants.is_first_pipe_stage():
         layer_indices = layer_indices[1:]
-    elif constants.is_last_pipe_stage():
+        ys[0].cache_seqlens = cache_seqlens
+        block_ys = ys[1:]
+    if constants.is_last_pipe_stage():
         layer_indices = layer_indices[:-1]
+        block_ys = block_ys[:-1]
 
-    assert len(layer_indices) == len(ys), (len(ys), layer_indices)
-    bs = input_lens.shape[0]
-    for y, layer_idx in zip(ys, layer_indices):
+    for y, layer_idx in zip(block_ys, layer_indices):
         assert (
             y.k_cache is not None
             and y.v_cache is not None
             and y.cache_seqlens is not None
-        )
+        ), (y.k_cache is None, y.v_cache is None, y.cache_seqlens is None)
         kvcache_seqlen = max(
             constants.max_prompt_len() + gconfig.max_new_tokens,
             module.config.hidden_dim // module.config.head_dim + 10,
         )
-        k_cache = torch.zeros(
-            (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-            dtype=y.k_cache.dtype,
-            device=y.k_cache.device,
-        )
-        v_cache = torch.zeros(
-            (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-            dtype=y.v_cache.dtype,
-            device=y.v_cache.device,
-        )
+        k_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "k_caches")
+        v_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "v_caches")
+        if k_cache_handle is not None and v_cache_handle is not None:
+            k_cache = k_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
+            v_cache = v_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
+        else:
+            k_cache = torch.zeros(
+                (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
+                dtype=y.k_cache.dtype,
+                device=y.k_cache.device,
+            )
+            v_cache = torch.zeros(
+                (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
+                dtype=y.v_cache.dtype,
+                device=y.v_cache.device,
+            )
         indices = (
             torch.arange(kvcache_seqlen, device=module.device, dtype=torch.long)[
                 None, :
@@ -264,7 +199,45 @@ def init_kv_cache(
         v_cache[indices] = y.v_cache
         y.k_cache = k_cache
         y.v_cache = v_cache
-        y.cache_seqlens = input_lens.clone().to(dtype=torch.int32)
+        y.cache_seqlens = cache_seqlens
+
+    return x, ys
+
+
+def maybe_capture_cudagraph(
+    module: "ReaLModel",
+    x: PipeTransferData,
+    ys: List[PipeCacheData],
+    cuda_graph_name: str,
+):
+    bs = x.cu_seqlens.shape[0] - 1
+    cache_seqlens = ys[0].cache_seqlens
+    input_buffers = dict(
+        input_ids=torch.ones((bs,), dtype=torch.long, device="cuda"),
+        position_ids=cache_seqlens.unsqueeze(-1).clone(),
+        k_caches=[y.k_cache for y in ys],
+        v_caches=[y.v_cache for y in ys],
+        cache_seqlens=cache_seqlens.clone(),
+        max_seqlen=x.max_seqlen,
+        cu_seqlens=x.cu_seqlens.clone(),
+        hidden_states=(
+            torch.zeros(
+                (bs, x.pp_input.shape[1]), dtype=x.pp_input.dtype, device="cuda"
+            )
+            if x.pp_input is not None
+            else None
+        ),
+    )
+
+    graph, input_buffers, output_buffers = cuda_graph.capture_func(
+        cuda_graph_name,
+        module._forward,
+        input_buffers,
+        force_recapture=False,
+        no_grad=True,
+    )
+
+    return graph, input_buffers, output_buffers
 
 
 @torch.no_grad()
@@ -274,7 +247,9 @@ def generate(
     packed_input_ids: Optional[torch.LongTensor] = None,
     cu_seqlens: Optional[torch.LongTensor] = None,
     max_seqlen: Optional[int] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[
     torch.Tensor,
     torch.Tensor,
@@ -285,7 +260,7 @@ def generate(
     """Generete a sequence with a ReaLModel."""
     bs = cu_seqlens.shape[0] - 1
     device = model.device
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
@@ -306,7 +281,6 @@ def generate(
             f"Input sequence length {max_seqlen} is larger than the maximum sequence length "
             f"supported by the model {constants.max_prompt_len()}."
         )
-    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
     x = PipeTransferData(
         cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, store_kv_cache=True
     )
@@ -314,58 +288,10 @@ def generate(
     ys = [PipeCacheData(packed_input_ids=packed_input_ids)] + [
         PipeCacheData() for _ in range(mconfig.n_layers + 1)
     ]
+
     # Model forward will set k/v cache in PipeCacheData.
     prompt_logits = model(x, ys)[0].pp_output
     logits = prompt_logits[cu_seqlens[1:] - 1]
-    cache_seqlens = input_lens.clone().to(dtype=torch.int32)
-    for y, layer_idx in zip(ys[1:-1], range(mconfig.n_layers)):
-        assert (
-            y.k_cache is not None
-            and y.v_cache is not None
-            and y.cache_seqlens is not None
-        )
-        # fix of a flash attention bug
-        kvcache_seqlen = max(
-            constants.max_prompt_len() + gconfig.max_new_tokens,
-            mconfig.hidden_dim // mconfig.head_dim + 10,
-        )
-        # TODO: since pytorch all-reduce has bug during capturing and vllm all-reduce does not support >8 GPUs,
-        # we defer the implementation of CUDAGraph generation in the future
-
-        # global _DECODING_CUDA_GRAPH
-        # if _DECODING_CUDA_GRAPH is not None:
-        #     global _DECODING_CUDA_GRAPH_BS, _DECODING_CUDA_GRAPH_SEQLEN
-        #     global _DECODING_CUDA_GRAPH_INPUT_BUFFER
-        #     if not (_DECODING_CUDA_GRAPH_BS >= bs and _DECODING_CUDA_GRAPH_SEQLEN >= kvcache_seqlen):
-        #         raise RuntimeError(
-        #             f"CUDAGraph batch size {_DECODING_CUDA_GRAPH_BS} or seqlen {_DECODING_CUDA_GRAPH_SEQLEN} "
-        #             f"is smaller than the data batch size {bs} or seqlen {kvcache_seqlen}. "
-        #             "Have you correctly set the `max_seqlen` constant and set a `min_n_seqs_per_dp` in RPC config?"
-        #         )
-        #     k_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["k_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
-        #     v_cache = _DECODING_CUDA_GRAPH_INPUT_BUFFER["v_caches"][layer_idx + 1][:bs, :kvcache_seqlen]
-        # else:
-        k_cache = torch.zeros(
-            (bs, kvcache_seqlen, *y.k_cache.shape[1:]),
-            dtype=y.k_cache.dtype,
-            device=y.k_cache.device,
-        )
-        v_cache = torch.zeros(
-            (bs, kvcache_seqlen, *y.v_cache.shape[1:]),
-            dtype=y.v_cache.dtype,
-            device=y.v_cache.device,
-        )
-        indices = (
-            torch.arange(kvcache_seqlen, device=device, dtype=torch.long)[None, :]
-            < input_lens[:, None]
-        )
-        k_cache[indices] = y.k_cache
-        v_cache[indices] = y.v_cache
-        y.k_cache = k_cache
-        y.v_cache = v_cache
-        y.cache_seqlens = cache_seqlens
-    x = PipeTransferData(store_kv_cache=True)
-    ys[0].cache_seqlens = cache_seqlens
 
     # Next, we will generate the next token after prompts.
     # cache_seqlens is exactly the lengths of prompts.
@@ -378,37 +304,41 @@ def generate(
     gen_logits_mask_ph.append(logits_mask)
     generated_idx += 1
 
-    # graph, input_buffers, output_buffers = get_decoding_cuda_graph(
-    #     model,
-    #     bs,
-    #     [y.k_cache for y in ys],
-    #     [y.v_cache for y in ys],
-    #     cache_seqlens,
-    #     force_recapture=k_caches is not None,  # FIXME: this is not the usual use case
-    # )
+    cuda_graph_name = "decoding"
+    x, ys = prepare_generate_inputs(model, gconfig, x, ys, cuda_graph_name)
+    graph = None
+    if gconfig.use_cuda_graph:
+        graph, input_buffers, output_buffers = maybe_capture_cudagraph(
+            model, x, ys, cuda_graph_name
+        )
 
     # The main loop.
     while not terminate:
         # the next round of inference
-        # input_buffers["input_ids"][:bs].copy_(next_tokens.unsqueeze(-1), non_blocking=True)
-        # input_buffers["position_ids"][:bs].copy_(cache_seqlens.unsqueeze(-1), non_blocking=True)
-        # input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
-        # # # K/v cache will be changed in-place with flash attention.
-        # graph.replay()
-        # logits = output_buffers["logits"][:bs].squeeze(1)
-        # cache_seqlens += 1  # The global handle. This will increase all handles in ys by 1.
+        if graph is not None:
+            input_buffers["input_ids"][:bs].copy_(next_tokens, non_blocking=True)
+            input_buffers["position_ids"][:bs].copy_(
+                ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
+            )
+            input_buffers["cache_seqlens"][:bs].copy_(
+                ys[0].cache_seqlens, non_blocking=True
+            )
+            # K/v cache will be changed in-place with flash attention.
+            graph.replay()
+            logits = output_buffers["output"][:bs].squeeze(1)
+        else:
+            ys[0].packed_input_ids = next_tokens
+            ys[0].packed_position_ids = None
+            x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=device)
+            x.max_seqlen = 1
+            # K/v cache will be changed in-place with flash attention.
+            logits = model(x, ys)[0].pp_output.squeeze(dim=1)
 
-        # the next round of inference
-        ys[0].packed_input_ids = next_tokens
-        ys[0].packed_position_ids = None
-        x.cu_seqlens = torch.arange(bs + 1, dtype=torch.int32, device=device)
-        x.max_seqlen = 1
-        # K/v cache will be changed in-place with flash attention.
-        logits = model(x, ys)[0].pp_output.squeeze(dim=1)
-        cache_seqlens += (
+        ys[
+            0
+        ].cache_seqlens += (
             1  # The global handle. This will increase all handles in ys by 1.
         )
-
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
             logits, tokenizer, unfinished_sequences, generated_idx, gconfig
         )
@@ -420,7 +350,6 @@ def generate(
     gen_tokens, log_probs, logits_mask = _gather_gen_output_from_list(
         gen_token_ph, gen_logprob_ph, gen_logits_mask_ph
     )
-
     return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
 
 
@@ -587,10 +516,12 @@ def vanilla_packed_generate(
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
@@ -652,10 +583,12 @@ def vanilla_cpu_generate(
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
     assert str(input_ids.device) == "cpu"
 
     terminate = False
@@ -716,7 +649,7 @@ class InflightBatchingGenerator:
         outqueue: queue.Queue,
         model: "ReaLModel",
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig,
+        gconfig: GenerationHyperparameters,
         batch_size: int,
         max_prompt_len: int,
     ):

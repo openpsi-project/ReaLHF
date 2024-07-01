@@ -19,6 +19,38 @@ logger = logging.getLogger("model")
 
 
 @dataclasses.dataclass
+class GenerationHyperparameters:
+    """Generation hyperparameters.
+
+    :param max_new_tokens: The maximum number of new tokens to generate.
+    :type max_new_tokens: int
+    :param min_new_tokens: The minimum number of new tokens to generate.
+    :type min_new_tokens: int
+    :param greedy: Whether to use greedy decoding.
+    :type greedy: bool
+    :param top_k: The number of highest probability tokens to keep.
+    :type top_k: int
+    :param top_p: The cumulative probability of the highest probability tokens to keep.
+    :type top_p: float
+    :param temperature: The temperature of the sampling process.
+    :type temperature: float
+    :param num_samples: The number of samples to generate.
+    :type num_samples: int
+    :param use_cuda_graph: Whether to use CUDA graph.
+    :type use_cuda_graph: bool
+    """
+
+    max_new_tokens: int = 256
+    min_new_tokens: int = 256
+    greedy: bool = False
+    top_p: float = 0.9
+    top_k: int = 200
+    temperature: float = 1.0
+    num_samples: int = 1
+    use_cuda_graph: bool = False
+
+
+@dataclasses.dataclass
 class ReaLModelConfig:
     """Configuration for ReaLModel.
 
@@ -319,6 +351,7 @@ def register_hf_family(
     embedding_param_names: Callable[[ReaLModelConfig], List[str]],
     tblock_param_names: Callable[[ReaLModelConfig, int], List[str]],
     head_param_names: Callable[[ReaLModelConfig], List[str]],
+    real_config_maker: Optional[Callable] = None,
 ):
     if name in SUPPORTED_MODELS:
         raise ValueError(f"Model {name} is already registered.")
@@ -335,4 +368,5 @@ def register_hf_family(
         embedding_param_names=embedding_param_names,
         tblock_param_names=tblock_param_names,
         head_param_names=head_param_names,
+        real_config_maker=real_config_maker,
     )
