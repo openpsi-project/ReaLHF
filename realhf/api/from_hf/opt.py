@@ -59,7 +59,7 @@ def sd_to_opt(state_dict: Dict, config: ReaLModelConfig) -> Dict:
     if "0.wte.weight" in state_dict:
         new_sd["model.decoder.embed_tokens.weight"] = state_dict["0.wte.weight"]
         new_sd["model.decoder.embed_positions.weight"] = state_dict["0.wpe.weight"]
-    if "lm_head.weight" in state_dict:
+    if f"{config.n_layers + 1}.weight" in state_dict:
         new_sd["lm_head.weight"] = state_dict[f"{config.n_layers + 1}.weight"]
 
     if f"{config.n_layers}.ln_f.weight" in state_dict:

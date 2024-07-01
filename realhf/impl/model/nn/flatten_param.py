@@ -74,9 +74,16 @@ def slice_intervals(
     output_size: int,
 ) -> torch.Tensor:
     assert len(tensor.shape) == 1
+    assert sum(intervals[:, 1] - intervals[:, 0]) == output_size
+    assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
+    assert intervals[:, 0].min().item() >= 0, (intervals[:, 0].min().item(), tensor.shape[0])
+    assert intervals[:, 1].max().item() <= tensor.shape[0], (tensor.shape[0], intervals[:, 1].max().item())
+
     # NOTE: these following assertions will take ten years to finish.
     # assert len(intervals) == len(intervals_cpu)
     # assert len(set([x[0] for x in intervals_cpu])) == len(intervals_cpu)
+
+    # res = torch._C._nn.flatten_dense_tensors([tensor[start:end] for start, end in intervals_cpu])
     if len(intervals_cpu) == 1:
         return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
     elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
@@ -103,9 +110,13 @@ def set_intervals(
     max_interval_size: int,
 ):
     assert len(dst.shape) == len(src.shape) == 1
+    assert sum(intervals[:, 1] - intervals[:, 0]) == src.shape[0]
+    assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
     if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
         offset = 0
         for i, j in intervals_cpu:
+            assert i >= 0
+            assert j <= dst.shape[0], (j, dst.shape[0])
             dst[i:j] = src[offset : offset + j - i]
             offset += j - i
         assert offset == src.shape[0]
@@ -122,6 +133,29 @@ def set_intervals(
     )
     return
 
+def param_size_from_keys(
+    config: model_api.ReaLModelConfig,
+    src_mp_size: int,
+    sequence_parallel: bool,
+    sd_keys: List[str],
+    src2dst_tp_size: int,
+    src2dst_tp_rank: int,
+    head_param_point_to_embedding: bool,
+) -> Tuple[List[int], int]:
+    param_size = 0
+    for k in sd_keys:
+        if head_param_point_to_embedding and k == f"{config.n_layers + 1}.weight":
+            continue
+        new_shape = mp_partition_key(
+            k,
+            get_real_model_param_shape(k, config, src_mp_size, sequence_parallel),
+            src2dst_tp_rank,
+            src2dst_tp_size,
+            config,
+            partition_fn=shape_partition_fn,
+        )
+        param_size += int(np.prod(new_shape))
+    return param_size
 
 def build_param_spec(
     layer_indices: List[int],
@@ -140,7 +174,7 @@ def build_param_spec(
     disable_bucketing = 0 not in layer_indices
 
     sd_keys = []
-    for layer_idx in layer_indices:
+    for layer_idx in sorted(layer_indices):
         if layer_idx == 0:
             sd_keys += real_model_embedding_param_keys(config)
         elif layer_idx == config.n_layers + 1:
@@ -149,7 +183,7 @@ def build_param_spec(
             sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
 
     # In the reverse order as backpropagation, consistent with Megatron.
-    sd_keys = reversed(sd_keys)
+    sd_keys = list(reversed(sd_keys))
 
     data_start_index = 0
     bucket_data_start_index = data_start_index
@@ -206,7 +240,7 @@ def build_param_spec(
     if len(bucket_params) > 0:
         data_end_index = _create_fake_bucket(data_end_index)
 
-    if head_param_point_to_embedding:
+    if head_param_point_to_embedding and f"{config.n_layers + 1}.weight" in sd_keys:
         param_spec[f"{config.n_layers + 1}.weight"] = param_spec["0.wte.weight"]
     return param_spec, data_end_index
 
@@ -223,17 +257,7 @@ def param_intervals_from_keys(
     portion_rank: int,
 ) -> List[int]:
     # if portion_size == 1:
-    #     if not head_param_point_to_embedding or f"{config.n_layers + 1}.weight" not in sd_keys:
-    #         # In this case, all parameters have unique unoverlapped memory allocations.
-    #         # If the portion size is also one, we can merge these contiguous intervals.
-    #         start, end = None, None
-    #         for k in sd_keys:
-    #             if start is None or param_spec[k].start_idx < start:
-    #                 start = param_spec[k].start_idx
-    #             if end is None or param_spec[k].end_idx > end:
-    #                 end = param_spec[k].end_idx
-    #         return [(start, end)]
-    #     else:
+    #     if head_param_point_to_embedding and f"{config.n_layers + 1}.weight" in sd_keys:
     #         # The embeddings and output weights are shared.
     #         intervals = [(param_spec[f"{config.n_layers + 1}.weight"].start_idx, param_spec[f"{config.n_layers + 1}.weight"].end_idx)]
     #         start, end = None, None
@@ -247,15 +271,27 @@ def param_intervals_from_keys(
     #         intervals += [(start, end)]
     #         intervals = sorted(intervals, key=lambda x: x[0])
     #         # Merge these two intervals if possible.
-    #         if intervals[0][1] == intervals[1][0]:
+    #         if intervals[1][0]<= intervals[0][1]:
     #             return [(intervals[0][0], intervals[1][1])]
     #         else:
     #             return intervals
+    #     else:
+    #         # In this case, all parameters have unique unoverlapped memory allocations.
+    #         # If the portion size is also one, we can merge these contiguous intervals.
+    #         start, end = None, None
+    #         for k in sd_keys:
+    #             if start is None or param_spec[k].start_idx < start:
+    #                 start = param_spec[k].start_idx
+    #             if end is None or param_spec[k].end_idx > end:
+    #                 end = param_spec[k].end_idx
+    #         return [(start, end)]
 
     intervals = []
+    interval_size = param_size = 0
     for k in sd_keys:
         if head_param_point_to_embedding and k == f"{config.n_layers + 1}.weight":
             continue
+        param_size += int(np.prod(param_spec[k].shape))
         if (
             model_name,
             k.split(".", 1)[1],
@@ -291,7 +327,9 @@ def param_intervals_from_keys(
                 )
             ]
         intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
+        interval_size += sum(zero_start_intervals[:, 1] - zero_start_intervals[:, 0])
     # assert len(set([x[0] for x in intervals])) == len(intervals)
+    assert interval_size == param_size, (interval_size, param_size)
     intervals = sorted(intervals, key=lambda x: x[0])
     return intervals
 

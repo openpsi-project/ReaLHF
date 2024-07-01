@@ -148,6 +148,8 @@ class PPOActorInterface(model_api.ModelInterface):
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
 
+    gen_param: int = None
+
     def __post_init__(self):
         if self.adaptive_kl_ctl:
             assert self.adaptive_kl_target is not None
@@ -187,6 +189,11 @@ class PPOActorInterface(model_api.ModelInterface):
     @torch.no_grad()
     def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         module = model.module
+
+        if self.gen_param is not None:
+            assert module.module.contiguous_param.data_ptr() != self.gen_param.data_ptr()
+            print(f">>>>>>>>>> gen param changed? {not torch.allclose(module.module.contiguous_param, self.gen_param)}, {dist.get_rank()}")
+        self.gen_param = module.module.contiguous_param.detach().clone()
 
         module.eval()
 
@@ -419,6 +426,7 @@ class PPOActorInterface(model_api.ModelInterface):
 
         # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.
+        a = module.module.contiguous_param.detach().clone()
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
         for data in datas:
@@ -457,6 +465,7 @@ class PPOActorInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
 
+        print(f">>>>>>>>>> actor train param changed? {not torch.allclose(a, module.module.contiguous_param)}")
         if train_stats:
             train_stats = dict(
                 ppo_approx_kl=float(train_stats["ppo_approx_kl"] / _n_tokens),
@@ -552,6 +561,7 @@ class PPOCriticInterface(model_api.ModelInterface):
     )
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
+    inf_param: int = None
 
     def __post_init__(self):
         if self.adaptive_kl_ctl:
@@ -594,6 +604,11 @@ class PPOCriticInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
+
+        if self.inf_param is not None:
+            assert module.module.contiguous_param.data_ptr() != self.inf_param.data_ptr()
+            print(f">>>>>>>>>> inf param changed? {not torch.allclose(module.module.contiguous_param, self.inf_param)}")
+        self.inf_param = module.module.contiguous_param.clone().detach()
 
         input_lens = torch.tensor(data.metadata['seqlens'], dtype=torch.int32, device=model.device)
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
@@ -715,6 +730,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
+        a = module.module.contiguous_param.detach().clone()
         for data in datas:
             input_lens = torch.tensor(data.metadata['seqlens'], dtype=torch.int32, device=model.device)
             cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
@@ -748,6 +764,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
 
+        print(f">>>>>>>>>> critic train param changed? {not torch.allclose(a, module.module.contiguous_param)}")
         if train_stats:
             train_stats = dict(
                 value_loss=float(train_stats["value_loss"] / n_tokens),

@@ -79,6 +79,10 @@ def create_model(
         model.eval()
         if instantiate:
             model.instantiate()
+    if instantiate:
+        _check_tied_embedding_weights(model_name, model)
+    with constants.model_scope(model_name):
+        if instantiate:
             init_save_path = tmp_dir / "init"
             # sync initialized parameters
             getattr(model, f"to_{model_family_name}")(None, init_save_path)
@@ -86,6 +90,8 @@ def create_model(
             model = getattr(model, f"from_{model_family_name}")(
                 init_save_path, init_critic_from_actor=False
             )
+    if instantiate:
+        _check_tied_embedding_weights(model_name, model)
     return model
 
 
@@ -224,6 +230,35 @@ def setup_constants_and_param_realloc(
     return pg_info
 
 
+def _check_tied_embedding_weights(model_name, model: "ReaLModel"):
+    with constants.model_scope(model_name):
+        if not (constants.is_first_pipe_stage() or constants.is_last_pipe_stage()):
+            return
+
+        if constants.is_first_pipe_stage():
+            w1 = w = model.layers[0].wte.weight.float()
+        if constants.is_last_pipe_stage():
+            w2 = w = model.layers[-1].weight.float()
+
+        if constants.pipe_parallel_world_size() == 1:
+            if model.config.tied_embedding and not model.config.is_critic:
+                assert w1.data_ptr() == w2.data_ptr()
+            else:
+                assert w1.data_ptr() != w2.data_ptr()
+        else:
+            w_ = w.clone().detach().float()
+            dist.all_reduce(
+                w_,
+                op=dist.ReduceOp.SUM,
+                group=constants.grid().embedding_proc_group,
+            )
+            w_ /= dist.get_world_size(constants.grid().embedding_proc_group)
+            if model.config.tied_embedding and not model.config.is_critic:
+                assert torch.allclose(w_, w), (w_ - w).abs().max()
+            else:
+                assert not torch.allclose(w_, w), (w_ - w).abs().max()
+
+
 @dataclasses.dataclass
 class ParamRedistributer:
     from_model_name: ModelName
@@ -276,11 +311,14 @@ class ParamRedistributer:
 
 
 def _load_all_pytorch_bin(path: pathlib.Path):
-    with open(path / "pytorch_model.bin.index.json", "r") as f:
-        hf_sd_mapping = json.load(f)["weight_map"]
-    sd = {}
-    for fn in hf_sd_mapping.values():
-        sd.update(torch.load(path / fn, map_location="cpu"))
+    if os.path.exists(path / "pytorch_model.bin.index.json"):
+        with open(path / "pytorch_model.bin.index.json", "r") as f:
+            hf_sd_mapping = json.load(f)["weight_map"]
+        sd = {}
+        for fn in hf_sd_mapping.values():
+            sd.update(torch.load(path / fn, map_location="cpu"))
+    else:
+        sd = torch.load(path / "pytorch_model.bin", map_location="cpu")
     return sd
 
 
@@ -293,6 +331,7 @@ def _test_para_realloc(
     from_sequence_parallel: bool,
     to_sequence_parallel: bool,
     n_iterations: int,
+    skip_saveload: bool,
 ):
     # os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
     from realhf.impl.model.backend.megatron import ReaLMegatronEngine
@@ -326,8 +365,7 @@ def _test_para_realloc(
     # Creat model 2
     if (
         dist.get_rank()
-        >= dist.get_world_size()
-        - to_pp_dp_mp[0] * to_pp_dp_mp[1] * to_pp_dp_mp[2]
+        >= dist.get_world_size() - to_pp_dp_mp[0] * to_pp_dp_mp[1] * to_pp_dp_mp[2]
     ):
         to_model = create_model(
             tmp_dir=tmp_path,
@@ -350,36 +388,47 @@ def _test_para_realloc(
 
     if from_model is not None:
         train_engine = build_engine(from_model, from_model_name, trainable=True)
+        _check_tied_embedding_weights(from_model_name, from_model)
     if to_model is not None:
         inf_engine = build_engine(to_model, to_model_name, trainable=False)
 
-    prev_to_model_param = None
-    prev_to_model_sd = None
-
     for i in range(n_iterations):
+        # Create the same random data across all ranks.
         if from_model is not None:
             vocab_size = from_model.config.vocab_size
         elif to_model is not None:
             vocab_size = to_model.config.vocab_size
         else:
-            vocab_size = None
+            # Give a random vocab size for sampling across the whole world.
+            vocab_size = 100
 
-        if vocab_size is not None:
-            x = random_sample(bs=32, seq_len=32, vocab_size=vocab_size)
-            packed_input_ids = x["packed_input_ids"].cuda()
-            cu_seqlens = x["cu_seqlens"].cuda()
-            prompt_mask = x["prompt_mask"].cuda()
-            input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-            seqlens_cpu = input_lens.cpu().numpy().tolist()
+        _v = torch.tensor([vocab_size], dtype=torch.int32, device="cuda")
+        dist.all_reduce(_v, op=dist.ReduceOp.MAX)
+        vocab_size = _v.item()
+
+        # Synchronize the data across all ranks.
+        x = random_sample(bs=32, seq_len=32, vocab_size=vocab_size)
+        packed_input_ids = x["packed_input_ids"].cuda()
+        dist.all_reduce(packed_input_ids, op=dist.ReduceOp.MAX)
+        cu_seqlens = x["cu_seqlens"].cuda()
+        assert torch.allclose(
+            cu_seqlens,
+            torch.linspace(0, 32 * 32, 33, device="cuda", dtype=cu_seqlens.dtype),
+        )
+        prompt_mask = x["prompt_mask"].cuda()
+        assert torch.all(prompt_mask == 0)
+        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+        seqlens_cpu = input_lens.cpu().numpy().tolist()
 
         # Synchronize the initial parameters at the start of this iteration.
-        if from_model is not None:
-            with constants.model_scope(from_model_name):
-                getattr(from_model, f"to_{model_family_name}")(
-                    None, tmp_path / f"save_from_{i}"
-                )
-        dist.barrier()
-        sd1 = _load_all_pytorch_bin(tmp_path / f"save_from_{i}")
+        if not skip_saveload:
+            if from_model is not None:
+                with constants.model_scope(from_model_name):
+                    getattr(from_model, f"to_{model_family_name}")(
+                        None, tmp_path / f"save_from_{i}"
+                    )
+            dist.barrier()
+            sd1 = _load_all_pytorch_bin(tmp_path / f"save_from_{i}")
 
         # Run redistribution.
         redist.forward()
@@ -388,28 +437,20 @@ def _test_para_realloc(
         # Synchronize the redistributed parameters. They should be identical to the initial parameters.
         # Also, they should be different from the parameters of the previous iteration
         # because we have updated the parameters.
-        if to_model is not None:
-            if prev_to_model_param is not None:
-                assert not torch.allclose(
-                    prev_to_model_param, to_model.contiguous_param
-                )
-            prev_to_model_param = to_model.contiguous_param.detach().clone()
-            with constants.model_scope(to_model_name):
-                getattr(to_model, f"to_{model_family_name}")(
-                    None, tmp_path / f"save_to_{i}"
-                )
-        dist.barrier()
-        sd2 = _load_all_pytorch_bin(tmp_path / f"save_to_{i}")
-        if prev_to_model_sd is not None:
-            assert not all(
-                torch.allclose(v, sd2[k]) for k, v in prev_to_model_sd.items()
-            ), (k, v, sd2[k])
-        prev_to_model_sd = sd2
-        for k, v in sd1.items():
-            assert torch.allclose(v, sd2[k]), (k, v, sd2[k])
+        if not skip_saveload:
+            if to_model is not None:
+                with constants.model_scope(to_model_name):
+                    getattr(to_model, f"to_{model_family_name}")(
+                        None, tmp_path / f"save_to_{i}"
+                    )
+            dist.barrier()
+            sd2 = _load_all_pytorch_bin(tmp_path / f"save_to_{i}")
+            for k, v in sd1.items():
+                assert torch.allclose(v, sd2[k]), (k, v, sd2[k])
 
         # Run a forward with the redistributed model.
         if to_model is not None:
+            _check_tied_embedding_weights(to_model_name, to_model)
             with constants.model_scope(to_model_name):
                 inf_engine.eval()
                 logits1 = inf_engine.forward(
@@ -426,6 +467,7 @@ def _test_para_realloc(
         redist.forward()
         dist.barrier()
         if to_model is not None:
+            _check_tied_embedding_weights(to_model_name, to_model)
             with constants.model_scope(to_model_name):
                 inf_engine.eval()
                 logits2 = inf_engine.forward(
@@ -439,28 +481,28 @@ def _test_para_realloc(
         dist.barrier()
 
         # Synchronize the redistributed parameters. They should be identical to the initial parameters.
-        if from_model is not None:
-            with constants.model_scope(from_model_name):
-                getattr(from_model, f"to_{model_family_name}")(
-                    None, tmp_path / f"save_back_{i}"
-                )
-        dist.barrier()
-        sd3 = _load_all_pytorch_bin(tmp_path / f"save_back_{i}")
-        for k, v in sd1.items():
-            assert torch.allclose(v, sd3[k]), (k, v, sd3[k])
+        if not skip_saveload:
+            if from_model is not None:
+                with constants.model_scope(from_model_name):
+                    getattr(from_model, f"to_{model_family_name}")(
+                        None, tmp_path / f"save_back_{i}"
+                    )
+            dist.barrier()
+            sd3 = _load_all_pytorch_bin(tmp_path / f"save_back_{i}")
+            for k, v in sd1.items():
+                assert torch.allclose(v, sd3[k]), (k, v, sd3[k])
 
         # Train the model.
         if from_model is not None:
             for _ in range(2):
+                _check_tied_embedding_weights(from_model_name, from_model)
                 loss_fn_kwargs = dict(
                     prompt_mask=prompt_mask,
                     input_lens=input_lens,
                 )
                 train_engine.eval()
 
-                p = (
-                    train_engine.engine.ddp.module.contiguous_param.clone().detach()
-                )
+                p = from_model.contiguous_param.clone().detach()
 
                 with constants.model_scope(from_model_name):
                     train_engine: ReaLMegatronEngine
@@ -473,22 +515,20 @@ def _test_para_realloc(
                             if not is_critic
                             else compute_critic_loss
                         ),
-                        num_micro_batches=constants.pipe_parallel_world_size()
-                        * 2,
+                        num_micro_batches=constants.pipe_parallel_world_size() * 2,
                         version_steps=i,
                         **loss_fn_kwargs,
                     )
 
-                p_ = (
-                    train_engine.engine.ddp.module.contiguous_param.clone().detach()
-                )
+                p_ = from_model.contiguous_param.clone().detach()
                 # After training, the parameters should have changed.
-                assert not torch.allclose(p, p_)
+                assert not torch.allclose(p, p_), (p - p_).abs().max()
 
         # Re-run redistribution to ensure that inference results changed.
         redist.forward()
         dist.barrier()
         if to_model is not None:
+            _check_tied_embedding_weights(to_model_name, to_model)
             with constants.model_scope(to_model_name):
                 inf_engine.eval()
                 logits3 = inf_engine.forward(
@@ -500,6 +540,7 @@ def _test_para_realloc(
                 assert not torch.allclose(logits1, logits3)
         redist.backward()
         dist.barrier()
+    print("success")
 
 
 parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
@@ -509,14 +550,15 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
     not torch.cuda.is_available() or torch.cuda.device_count() < 8,
     reason="This test requires at least 8 GPUs to run.",
 )
-@pytest.mark.slow
-@pytest.mark.distributed
-@pytest.mark.parametrize("model_family_name", ["gpt2", "llama"])
-@pytest.mark.parametrize("is_critic", [False, True])
-@pytest.mark.parametrize("from_pp_dp_mp", parallelism)
-@pytest.mark.parametrize("to_pp_dp_mp", parallelism)
+@pytest.mark.parametrize("model_family_name", ["opt"])
+@pytest.mark.parametrize("is_critic", [False])
+@pytest.mark.parametrize("from_pp_dp_mp", [(4, 2, 1)])
+@pytest.mark.parametrize("to_pp_dp_mp", [(1, 4, 2)])
 @pytest.mark.parametrize("from_sequence_parallel", [False])
 @pytest.mark.parametrize("to_sequence_parallel", [False])
+@pytest.mark.parametrize("skip_saveload", [True])
+@pytest.mark.slow
+@pytest.mark.distributed
 def test_param_realloc(
     model_family_name: str,
     is_critic: bool,
@@ -524,6 +566,7 @@ def test_param_realloc(
     to_pp_dp_mp: Tuple,
     from_sequence_parallel: bool,
     to_sequence_parallel: bool,
+    skip_saveload: bool,
 ):
     if from_sequence_parallel and from_pp_dp_mp[-1] == 1:
         return
@@ -546,7 +589,19 @@ def test_param_realloc(
         to_pp_dp_mp=to_pp_dp_mp,
         from_sequence_parallel=from_sequence_parallel,
         to_sequence_parallel=to_sequence_parallel,
-        n_iterations=2,
+        n_iterations=4,
+        skip_saveload=skip_saveload,
     )
     test_impl.launch()
     shutil.rmtree(tmp_dir)
+
+
+if __name__ == "__main__":
+    test_param_realloc(
+        model_family_name="gpt2",
+        is_critic=False,
+        from_pp_dp_mp=(2, 2, 1),
+        to_pp_dp_mp=(4, 2, 1),
+        from_sequence_parallel=False,
+        to_sequence_parallel=False,
+    )

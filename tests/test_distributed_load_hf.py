@@ -8,6 +8,7 @@ import pytest
 import torch
 import torch.distributed as dist
 import transformers
+import json
 
 from realhf.api.core.config import ModelFamily
 from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
@@ -21,6 +22,16 @@ from tests.hf_utils import hf_config_factory
 
 logger = logging.getLogger("tests.test_saveload")
 
+def _load_all_pytorch_bin(path: pathlib.Path):
+    if os.path.exists(path / "pytorch_model.bin.index.json"):
+        with open(path / "pytorch_model.bin.index.json", "r") as f:
+            hf_sd_mapping = json.load(f)["weight_map"]
+        sd = {}
+        for fn in hf_sd_mapping.values():
+            sd.update(torch.load(path / fn, map_location="cpu"))
+    else:
+        sd = torch.load(path / "pytorch_model.bin", map_location="cpu")
+    return sd
 
 def _save_then_load(
     tmp_path: pathlib.Path,
@@ -53,13 +64,6 @@ def _save_then_load(
         tokenizer = None
         hf_config = hf_config_factory(model_family_name)
 
-        # Create an HF model.
-        if not is_critic or init_critic_from_actor:
-            if dist.get_rank() == 0:
-                hf_model = transformers.AutoModelForCausalLM.from_config(hf_config)
-                hf_model.save_pretrained(hf_save_path)
-        dist.barrier()
-
         mconfig: ReaLModelConfig = getattr(
             ReaLModel, f"config_from_{model_family_name}"
         )(hf_config)
@@ -67,12 +71,6 @@ def _save_then_load(
 
         # load from hf model or create a new critic model
         model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
-        if not is_critic or init_critic_from_actor:
-            model._instantiation_hooks.append(
-                lambda: getattr(model, f"from_{model_family_name}")(
-                    hf_save_path, init_critic_from_actor
-                )
-            )
         model.instantiate()
         # sync initialized parameters
         getattr(model, f"to_{model_family_name}")(tokenizer, init_save_path)
@@ -113,12 +111,18 @@ def _save_then_load(
         if not is_critic:
             hf_model = transformers.AutoModelForCausalLM.from_pretrained(real_save_path)
             dist.barrier()
-            if constants.model_parallel_world_size() == 1:
-                sd3 = HF_MODEL_FAMILY_REGISTRY[model_family_name][
-                    "sd_from_hf_converter"
-                ](hf_model.state_dict(), mconfig)
-                for k, v in sd1.items():
-                    assert torch.allclose(v.cpu(), sd3[k]), k
+            _hf_sd = hf_model.state_dict()
+            sd3 = _load_all_pytorch_bin(real_save_path)
+            if model_family_name != "gpt2":
+                for k, v in sd3.items():
+                    if k.endswith(".rotary_emb.inv_freq"):
+                        continue
+                    assert torch.allclose(v.cpu(), _hf_sd[k]), k
+            else:
+                for k, v in sd3.items():
+                    if k.endswith(".attn.bias"):
+                        continue
+                    assert torch.allclose(v.cpu(), _hf_sd[f"transformer.{k}"]), k
 
         # save again, check size
         getattr(model, f"to_{model_family_name}")(tokenizer, real_save_path2)
@@ -128,6 +132,7 @@ def _save_then_load(
             if fn.endswith(".bin"):
                 file_size2 += os.path.getsize(os.path.join(real_save_path2, fn))
         assert file_size2 == file_size, (file_size, file_size2)
+        dist.barrier()
 
 
 @pytest.mark.skipif(

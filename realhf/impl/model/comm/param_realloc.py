@@ -18,6 +18,7 @@ from realhf.impl.model.nn.flatten_param import (
     ContiguousParamSpec,
     build_param_spec,
     param_intervals_from_keys,
+    param_size_from_keys,
 )
 from realhf.impl.model.nn.real_llm_base import (
     keys_from_layer_indices,
@@ -348,26 +349,7 @@ def _split_intervals(intervals, K):
     return result
 
 
-def param_size_from_keys(
-    config: model_api.ReaLModelConfig,
-    src_mp_size: int,
-    sequence_parallel: bool,
-    sd_keys: List[str],
-    src2dst_tp_size: int,
-    src2dst_tp_rank: int,
-) -> Tuple[List[int], int]:
-    param_size = 0
-    for k in sd_keys:
-        new_shape = mp_partition_key(
-            k,
-            get_real_model_param_shape(k, config, src_mp_size, sequence_parallel),
-            src2dst_tp_rank,
-            src2dst_tp_size,
-            config,
-            partition_fn=shape_partition_fn,
-        )
-        param_size += int(np.prod(new_shape))
-    return param_size
+
 
 
 def _derive_reparallelize_comm_plan(
@@ -502,6 +484,7 @@ def _derive_reparallelize_comm_plan(
                         src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
                         src2dst_tp_rank=sender_mp_portion_id,
                         sequence_parallel=from_topo.sequence_parallel,
+                        head_param_point_to_embedding=from_model_head_param_point_to_embedding,
                     )
                     if torch.distributed.is_initialized():
                         # torch.distributed is not initialized when estimating param realloc cost
