@@ -129,6 +129,7 @@ def init_custom_ar() -> None:
             " capability. "
         )
         return
+
     _CA_HANDLE = CustomAllreduce(mp_rank, mp_world_size, full_nvlink=full_nvlink)
 
 

@@ -91,8 +91,6 @@ class PPOHyperparameters:
     :param value_norm_eps: Epsilon factor in the
         denominator of exponential moving average.
     :type value_norm_eps: float
-    :param use_cuda_graph: Whether to use CUDA graph in PPO actor generation.
-    :type use_cuda_graph: bool
     """
 
     gen: GenerationHyperparameters = dataclasses.field(
@@ -117,7 +115,6 @@ class PPOHyperparameters:
     )
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
-    use_cuda_graph: bool = False
 
 
 @dataclasses.dataclass
@@ -248,8 +245,6 @@ class PPOConfig(CommonExperimentConfig):
             raise NotImplementedError("SFT LoRA is not supported yet.")
         if self.is_rew_lora or self.rew_lora_path is not None:
             raise NotImplementedError("Rew LoRA is not supported yet.")
-        if self.ppo.use_cuda_graph:
-            os.environ["USE_CUDA_GRAPH"] = "1"
 
         self.ppo_kwargs = dict(
             n_minibatches=self.ppo.ppo_n_minibatches,

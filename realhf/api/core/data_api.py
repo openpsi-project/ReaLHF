@@ -65,7 +65,6 @@ def load_shuffle_split_dataset(
     util: DatasetUtility,
     dataset_path: str,
     dataset_builder: Optional[Callable[[], List[Dict[str, str]]]] = None,
-    max_num_sequences: Optional[int] = None,
 ):
     if dataset_path is not None:
         if dataset_path.endswith(".jsonl"):
@@ -79,9 +78,6 @@ def load_shuffle_split_dataset(
     else:
         assert dataset_builder is not None
         data = dataset_builder()
-
-    if max_num_sequences is not None:
-        data = data[:max_num_sequences]
 
     datasize_per_rank = len(data) // util.world_size
     shuffle_indices = get_shuffle_indices(

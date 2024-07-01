@@ -17,7 +17,6 @@ class PromptDataset(torch.utils.data.Dataset):
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
         pad_to_max_length: bool = False,
-        max_num_sequences: Optional[int] = None,
     ):
         """A dataset with prompts. Usually used for PPO.
 
@@ -30,14 +29,11 @@ class PromptDataset(torch.utils.data.Dataset):
             dataset_builder (Optional[Callable[[], List[Dict]]], optional): Alternative to dataset_path.
                 A callable that returns a list of dictionary. Defaults to None.
             pad_to_max_length (bool): Whether to pad the prompts to max_length. Defaults to False.
-            max_num_sequences (int): Max number of sequences the dataset contains. Only used in tests.
         """
         self._util = util
         self.max_length = max_length
 
-        data = data_api.load_shuffle_split_dataset(
-            util, dataset_path, dataset_builder, max_num_sequences=max_num_sequences
-        )
+        data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
         prompts_str = [x["prompt"] for x in data]
         util.tokenizer.padding_side = "left"
