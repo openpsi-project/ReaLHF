@@ -430,9 +430,6 @@ class PipeGenInstrSet:
                 cuda_graph.input_buffer_handle(cuda_graph_name, "cu_seqlens").copy_(
                     x.cu_seqlens, non_blocking=True
                 )
-                # cuda_graph.input_buffer_handle(cuda_graph_name, "max_seqlen").copy_(
-                #     torch.tensor(x.max_seqlen), non_blocking=True
-                # )
             cuda_graph.input_buffer_handle(cuda_graph_name, "position_ids")[:bs].copy_(
                 ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
             )

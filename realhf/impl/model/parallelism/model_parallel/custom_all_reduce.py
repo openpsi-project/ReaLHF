@@ -1,3 +1,4 @@
+# Copied from the vLLM project: https://github.com/vllm-project/vllm
 import dataclasses
 from contextlib import contextmanager, nullcontext
 from typing import Any, List, Optional
