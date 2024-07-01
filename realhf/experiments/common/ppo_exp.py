@@ -91,8 +91,6 @@ class PPOHyperparameters:
     :param value_norm_eps: Epsilon factor in the
         denominator of exponential moving average.
     :type value_norm_eps: float
-    :param use_cuda_graph: Whether to use CUDA graph in PPO actor generation.
-    :type use_cuda_graph: bool
     """
 
     gen: GenerationHyperparameters = dataclasses.field(
@@ -117,7 +115,6 @@ class PPOHyperparameters:
     )
     value_norm_beta: float = 0.99995
     value_norm_eps: float = 1e-5
-    use_cuda_graph: bool = False
 
 
 @dataclasses.dataclass
@@ -264,16 +261,6 @@ class PPOConfig(CommonExperimentConfig):
             value_norm_eps=self.ppo.value_norm_eps,
         )
 
-        self.generation_kwargs = dict(
-            max_new_tokens=self.ppo.gen.max_new_tokens,
-            min_new_tokens=self.ppo.gen.min_new_tokens,
-            greedy=self.ppo.gen.greedy,
-            top_p=self.ppo.gen.top_p,
-            top_k=self.ppo.gen.top_k,
-            temperature=self.ppo.gen.temperature,
-            use_cuda_graph=self.ppo.gen.use_cuda_graph,
-        )
-
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
         # role to config
@@ -291,7 +278,7 @@ class PPOConfig(CommonExperimentConfig):
             "ppo_actor",
             args={
                 **copy.deepcopy(self.ppo_kwargs),
-                "generation_config": self.generation_kwargs,
+                "generation_config": self.ppo.gen,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
                 "force_no_logits_mask": self.ppo.force_no_logits_mask,
                 "adv_norm": self.ppo.adv_norm,

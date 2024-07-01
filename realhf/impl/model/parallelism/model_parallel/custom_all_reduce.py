@@ -123,7 +123,7 @@ def init_custom_ar() -> None:
         )
         return
 
-    if not _can_p2p(mp_rank, mp_world_size):
+    if not _can_p2p():
         logger.warn(
             "Custom allreduce is disabled because your platform lacks GPU P2P"
             " capability. "
@@ -166,13 +166,16 @@ def _can_p2p() -> bool:
     assert parallelism_world_size % 2 == 0
     if parallelism_world_size == 1:
         return True
-    buf = torch.zeros(1, dtype=torch.int32)
+    buf = torch.zeros(1, dtype=torch.int32, device="cuda")
     try:
         if rank % 2 == 0:
-            dist.send(torch.tensor([1]), constants.to_global_pg_rank(rank + 1))
+            dist.send(
+                torch.tensor([1], device="cuda"), constants.to_global_pg_rank(rank + 1)
+            )
         else:
             dist.recv(buf, constants.to_global_pg_rank(rank - 1))
-    except:
+    except Exception as e:
+        logger.warn(e)
         return False
     return True
 

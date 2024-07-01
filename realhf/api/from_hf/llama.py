@@ -238,19 +238,13 @@ def convert_config_back_llama(
     )
 
 
-def make_real_config_llama(
-    hidden_dim: int,
-    head_dim: int,
-    n_layers: int,
-    intermediate_dim: int,
-    n_kv_heads: int,
-):
+def make_real_config_llama():
     return ReaLModelConfig(
-        n_layers=n_layers,
-        n_kv_heads=n_kv_heads,
-        hidden_dim=hidden_dim,
-        head_dim=head_dim,
-        intermediate_dim=intermediate_dim,
+        n_layers=4,
+        n_kv_heads=1,
+        hidden_dim=256,
+        head_dim=32,
+        intermediate_dim=512,
         vocab_size=32000,
         n_positions=4096,
         embd_pdrop=0.0,

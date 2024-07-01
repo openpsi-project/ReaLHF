@@ -6,9 +6,9 @@ import transformers
 
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
+from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.nn.real_llm_api import ReaLModel
-from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 
 
 class PipelinableInferenceEngine:
@@ -92,7 +92,9 @@ class PipelinableInferenceEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        gconfig: GenerationHyperparameters = dataclasses.field(
+            default_factory=GenerationHyperparameters
+        ),
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:

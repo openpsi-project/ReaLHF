@@ -20,15 +20,6 @@ def model_class(request):
     return request.param
 
 
-@dataclasses.dataclass
-class DummyTokenizer:
-    eos_token_id = 0
-    pad_token_id = 0
-
-    def save_pretrained(self, save_path):
-        pass
-
-
 def maybe_prepare_cpu_env(max_prompt_len: int):
     if not dist.is_initialized():
         # for parametrized runs
@@ -49,17 +40,10 @@ def maybe_prepare_cpu_env(max_prompt_len: int):
 
 
 @pytest.fixture
-def tokenizer():
-    return DummyTokenizer()
-
-
-@pytest.fixture
 def mconfig(model_class):
     from realhf.impl.model.nn.real_llm_api import ReaLModel
 
-    mconfig = getattr(ReaLModel, f"make_{model_class}_config")(
-        hidden_dim=256, n_layers=4, intermediate_dim=512, head_dim=32, n_kv_heads=1
-    )
+    mconfig = getattr(ReaLModel, f"make_{model_class}_config")()
     return mconfig
 
 
@@ -69,7 +53,7 @@ def save_path(tmpdir_factory: pytest.TempdirFactory):
 
 
 @pytest.fixture
-def cpu_real_model(model_class, mconfig, tokenizer, save_path):
+def cpu_real_model(model_class, mconfig, save_path):
     max_prompt_len = 128
     maybe_prepare_cpu_env(max_prompt_len)
     with constants.model_scope(testing.MODEL_NAME):
@@ -79,7 +63,7 @@ def cpu_real_model(model_class, mconfig, tokenizer, save_path):
         add_helper_functions(model)
         model.instantiate()
         model.eval()
-        getattr(model, f"to_{model_class}")(tokenizer, save_path)
+        getattr(model, f"to_{model_class}")(None, save_path)
     return model
 
 

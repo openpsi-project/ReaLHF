@@ -193,11 +193,11 @@ def real_model_generate(
     test_params: GenerateTestParams,
 ):
     from realhf.base.namedarray import NamedArray
-    from realhf.impl.model.nn.real_llm_generate import GenerationConfig
+    from realhf.experiments.common.gen_exp import GenerationHyperparameters
 
     assert not test_params.huggingface
     parallel = test_params.parallel
-    generation_config_dict = dict(
+    generation_config = GenerationHyperparameters(
         min_new_tokens=test_params.gen_len,
         max_new_tokens=test_params.gen_len,
         use_cuda_graph=test_params.use_cuda_graph,
@@ -245,7 +245,7 @@ def real_model_generate(
                 tokenizer=tokenizer,
                 packed_input_ids=packed_prompts,
                 cu_seqlens=prompt_cu_seqlens,
-                gconfig=GenerationConfig(**generation_config_dict),
+                gconfig=generation_config,
             )
             t = time.monotonic() - st
 
@@ -343,13 +343,13 @@ real_pp_cudagraph = GenerateTestParams(
 @pytest.mark.parametrize(
     "test_params1,test_params2,seq_acc_threshold,token_acc_threshold",
     [
-        # (real_simple, huggingface, 0.8, 0.8),
-        # (real_simple, real_cudagraph, 1.0, 1.0),
-        # (real_simple, real_3d_parallel, 0.8, 0.8),
-        # (real_mp, real_mp_cudagraph, 0.8, 0.8),
-        # (real_dp, real_dp_cudagraph, 1.0, 1.0),
+        (real_simple, huggingface, 0.8, 0.8),
+        (real_simple, real_cudagraph, 1.0, 1.0),
+        (real_simple, real_3d_parallel, 0.8, 0.8),
+        (real_mp, real_mp_cudagraph, 0.8, 0.8),
+        (real_dp, real_dp_cudagraph, 1.0, 1.0),
         (real_pp, real_pp_cudagraph, 1.0, 1.0),
-        # (real_3d_parallel, real_3d_parallel_cudagraph, 0.8, 0.8),
+        (real_3d_parallel, real_3d_parallel_cudagraph, 0.8, 0.8),
     ],
 )
 @pytest.mark.skipif(

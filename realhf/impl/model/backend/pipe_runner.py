@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import os
 from typing import *
@@ -27,11 +28,11 @@ import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import data_api
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.base.namedarray import NamedArray
+from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.backend.utils import MegatronEngine
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.nn.real_llm_generate import (
-    GenerationConfig,
     _gather_gen_output_from_list,
     _gather_minibatch_gen_outputs,
     genstep,
@@ -1059,7 +1060,9 @@ class PipelineRunner:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        gconfig: GenerationHyperparameters = dataclasses.field(
+            default_factory=GenerationHyperparameters
+        ),
         num_micro_batches: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[PipeCacheData]]:
         if constants.sequence_parallel():
@@ -1083,6 +1086,7 @@ class PipelineRunner:
         )
 
         # for elegant generation termination
+        gconfig = copy.deepcopy(gconfig)
         gconfig.max_new_tokens += constants.pipe_parallel_world_size() - 1
 
         for mbid in range(num_micro_batches):

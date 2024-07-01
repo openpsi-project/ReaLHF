@@ -27,6 +27,8 @@ class GenerationHyperparameters:
     :type top_p: float
     :param temperature: The temperature of the sampling process.
     :type temperature: float
+    :param num_samples: The number of samples to generate.
+    :type num_samples: int
     :param use_cuda_graph: Whether to use CUDA graph.
     :type use_cuda_graph: bool
     """
@@ -37,6 +39,7 @@ class GenerationHyperparameters:
     top_p: float = 0.9
     top_k: int = 200
     temperature: float = 1.0
+    num_samples: int = 1
     use_cuda_graph: bool = False
 
 
@@ -76,16 +79,7 @@ class GenerationConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        gen_kwargs = dict(
-            max_new_tokens=self.gen.max_new_tokens,
-            min_new_tokens=self.gen.min_new_tokens,
-            greedy=self.gen.greedy,
-            top_p=self.gen.top_p,
-            top_k=self.gen.top_k,
-            temperature=self.gen.temperature,
-            use_cuda_graph=self.gen.use_cuda_graph,
-        )
-        interface = ModelInterface("generation", args={"generation_config": gen_kwargs})
+        interface = ModelInterface("generation", args={"generation_config": self.gen})
         gen = MFCDef(
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.GENERATE,

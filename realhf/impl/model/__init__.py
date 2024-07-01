@@ -62,10 +62,10 @@ def _config_to_hf(registry_name, config):
     return r.config_to_hf(config)
 
 
-def _make_real_config(registry_name, *args, **kwargs):
+def _make_real_config(registry_name):
     r = _HF_REGISTRIES[registry_name]
     if r.real_config_maker is not None:
-        return r.real_config_maker(*args, **kwargs)
+        return r.real_config_maker()
     raise NotImplementedError(
         f"`real_config_maker` not implemented for {registry_name}. "
         f"Please implement and register `real_config_maker` "

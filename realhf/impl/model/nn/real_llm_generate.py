@@ -12,6 +12,7 @@ import transformers
 import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core import model_api
 from realhf.base import constants, logging
+from realhf.experiments.common.gen_exp import GenerationHyperparameters
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.utils.functional import mask_eos_token
 from realhf.impl.model.utils.logits_warper import top_k_top_p_logits
@@ -23,24 +24,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger("ReaLModel Generation")
 
 
-@dataclasses.dataclass
-class GenerationConfig:
-    min_new_tokens: int = 1
-    max_new_tokens: int = 10
-    temperature: float = 1.0
-    greedy: bool = True
-    top_p: float = 1.0
-    top_k: int = 0
-    num_samples: int = 1
-    use_cuda_graph: bool = False
-
-
 def genstep(
     next_token_logits: torch.Tensor,
     tokenizer: transformers.PreTrainedTokenizerFast,
     unfinished_sequences: torch.Tensor,
     generated_idx: Union[torch.IntTensor, int],
-    gconfig: GenerationConfig,
+    gconfig: GenerationHyperparameters,
 ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], bool, torch.Tensor]:
     """Advance generation by one step given logits.
 
@@ -50,7 +39,7 @@ def genstep(
         unfinished_sequences (torch.Tensor): Bool tensor indicator of whether a sequence is finished.
             Shape [bs].
         generated_idx (int): The token index to be generated.
-        gconfig (GenerationConfig): .
+        gconfig (GenerationHyperparameters): .
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor, torch.Tensor, bool, torch.Tensor]:
@@ -152,7 +141,7 @@ def genstep(
 
 def prepare_generate_inputs(
     module: "ReaLModel",
-    gconfig: GenerationConfig,
+    gconfig: GenerationHyperparameters,
     x: PipeTransferData,
     ys: List[PipeCacheData],
     cuda_graph_name: str,
@@ -259,7 +248,9 @@ def generate(
     packed_input_ids: Optional[torch.LongTensor] = None,
     cu_seqlens: Optional[torch.LongTensor] = None,
     max_seqlen: Optional[int] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[
     torch.Tensor,
     torch.Tensor,
@@ -526,7 +517,9 @@ def vanilla_packed_generate(
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
     mconfig: model_api.ReaLModelConfig = model.config
@@ -591,7 +584,9 @@ def vanilla_cpu_generate(
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
     mconfig: model_api.ReaLModelConfig = model.config
@@ -655,7 +650,7 @@ class InflightBatchingGenerator:
         outqueue: queue.Queue,
         model: "ReaLModel",
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig,
+        gconfig: GenerationHyperparameters,
         batch_size: int,
         max_prompt_len: int,
     ):
