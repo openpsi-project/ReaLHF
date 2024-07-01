@@ -40,18 +40,18 @@ python3 -m realhf.apps.quickstart ppo \
     ppo.value_eps_clip=0.2 \
     ppo.reward_output_scaling=10.0 \
     ppo.adv_norm=True ppo.value_norm=True \
-    actor_train.device_mesh=\'NODE01:0,1,2,3,4,5,6,7\' \
-    actor_train.parallel.data_parallel_size=4 \
+    actor_train.device_mesh=\'NODE01:0,1,2,3\' \
+    actor_train.parallel.data_parallel_size=2 \
     actor_train.parallel.model_parallel_size=1 \
     actor_train.parallel.pipeline_parallel_size=2 \
-    actor_gen.device_mesh=\'NODE01:0,1,2,3\' \
-    actor_gen.parallel.data_parallel_size=2 \
+    actor_gen.device_mesh=\'NODE01:0,1,2,3,4,5,6,7\' \
+    actor_gen.parallel.data_parallel_size=4 \
     actor_gen.parallel.model_parallel_size=1 \
     actor_gen.parallel.pipeline_parallel_size=2 \
     critic_train.device_mesh=\'NODE01:4,5,6,7\' \
-    critic_train.parallel.data_parallel_size=1 \
+    critic_train.parallel.data_parallel_size=2 \
     critic_train.parallel.model_parallel_size=1 \
-    critic_train.parallel.pipeline_parallel_size=4 \
+    critic_train.parallel.pipeline_parallel_size=2 \
     critic_inf.device_mesh=\'NODE01:0,1\' \
     critic_inf.parallel.data_parallel_size=2 \
     critic_inf.parallel.model_parallel_size=1 \
@@ -61,6 +61,6 @@ python3 -m realhf.apps.quickstart ppo \
     rew_inf.parallel.model_parallel_size=1 \
     rew_inf.parallel.pipeline_parallel_size=2 \
     ref_inf.device_mesh=\'NODE01:4,5,6,7\' \
-    ref_inf.parallel.data_parallel_size=4 \
+    ref_inf.parallel.data_parallel_size=1 \
     ref_inf.parallel.model_parallel_size=1 \
-    ref_inf.parallel.pipeline_parallel_size=1
+    ref_inf.parallel.pipeline_parallel_size=4
