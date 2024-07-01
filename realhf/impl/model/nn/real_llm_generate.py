@@ -10,7 +10,7 @@ import torch.utils.checkpoint
 import transformers
 
 import realhf.impl.model.utils.cuda_graph as cuda_graph
-from realhf.api.core import model_api
+from realhf.api.core.model_api import GenerationHyperparameters, ReaLModelConfig
 from realhf.base import constants, logging
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.utils.functional import mask_eos_token
@@ -23,23 +23,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger("ReaLModel Generation")
 
 
-@dataclasses.dataclass
-class GenerationConfig:
-    min_new_tokens: int = 1
-    max_new_tokens: int = 10
-    temperature: float = 1.0
-    greedy: bool = True
-    top_p: float = 1.0
-    top_k: int = 0
-    num_samples: int = 1
-
-
 def genstep(
     next_token_logits: torch.Tensor,
     tokenizer: transformers.PreTrainedTokenizerFast,
     unfinished_sequences: torch.Tensor,
     generated_idx: Union[torch.IntTensor, int],
-    gconfig: GenerationConfig,
+    gconfig: GenerationHyperparameters,
 ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], bool, torch.Tensor]:
     """Advance generation by one step given logits.
 
@@ -49,7 +38,7 @@ def genstep(
         unfinished_sequences (torch.Tensor): Bool tensor indicator of whether a sequence is finished.
             Shape [bs].
         generated_idx (int): The token index to be generated.
-        gconfig (GenerationConfig): .
+        gconfig (GenerationHyperparameters): .
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor, torch.Tensor, bool, torch.Tensor]:
@@ -149,9 +138,9 @@ def genstep(
     return next_tokens, logprob, logits_mask, terminate, unfinished_sequences
 
 
-def prepare(
+def prepare_generate_inputs(
     module: "ReaLModel",
-    gconfig: GenerationConfig,
+    gconfig: GenerationHyperparameters,
     x: PipeTransferData,
     ys: List[PipeCacheData],
     cuda_graph_name: str,
@@ -186,8 +175,6 @@ def prepare(
         )
         k_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "k_caches")
         v_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "v_caches")
-        k_cache_handle = None
-        v_cache_handle = None
         if k_cache_handle is not None and v_cache_handle is not None:
             k_cache = k_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
             v_cache = v_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
@@ -214,8 +201,17 @@ def prepare(
         y.v_cache = v_cache
         y.cache_seqlens = cache_seqlens
 
-    # use cuda graph if env var USE_CUDA_GRAPH is set to 1,
-    # otherwise `graph` should be None
+    return x, ys
+
+
+def maybe_capture_cudagraph(
+    module: "ReaLModel",
+    x: PipeTransferData,
+    ys: List[PipeCacheData],
+    cuda_graph_name: str,
+):
+    bs = x.cu_seqlens.shape[0] - 1
+    cache_seqlens = ys[0].cache_seqlens
     input_buffers = dict(
         input_ids=torch.ones((bs,), dtype=torch.long, device="cuda"),
         position_ids=cache_seqlens.unsqueeze(-1).clone(),
@@ -241,7 +237,7 @@ def prepare(
         no_grad=True,
     )
 
-    return x, ys, cache_seqlens, graph, input_buffers, output_buffers
+    return graph, input_buffers, output_buffers
 
 
 @torch.no_grad()
@@ -251,7 +247,9 @@ def generate(
     packed_input_ids: Optional[torch.LongTensor] = None,
     cu_seqlens: Optional[torch.LongTensor] = None,
     max_seqlen: Optional[int] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[
     torch.Tensor,
     torch.Tensor,
@@ -262,7 +260,7 @@ def generate(
     """Generete a sequence with a ReaLModel."""
     bs = cu_seqlens.shape[0] - 1
     device = model.device
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
@@ -306,9 +304,13 @@ def generate(
     gen_logits_mask_ph.append(logits_mask)
     generated_idx += 1
 
-    x, ys, cache_seqlens, graph, input_buffers, output_buffers = prepare(
-        model, gconfig, x, ys, f"decoding"
-    )
+    cuda_graph_name = "decoding"
+    x, ys = prepare_generate_inputs(model, gconfig, x, ys, cuda_graph_name)
+    graph = None
+    if gconfig.use_cuda_graph:
+        graph, input_buffers, output_buffers = maybe_capture_cudagraph(
+            model, x, ys, cuda_graph_name
+        )
 
     # The main loop.
     while not terminate:
@@ -316,9 +318,11 @@ def generate(
         if graph is not None:
             input_buffers["input_ids"][:bs].copy_(next_tokens, non_blocking=True)
             input_buffers["position_ids"][:bs].copy_(
-                cache_seqlens.unsqueeze(-1), non_blocking=True
+                ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
             )
-            input_buffers["cache_seqlens"][:bs].copy_(cache_seqlens, non_blocking=True)
+            input_buffers["cache_seqlens"][:bs].copy_(
+                ys[0].cache_seqlens, non_blocking=True
+            )
             # K/v cache will be changed in-place with flash attention.
             graph.replay()
             logits = output_buffers["output"][:bs].squeeze(1)
@@ -330,7 +334,9 @@ def generate(
             # K/v cache will be changed in-place with flash attention.
             logits = model(x, ys)[0].pp_output.squeeze(dim=1)
 
-        cache_seqlens += (
+        ys[
+            0
+        ].cache_seqlens += (
             1  # The global handle. This will increase all handles in ys by 1.
         )
         next_tokens, logprob, logits_mask, terminate, unfinished_sequences = genstep(
@@ -510,10 +516,12 @@ def vanilla_packed_generate(
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
 
     terminate = False
     generated_idx = 0
@@ -575,10 +583,12 @@ def vanilla_cpu_generate(
     tokenizer: transformers.PreTrainedTokenizerFast,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    ),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Only used for debugging."""
-    mconfig: model_api.ReaLModelConfig = model.config
+    mconfig: ReaLModelConfig = model.config
     assert str(input_ids.device) == "cpu"
 
     terminate = False
@@ -639,7 +649,7 @@ class InflightBatchingGenerator:
         outqueue: queue.Queue,
         model: "ReaLModel",
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig,
+        gconfig: GenerationHyperparameters,
         batch_size: int,
         max_prompt_len: int,
     ):

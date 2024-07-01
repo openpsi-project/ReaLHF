@@ -1,3 +1,4 @@
+import dataclasses
 from typing import Dict, List, Optional
 
 import deepspeed
@@ -10,7 +11,6 @@ import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
 from realhf.impl.model.nn.real_llm_api import ReaLModel
-from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 from realhf.impl.model.utils.functional import (
     build_shift_one_indices,
     gather_packed_shifted_log_probs,
@@ -217,38 +217,6 @@ class SFTInterface(model_api.ModelInterface):
         x = from_dict(dict(logits=logits))
         x.register_metadata(**data.medata)
         return x
-
-    # for testing only
-    @torch.no_grad()
-    def generate(
-        self,
-        model: model_api.Model,
-        data: NamedArray,
-        gconfig: GenerationConfig,
-    ) -> NamedArray:
-        module = model.module
-
-        module.eval()
-
-        data = recursive_apply(data, lambda x: x.to(model.device))
-
-        res = module.generate(
-            seqlens_cpu=data.metadata["seqlens"],
-            tokenizer=model.tokenizer,
-            packed_input_ids=data["packed_input_ids"],
-            cu_seqlens=data["cu_seqlens"],
-            gconfig=gconfig,
-        )
-        if res is None:
-            return dict()
-
-        gen_tokens, logprobs, logits_mask, *_ = res
-
-        return dict(
-            gen_tokens=gen_tokens,
-            log_probs=logprobs,
-            logits_mask=logits_mask,
-        )
 
 
 model_api.register_interface("sft", SFTInterface)

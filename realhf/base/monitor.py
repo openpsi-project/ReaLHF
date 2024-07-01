@@ -394,15 +394,20 @@ def cuda_tmark(name: str, type_: CUDATimeMarkType):
             def _wrapped_f(*args, **kwargs):
                 import torch
 
-                from realhf.base.constants import _model_name
+                if torch.cuda.is_available():
+                    from realhf.base.constants import _model_name
 
-                torch.cuda.synchronize()
-                tik = time.time_ns()
-                res = f(*args, **kwargs)
-                torch.cuda.synchronize()
-                tok = time.time_ns()
-                global TIME_MARK_DB
-                TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
+                    torch.cuda.synchronize()
+                    tik = time.time_ns()
+                    res = f(*args, **kwargs)
+                    torch.cuda.synchronize()
+                    tok = time.time_ns()
+                    global TIME_MARK_DB
+                    TIME_MARK_DB.append(
+                        TimeMarkEntry(name, _model_name, type_, tik, tok)
+                    )
+                else:
+                    res = f(*args, **kwargs)
                 return res
 
             return _wrapped_f
@@ -420,16 +425,18 @@ def cuda_tmarked(name: str, type_: CUDATimeMarkType):
     if os.getenv("REAL_CUDA_TMARK", None) == "1":
         import torch
 
-        from realhf.base.constants import _model_name
+        if torch.cuda.is_available():
+            from realhf.base.constants import _model_name
 
-        torch.cuda.synchronize()
-        tik = time.time_ns()
+            torch.cuda.synchronize()
+            tik = time.time_ns()
     yield
     if os.getenv("REAL_CUDA_TMARK", None) == "1":
-        torch.cuda.synchronize()
-        tok = time.time_ns()
-        global TIME_MARK_DB
-        TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            tok = time.time_ns()
+            global TIME_MARK_DB
+            TIME_MARK_DB.append(TimeMarkEntry(name, _model_name, type_, tik, tok))
 
 
 def fetch_latest_tmark():

@@ -2,20 +2,31 @@ import dataclasses
 import gc
 import multiprocessing as mp
 import os
+import pickle
 import queue
 import random
 import time
 import traceback
-from typing import Callable, Dict
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pynvml
+import pytest
 import torch
-import torch.distributed as dist
+import torch.utils.data
 
-from realhf.api.core import config
-from realhf.api.core.config import ModelFamily
-from realhf.base import constants, gpu_utils, name_resolve, namedarray, names, topology
+import realhf.api.core.data_api as data_api
+from realhf.base import (
+    constants,
+    gpu_utils,
+    logging,
+    name_resolve,
+    namedarray,
+    names,
+    topology,
+)
 from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
+
+logger = logging.getLogger("testing")
 
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
@@ -89,6 +100,59 @@ class StandaloneTestingProcess(mp.Process):
             raise e
 
 
+class LocalMultiProcessTest:
+    """Aims for defining this class:
+    1. Defining a barrier and a queue for all sub-processes.
+    2. Error handling after launch.
+    """
+
+    # NOTE: This is necessary for running pytest, otherwise
+    # pytest will exit early before subprocesses terminate.
+    mp.set_start_method("spawn", force=True)
+
+    def __init__(
+        self,
+        world_size: int,
+        func: Callable,
+        *args,
+        expr_name: str = None,
+        trial_name: str = None,
+        **kwargs,
+    ):
+        self.barrier = mp.Barrier(world_size)
+        self.err_queue = mp.Queue(world_size)
+        os.environ["REAL_MODE"] = "LOCAL"
+        os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+        os.environ["GPU_DEVICES_ISOLATED"] = str(1)
+        clear_name_resolve(expr_name, trial_name)
+        self.processes = []
+        for rank in range(world_size):
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
+            p = StandaloneTestingProcess(
+                rank,
+                world_size,
+                self.barrier,
+                self.err_queue,
+                func,
+                *args,
+                expr_name=expr_name,
+                trial_name=trial_name,
+                **kwargs,
+            )
+            p.start()
+            self.processes.append(p)
+
+    def launch(self):
+        while any([p.is_alive() for p in self.processes]):
+            try:
+                err = self.err_queue.get_nowait()
+                [p.terminate() for p in self.processes]
+                raise err
+            except queue.Empty:
+                time.sleep(0.1)
+        [p.join() for p in self.processes]
+
+
 def init_global_constants(
     num_dp,
     num_mp,
@@ -131,165 +195,12 @@ def init_global_constants(
         constants.set_grid(model_name=model_name, grid=grid)
 
 
-class LocalMultiProcessTest:
-    """Aims for defining this class:
-    1. Defining a barrier and a queue for all sub-processes.
-    2. Error handling after launch.
-    """
-
-    # NOTE: This is necessary for running pytest, otherwise
-    # pytest will exit early before subprocesses terminate.
-    mp.set_start_method("spawn", force=True)
-
-    def __init__(
-        self,
-        world_size: int,
-        func: Callable,
-        *args,
-        expr_name: str = None,
-        trial_name: str = None,
-        **kwargs,
-    ):
-        self.barrier = mp.Barrier(world_size)
-        self.err_queue = mp.Queue(world_size)
-        os.environ["REAL_MODE"] = "LOCAL"
-        os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
-        os.environ["GPU_DEVICES_ISOLATED"] = str(1)
-        self.processes = []
-        for rank in range(world_size):
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
-            p = StandaloneTestingProcess(
-                rank,
-                world_size,
-                self.barrier,
-                self.err_queue,
-                func,
-                *args,
-                expr_name=expr_name,
-                trial_name=trial_name,
-                **kwargs,
-            )
-            p.start()
-            self.processes.append(p)
-
-    def launch(self):
-        while any([p.is_alive() for p in self.processes]):
-            try:
-                err = self.err_queue.get_nowait()
-                [p.terminate() for p in self.processes]
-                raise err
-            except queue.Empty:
-                time.sleep(0.1)
-        [p.join() for p in self.processes]
-
-
 def clear_name_resolve(expr_name=None, trial_name=None):
     expr_name = expr_name if expr_name is not None else _DEFAULT_EXPR_NAME
     trial_name = trial_name if trial_name is not None else _DEFAULT_TRIAL_NAME
     name_resolve.clear_subtree(
         names.trial_root(experiment_name=expr_name, trial_name=trial_name)
     )
-
-
-def make_finetune_spec(
-    bs_per_device,
-    total_train_epochs=1,
-    total_train_steps=10,
-    steps_per_epoch=10,
-    max_seq_len=1024,
-):
-    import realhf.api.core.model_api as model_api
-
-    finetune_spec = model_api.FinetuneSpec(
-        total_train_epochs=total_train_epochs,
-        total_train_steps=total_train_steps,
-        steps_per_epoch=steps_per_epoch,
-    )
-    return finetune_spec
-
-
-def random_sentence(min_len=100, max_len=128):
-    words = [
-        "the",
-        "quick",
-        "brown",
-        "fox",
-        "jumped",
-        "over",
-        "the",
-        "lazy",
-        "dog",
-    ]
-    sentence_length = random.randint(min_len, max_len)
-    return " ".join(random.choices(words, k=sentence_length))
-    # return "Output less than 50 words:"
-
-
-def make_input(tokenizer, device, s):
-    tokenizer.padding_side = "left"
-    prompts = tokenizer(s, return_tensors="pt", padding=True)
-
-    input_ids, attention_mask = prompts["input_ids"], prompts["attention_mask"]
-    input_ids = input_ids.to(device)
-    attention_mask = attention_mask.to(device)
-
-    # print(f"make input input_ids.shape {input_ids.shape}")
-
-    return input_ids, attention_mask
-
-
-def make_batch(tokenizer, device, batch_size, dp_rank, dp_worldsize, seed=373):
-    random.seed(seed)
-    whole_batch = [random_sentence() for _ in range(batch_size)]
-    dp_batch = whole_batch[
-        batch_size
-        // dp_worldsize
-        * dp_rank : batch_size
-        // dp_worldsize
-        * (dp_rank + 1)
-    ]
-    return make_input(tokenizer, device, dp_batch)
-
-
-def init_data(tokenizer, device, batch_size, seed, dp_rank=None, num_dp=None):
-    from realhf.impl.model.utils.padding import unpad_input
-
-    if dp_rank == None:
-        assert num_dp == None
-        dp_rank = constants.data_parallel_rank()
-        num_dp = constants.data_parallel_world_size()
-    input_ids, attention_mask = make_batch(
-        tokenizer, device, batch_size, dp_rank % num_dp, num_dp, seed=seed
-    )
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-    prompt_mask = torch.zeros_like(packed_input_ids)
-    data = namedarray.NamedArray(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        prompts=input_ids,
-        prompt_mask=prompt_mask.bool(),
-        prompt_att_mask=attention_mask,
-    )
-    return data
-
-
-def random_sample(bs, seq_len, vocab_size):
-    import torch
-
-    from realhf.impl.model.utils.padding import unpad_input
-
-    input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
-    attention_mask = torch.ones_like(input_ids)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-    prompt_mask = torch.zeros_like(packed_input_ids)
-    data = namedarray.NamedArray(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        prompts=input_ids,
-        prompt_mask=prompt_mask.bool(),
-        prompt_att_mask=attention_mask,
-    )
-    return data
 
 
 def pytorch_memory_burnin(rank):
@@ -313,8 +224,7 @@ def clear_gpu_cache():
 def get_memory(rank):
     handle = pynvml.nvmlDeviceGetHandleByIndex(rank)
     memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-    # total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
-    used_memory = memory_info.used / (1024**2)
+    used_memory = memory_info.used / (1024**2)  # Convert bytes to megabytes
     return used_memory
 
 
@@ -341,58 +251,69 @@ def get_pytorch_profiler(save_fn: str):
     )
 
 
-def get_llama_config(size):
-    from realhf.api.core.model_api import ReaLModelConfig
+def random_sample(num_sequences: int, seq_len: int, vocab_size: int, seed: int = 1):
+    torch.manual_seed(seed)
+    return torch.randint(0, vocab_size, (num_sequences, seq_len), dtype=torch.long)
 
-    if size == 7:
-        size_args = dict(
-            n_layers=40,
-            n_kv_heads=32,
-            n_q_heads=32,
-            head_dim=128,
-            hidden_dim=4096,
-            intermediate_dim=11008,
-            n_positions=4096,
-        )
-    elif size == 13:
-        size_args = dict(
-            n_layers=40,
-            n_kv_heads=40,
-            n_q_heads=40,
-            head_dim=128,
-            hidden_dim=5120,
-            intermediate_dim=13824,
-            n_positions=4096,
-        )
-    elif size == 34:
-        size_args = dict(
-            n_layers=48,
-            n_kv_heads=8,
-            n_q_heads=64,
-            head_dim=128,
-            hidden_dim=8192,
-            intermediate_dim=22016,
-            n_positions=16384,
-        )
-    elif size == 70:
-        size_args = dict(
-            n_layers=80,
-            n_kv_heads=8,
-            n_q_heads=64,
-            head_dim=128,
-            hidden_dim=8192,
-            intermediate_dim=28672,
-            n_positions=32768,
-        )
-    else:
-        raise ValueError(f"size {size} not supported")
 
-    return ReaLModelConfig(
-        vocab_size=32000,
-        activation_function="silu",
-        use_attention_bias=False,
-        layer_norm_type="rms",
-        mlp_type="llama",
-        apply_rotary=True,
-        **size_args,
+def make_random_packed_batches(
+    n_batches,
+    batch_size,
+    seq_len,
+    vocab_size,
+    seed: int = 1,
+    dp_rank=None,
+    dp_size=None,
+):
+    assert (dp_rank is None and dp_size is None) or (
+        dp_rank is not None and dp_size is not None
     )
+    if dp_rank is None:
+        dp_rank = constants.data_parallel_rank()
+        dp_size = constants.data_parallel_world_size()
+    assert batch_size % dp_size == 0
+    dp_batch_size = batch_size // dp_size
+    n_seqs = batch_size * n_batches
+    seqs = random_sample(batch_size * n_batches, seq_len, vocab_size, seed)
+    seqs = seqs[n_seqs * dp_rank // dp_size : n_seqs * (dp_rank + 1) // dp_size]
+    seqs = [namedarray.NamedArray(packed_prompts=seqs[i]) for i in range(len(seqs))]
+    for seq in seqs:
+        seq.register_metadata(seqlens=[seq_len])
+    batches = [
+        seqs[j * dp_batch_size : (j + 1) * dp_batch_size] for j in range(n_batches)
+    ]
+    batches = [data_api.gather_sequences(batch) for batch in batches]
+    return batches
+
+
+def make_random_unpacked_batches(
+    n_batches,
+    batch_size,
+    seq_len,
+    vocab_size,
+    seed: int = 1,
+    dp_rank=None,
+    dp_size=None,
+):
+    n_seqs = batch_size * n_batches
+    dp_batch_size = batch_size // dp_size
+    assert (dp_rank is None and dp_size is None) or (
+        dp_rank is not None and dp_size is not None
+    )
+    if dp_rank is None:
+        dp_rank = constants.data_parallel_rank()
+        dp_size = constants.data_parallel_world_size()
+    assert batch_size % dp_size == 0
+    seqs = random_sample(batch_size * n_batches, seq_len, vocab_size, seed)
+    seqs = seqs[n_seqs * dp_rank // dp_size : n_seqs * (dp_rank + 1) // dp_size]
+    batches = [
+        seqs[j * dp_batch_size : (j + 1) * dp_batch_size] for j in range(n_batches)
+    ]
+    batches = [
+        dict(
+            input_ids=batch,
+            attention_mask=torch.ones_like(batch),
+        )
+        for batch in batches
+    ]
+    return batches

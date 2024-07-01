@@ -25,8 +25,6 @@ from realhf.impl.model.backend.utils import (
 from realhf.impl.model.modules.mlp import get_activation_fn
 from realhf.impl.model.nn.flatten_param import ContiguousParamSpec
 from realhf.impl.model.nn.real_llm_api import ReaLModel
-from realhf.impl.model.nn.real_llm_base import ReaLModelBlock
-from realhf.impl.model.nn.real_llm_generate import GenerationConfig
 
 WITHIN_MEGATRON_CONTEXT = False
 
@@ -310,7 +308,9 @@ class ReaLMegatronEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         tokenizer: transformers.PreTrainedTokenizerFast,
-        gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+        gconfig: model_api.GenerationHyperparameters = dataclasses.field(
+            default_factory=model_api.GenerationHyperparameters
+        ),
         num_micro_batches: Optional[int] = None,
     ):
         with megatron_ctx():

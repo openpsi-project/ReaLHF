@@ -44,7 +44,7 @@ from .real_llm_base import (
     real_model_head_param_count,
     real_model_tblock_param_count,
 )
-from .real_llm_generate import GenerationConfig, generate
+from .real_llm_generate import generate
 from .real_llm_parallel import partition_pipeline_layers
 
 logger = logging.getLogger("ReaLModel Interface")
@@ -821,7 +821,9 @@ def generate_helper(
     packed_input_ids: Optional[torch.Tensor] = None,
     cu_seqlens: Optional[torch.Tensor] = None,
     max_seqlen: Optional[int] = None,
-    gconfig: GenerationConfig = dataclasses.field(default_factory=GenerationConfig),
+    gconfig: model_api.GenerationHyperparameters = dataclasses.field(
+        default_factory=model_api.GenerationHyperparameters
+    ),
 ) -> DuckGenerationOutput:
     assert (packed_input_ids is None) == (cu_seqlens is None) == (max_seqlen is None)
     if attention_mask is None and input_ids is not None:
