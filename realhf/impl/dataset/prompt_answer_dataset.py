@@ -31,7 +31,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
             dataset_builder (Optional[Callable[[], List[Dict]]], optional): Alternative to dataset_path.
                 A callable that returns a list of dictionary. Defaults to None.
         """
-        self.util = util
+        self._util = util
         tokenizer = self.util.tokenizer
 
         data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
@@ -78,6 +78,10 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
             f"avg prompt length={np.mean(prompt_lengths):.1f}, "
             f"avg answer length={np.mean(seq_lengths) - np.mean(prompt_lengths):.1f}",
         )
+
+    @property
+    def util(self):
+        return self._util
 
     def __len__(self):
         return len(self.tokens["input_ids"])

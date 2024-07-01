@@ -10,6 +10,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 import numpy as np
 import torch.utils.data
 import transformers
+import random
 
 from realhf.api.core import model_api, system_api
 from realhf.base import datapack, logging, namedarray
@@ -193,6 +194,16 @@ def make_dataloader(
 
 
 def PackedDataLoader(dataset, *args, **kwargs):
+    if not isinstance(getattr(dataset, "util", None), DatasetUtility):
+        raise ValueError("Dataset must have a `util` attribute of type DatasetUtility.")
+    g = torch.Generator()
+    g.manual_seed(dataset.util.seed)
+
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
     return torch.utils.data.DataLoader(
         dataset,
         *args,
@@ -201,11 +212,15 @@ def PackedDataLoader(dataset, *args, **kwargs):
         # It is just a proper size to load data to workers.
         batch_size=512,
         shuffle=True,
+        generator=g,
+        worker_init_fn=seed_worker,
         **kwargs,
     )
 
 
 def PackedEvalDataLoader(dataset, *args, **kwargs):
+    if not isinstance(getattr(dataset, "util", None), DatasetUtility):
+        raise ValueError("Dataset must have a `util` attribute of type DatasetUtility.")
     return torch.utils.data.DataLoader(
         dataset,
         *args,
