@@ -105,7 +105,7 @@ Steps to Support a New HuggingFace Model
 
 We acknowledge that the current configuration and implementation of ``ReaLModel``
 do not support all features of HuggingFace models,
-such as MoE and shared embeddings.
+such as MoE.
 As a result, supporting a new HuggingFace model
 often requires modifications to files in ``impl/model/nn/``,
 which can be a challenging experience for users unfamiliar with the code architecture.
