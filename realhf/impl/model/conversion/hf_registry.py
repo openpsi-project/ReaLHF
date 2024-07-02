@@ -183,11 +183,10 @@ class HFModelRegistry:
         copy_time = time.perf_counter() - copy_tik
         load_times = "[" + ", ".join(f"{t:.2f}" for t in load_times) + "]"
         partition_times = "[" + ", ".join(f"{t:.2f}" for t in partition_times) + "]"
-        if os.getenv("REAL_LOG_LOAD_TIME", None) == "1":
-            logger.info(
-                f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
-                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s"
-            )
+        logger.debug(
+            f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
+            f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s"
+        )
         return model
 
     def save(
@@ -350,9 +349,8 @@ class HFModelRegistry:
         metadata_t = t1 - tik
         gather_cpu_t = t2 - t1
         dump_t = t3 - t2
-        if os.getenv("REAL_LOG_SAVE_TIME", None) == "1":
-            logger.info(
-                f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, "
-                f"gather/cpu copy cost={gather_cpu_t:.2f}s, "
-                f"dump cost={dump_t:.2f}s"
-            )
+        logger.debug(
+            f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, "
+            f"gather/cpu copy cost={gather_cpu_t:.2f}s, "
+            f"dump cost={dump_t:.2f}s"
+        )

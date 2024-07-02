@@ -184,14 +184,10 @@ class ReaLModel(nn.Module):
             return self.layers[-1]
         return None
 
-    @property
-    def shared_embedding_or_output_weights(self) -> bool:
-        return self.config.tied_embedding
-
     def shared_embedding_or_output_weight(self) -> None | torch.Tensor:
-        if not self.shared_embedding_or_output_weights or self.config.is_critic:
+        # NOTE: Use this name in consistent with Megatron-LM.
+        if not self.config.tied_embedding or self.config.is_critic:
             return None
-        # FIXME: what about pp_size = 1?
         if constants.is_first_pipe_stage():
             return self.layers[0].wte.weight
         elif constants.is_last_pipe_stage():
