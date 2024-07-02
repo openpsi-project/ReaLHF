@@ -85,6 +85,8 @@ def slice_intervals(
     # assert len(intervals) == len(intervals_cpu)
     # assert len(set([x[0] for x in intervals_cpu])) == len(intervals_cpu)
 
+    # FIXME: This is a temporary fix for interval slicing.
+    # It's correct but slow. We should use the CUDA/C++ version in the future.
     res = torch._C._nn.flatten_dense_tensors(
         [tensor[start:end] for start, end in intervals_cpu]
     )
@@ -122,6 +124,9 @@ def set_intervals(
     )
     assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
     # if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+
+    # FIXME: This is a temporary fix for interval value scattering.
+    # It's correct but slow. We should use the CUDA/C++ version in the future.
     offset = 0
     for i, j in intervals_cpu:
         assert i >= 0

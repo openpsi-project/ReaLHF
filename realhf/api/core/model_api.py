@@ -58,8 +58,11 @@ class ReaLModelConfig:
     :type n_layers: int
     :param n_kv_heads: Number of key-value attention heads.
     :type n_kv_heads: int
+    :param n_q_heads: Number of query attention heads.
+    :type n_q_heads: int
     :param head_dim: Dimension of each attention head.
-        The number of query heads is hidden_dim // head_dim.
+        If None, defaults to hidden_dim // n_q_heads.
+        If given, the query layer will have shape (hidden_dim, head_dim * n_q_heads).
     :type head_dim: int
     :param hidden_dim: Hidden dimension of the transformer block.
     :type hidden_dim: int
@@ -83,9 +86,11 @@ class ReaLModelConfig:
     :param scale_attn_by_inverse_layer_idx: Whether to scale the attention weights
         by the inverse of the layer index.
     :type scale_attn_by_inverse_layer_idx: bool
-    :param use_attention_bias: Whether to use attention bias.
+    :param use_attention_bias: Whether to use bias for QKV layers.
     :type use_attention_bias: bool
-    :param layer_norm_type: Type of layer normalization. Either None or "rms".
+    :param use_attn_proj_bias: Whether to use bias for the attention projection layer.
+    :type use_attn_proj_bias: bool
+    :param layer_norm_type: Type of layer normalization, can by None, "rms", or "gemma".
     :type layer_norm_type: Optional[str]
     :param mlp_type: Type of the MLP. Either None or "llama".
     :type mlp_type: Optional[str]
@@ -99,16 +104,24 @@ class ReaLModelConfig:
     :type rotary_scaling: Optional[float]
     :param rotary_scaling_type: Type of scaling for the rotary embedding.
     :type rotary_scaling_type: Optional[str]
+    :param normalize_embed: Whether to normalize the embeddings
+        before transformer blocks. Used by Gemma.
+    :type normalize_embed: bool
+    :param abs_position_embedding_offset: Offset for the absolute position embedding.
+        Used by OPT, but OPT is currently not supported.
+    :type abs_position_embedding_offset: int
+    :param do_layernorm_before: Whether to apply layer normalization before the attention
+        rather than after. Used by OPT, but OPT is currently not supported.
+    :type do_layernorm_before: bool
+    :param tied_embedding: Whether to share the embeddings and output weights.
+        Used by models like GPT-2 and Gemma.
+    :type tied_embedding: bool
     :param is_critic: Whether the model is a critic model.
     :type is_critic: bool
     :param gradient_accumulation_fusion: Whether to fuse
         gradient accumulation in Megatron.
         Currently not supported.
     :type gradient_accumulation_fusion: bool
-    :param tied_embedding: Whether to share
-        the embeddings and output weights.
-        Currently not supported.
-    :type tied_embedding: bool
     """
 
     ### Architectural configurations. ###

@@ -550,6 +550,7 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
 @pytest.mark.slow
 @pytest.mark.distributed
 def test_param_realloc(
+    tmp_path: pathlib.Path,
     model_family_name: str,
     is_critic: bool,
     from_pp_dp_mp: Tuple,
@@ -564,15 +565,12 @@ def test_param_realloc(
         return
     expr_name = uuid.uuid4()
     trial_name = uuid.uuid4()
-    clear_name_resolve(expr_name=expr_name, trial_name=trial_name)
-    tmp_dir = pathlib.Path(f"/tmp/{expr_name}/{trial_name}")
-    os.makedirs(tmp_dir, exist_ok=True)
     test_impl = LocalMultiProcessTest(
         world_size=8,
         func=_test_para_realloc,
         expr_name=expr_name,
         trial_name=trial_name,
-        tmp_path=tmp_dir,
+        tmp_path=tmp_path,
         model_family_name=model_family_name,
         is_critic=is_critic,
         from_pp_dp_mp=from_pp_dp_mp,
@@ -583,4 +581,3 @@ def test_param_realloc(
         skip_saveload=skip_saveload,
     )
     test_impl.launch()
-    shutil.rmtree(tmp_dir)

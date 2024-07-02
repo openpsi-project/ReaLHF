@@ -57,7 +57,6 @@ def _save_then_load(
     assert dist.get_world_size() == 8, dist.get_world_size()
     assert tmp_path.exists()
     init_save_path = tmp_path / "init"
-    hf_save_path = tmp_path / "hf"
     real_save_path = tmp_path / "real"
     real_save_path2 = tmp_path / "real2"
 
@@ -145,6 +144,7 @@ def _save_then_load(
 @pytest.mark.parametrize("init_critic_from_actor", [True, False])
 @pytest.mark.parametrize("pp_dp_mp", [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)])
 def test_save_then_load(
+    tmp_path: pathlib.Path,
     model_family_name: str,
     is_critic: bool,
     init_critic_from_actor: bool,
@@ -156,9 +156,6 @@ def test_save_then_load(
         return
     expr_name = uuid.uuid4()
     trial_name = uuid.uuid4()
-    clear_name_resolve(expr_name=expr_name, trial_name=trial_name)
-    tmp_path = pathlib.Path(f"/tmp/{expr_name}/{trial_name}/{uuid.uuid4()}")
-    os.makedirs(tmp_path, exist_ok=True)
     test_impl = LocalMultiProcessTest(
         world_size=8,
         func=_save_then_load,
@@ -171,4 +168,3 @@ def test_save_then_load(
         tmp_path=tmp_path,
     )
     test_impl.launch()
-    shutil.rmtree(tmp_path)
