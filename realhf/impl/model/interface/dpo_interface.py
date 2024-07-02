@@ -178,7 +178,6 @@ class DPOInterface(model_api.ModelInterface):
             seqlens_cpu=data.metadata["seqlens"],
             packed_input_ids=packed_input_ids,
             cu_seqlens=cu_seqlens,
-            input_lens_for_partition=pair_lens,
             version_steps=model.version.global_step,
             loss_fn=_dpo_loss_from_model_outputs,
             **loss_fn_kwargs,

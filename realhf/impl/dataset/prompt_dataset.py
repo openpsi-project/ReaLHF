@@ -30,6 +30,7 @@ class PromptDataset(torch.utils.data.Dataset):
                 A callable that returns a list of dictionary. Defaults to None.
             pad_to_max_length (bool): Whether to pad the prompts to max_length. Defaults to False.
         """
+        self._util = util
         self.max_length = max_length
 
         data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
@@ -50,6 +51,10 @@ class PromptDataset(torch.utils.data.Dataset):
         assert all(len(x) == l for x, l in zip(self.prompts, self.prompt_lengths))
 
         logger.info(f"Number of prompts in the dataset: {len(self.prompts)}")
+
+    @property
+    def util(self):
+        return self._util
 
     def __len__(self):
         return len(self.prompts)

@@ -309,7 +309,6 @@ class PPOConfig(CommonExperimentConfig):
             output_data=[
                 "seq_no_eos_mask",
                 "packed_seq",
-                "cu_seqlens",
                 "packed_logprobs",
                 "prompt_mask",
                 "packed_logits_mask",
@@ -325,7 +324,7 @@ class PPOConfig(CommonExperimentConfig):
             interface_impl=rw_interface,
             model_type=self.rew.type,
             model_path=self.rew.path,
-            input_data=["packed_seq", "cu_seqlens"],
+            input_data=["packed_seq"],
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
@@ -333,7 +332,7 @@ class PPOConfig(CommonExperimentConfig):
             max_n_seqs=self.dataset.train_bs_n_seqs,
         )
 
-        inf_ref_inputs = ["packed_seq", "cu_seqlens"]
+        inf_ref_inputs = ["packed_seq"]
         if not self.ppo.force_no_logits_mask:
             inf_ref_inputs.append(
                 "packed_logits_mask",
@@ -357,7 +356,7 @@ class PPOConfig(CommonExperimentConfig):
             interface_impl=critic_interface,
             model_type=self.critic.type,
             model_path=self.critic.path,
-            input_data=["packed_seq", "cu_seqlens", "seq_no_eos_mask"],
+            input_data=["packed_seq", "seq_no_eos_mask"],
             output_data=["scores"],
             output_key_remap={"scores": "values"},
             min_n_seqs=self.dataset.train_bs_n_seqs,
@@ -366,7 +365,6 @@ class PPOConfig(CommonExperimentConfig):
 
         train_actor_inputs = [
             "packed_seq",
-            "cu_seqlens",
             "packed_logprobs",
             "packed_ref_logprobs",
             "rewards",
@@ -399,7 +397,6 @@ class PPOConfig(CommonExperimentConfig):
             model_path=self.critic.path,
             input_data=[
                 "packed_seq",
-                "cu_seqlens",
                 "packed_logprobs",
                 "packed_ref_logprobs",
                 "rewards",

@@ -3,27 +3,23 @@
 from itertools import product as cartesian_product
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-import torch.distributed
+import torch.distributed as dist
 
 import realhf.base.logging as logging
 
 logger = logging.getLogger("Topology")
 
-GLOBAL_PROCESS_GROUP_REGISTRY: Dict[
-    Tuple[Tuple[int], str], torch.distributed.ProcessGroup
-] = {}
+GLOBAL_PROCESS_GROUP_REGISTRY: Dict[Tuple[Tuple[int], str], dist.ProcessGroup] = {}
 
 
 def new_or_get_group(ranks: List[int], backend=None):
     if backend is None:
-        backend = torch.distributed.get_backend()
+        backend = dist.get_backend()
     ranks = tuple(sorted(ranks))
     global GLOBAL_PROCESS_GROUP_REGISTRY
     key = (ranks, backend)
     if key not in GLOBAL_PROCESS_GROUP_REGISTRY:
-        GLOBAL_PROCESS_GROUP_REGISTRY[key] = torch.distributed.new_group(
-            ranks, backend=backend
-        )
+        GLOBAL_PROCESS_GROUP_REGISTRY[key] = dist.new_group(ranks, backend=backend)
     return GLOBAL_PROCESS_GROUP_REGISTRY[key]
 
 
@@ -328,11 +324,9 @@ class ParallelGrid:
     def __init__(
         self,
         topology: PipeModelDataParallelTopology,
-        process_group: torch.distributed.ProcessGroup,
+        process_group: dist.ProcessGroup,
         rank_mapping: Optional[Dict[int, int]] = None,
     ):
-        from deepspeed import comm as dist
-
         # NOTE: DeepSpeed will access *EVERY* attribute they defined. We need to remain
         # the original semantics, so the attribute name may not truthfully mean what the attribute is.
         # E.g., self.global_rank is not the global rank of the whole world including the master worker,
@@ -491,8 +485,6 @@ class ParallelGrid:
         return p2p_lists
 
     def _is_grid_valid(self):
-        from deepspeed import comm as dist
-
         ranks = 1
         for ax in self._topo.get_axis_names():
             ranks *= self._topo.get_dim(ax)

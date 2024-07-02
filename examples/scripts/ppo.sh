@@ -1,38 +1,39 @@
-SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft-debug/20240603-1/default/epoch7epochstep11globalstep50/
-RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw-debug/20240603-1/default/epoch1epochstep15globalstep15/
+MODEL_FAMILY=gpt2
+SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/$MODEL_FAMILY/default/epoch7epochstep5globalstep50/
+RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw/$MODEL_FAMILY/default/epoch2epochstep25globalstep50/
 CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quickstart ppo \
-    experiment_name=quickstart-ppo trial_name=release \
+    experiment_name=quickstart-ppo trial_name=$MODEL_FAMILY \
     n_nodes=1 \
     total_train_epochs=1 \
     allocation_mode=heuristic \
     save_freq_steps=null \
-    actor.type._class=llama \
-    actor.type.size=7 \
+    actor.type._class=$MODEL_FAMILY \
+    actor.type.size=0 \
     actor.type.is_critic=False \
     actor.path=$SFT_MODEL_PATH \
     actor.gradient_checkpointing=True \
-    critic.type._class=llama \
-    critic.type.size=7 \
+    critic.type._class=$MODEL_FAMILY \
+    critic.type.size=0 \
     critic.type.is_critic=True \
     critic.path=$RW_MODEL_PATH \
     critic.gradient_checkpointing=True \
-    ref.type._class=llama \
-    ref.type.size=7 \
+    ref.type._class=$MODEL_FAMILY \
+    ref.type.size=0 \
     ref.type.is_critic=False \
     ref.path=$SFT_MODEL_PATH \
-    rew.type._class=llama \
-    rew.type.size=7 \
+    rew.type._class=$MODEL_FAMILY \
+    rew.type.size=0 \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
     dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
-    dataset.max_prompt_len=256 \
+    dataset.max_prompt_len=128 \
     dataset.train_bs_n_seqs=128 \
-    ppo.max_new_tokens=256 \
-    ppo.min_new_tokens=256 \
+    ppo.max_new_tokens=512 \
+    ppo.min_new_tokens=512 \
     ppo.ppo_n_minibatches=4 \
     ppo.kl_ctl=0.1 \
     ppo.force_no_logits_mask=False \
     ppo.value_eps_clip=0.2 \
-    ppo.reward_output_scaling=10.0 \
+    ppo.reward_output_scaling=1.0 \
     ppo.adv_norm=True ppo.value_norm=True \
     ppo.top_p=0.9 ppo.top_k=1000 

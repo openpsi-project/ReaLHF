@@ -10,7 +10,7 @@ import transformers
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging
-from realhf.base.saveload_utils import split_state_dict_into_shards
+from realhf.base.saveload_utils import load_safetensor, split_state_dict_into_shards
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_parallel import (
     mp_merge_key,
@@ -49,6 +49,8 @@ class HFModelRegistry:
             )
         config = self.config_from_hf_converter(hf_config)
         config.is_critic = is_critic
+        if config.is_critic:
+            config.tied_embedding = False
         return config
 
     def config_to_hf(
@@ -62,6 +64,7 @@ class HFModelRegistry:
         load_dir: str,
         init_critic_from_actor: bool = False,
     ):
+        # TODO: expand odd vocab size to support tensor parallel
         # NOTE: moving this upwards will result in circular import
 
         tik = time.perf_counter()
@@ -83,20 +86,49 @@ class HFModelRegistry:
             else:
                 required_hf_sd_names += self.tblock_param_names(model.config, lidx - 1)
 
+        # Load embedding weights as well if tied_embedding is True.
+        required_hf_sd_names = set(required_hf_sd_names)
+        if (
+            model.config.tied_embedding
+            and not model.config.is_critic
+            and constants.is_last_pipe_stage()
+        ):
+            required_hf_sd_names.union(self.embedding_param_names(model.config))
+
         if os.path.exists(os.path.join(load_dir, "pytorch_model.bin.index.json")):
             with open(os.path.join(load_dir, "pytorch_model.bin.index.json"), "r") as f:
                 hf_sd_mapping = json.load(f)["weight_map"]
-            files_to_load = set(hf_sd_mapping[name] for name in required_hf_sd_names)
-        else:
+            files_to_load = set()
+            for name in required_hf_sd_names:
+                if name in hf_sd_mapping:
+                    files_to_load.add(hf_sd_mapping[name])
+        elif os.path.exists(os.path.join(load_dir, "model.safetensors.index.json")):
+            with open(os.path.join(load_dir, "model.safetensors.index.json"), "r") as f:
+                hf_sd_mapping = json.load(f)["weight_map"]
+            files_to_load = set()
+            for name in required_hf_sd_names:
+                if name in hf_sd_mapping:
+                    files_to_load.add(hf_sd_mapping[name])
+        elif os.path.exists(os.path.join(load_dir, "pytorch_model.bin")):
             files_to_load = ["pytorch_model.bin"]
+        elif os.path.exists(os.path.join(load_dir, "model.safetensors")):
+            files_to_load = ["model.safetensors"]
+        else:
+            raise ValueError(
+                f"Could not find model file in {load_dir}. "
+                "Make sure you have downloaded the model correctly."
+            )
         setup_time = time.perf_counter() - tik
 
         load_times, partition_times = [], []
         state_dict = {}
         for fn in files_to_load:
             load_tik = time.perf_counter()
-            # set map_location to be CPU is a little bit faster
-            sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
+            if fn.endswith(".safetensors"):
+                sd = load_safetensor(os.path.join(load_dir, fn))
+            else:
+                # set map_location to be CPU is a little bit faster
+                sd = torch.load(os.path.join(load_dir, fn), map_location="cpu")
             partition_tik = time.perf_counter()
             sd = {k: v for k, v in sd.items() if k in required_hf_sd_names}
             sd = self.sd_from_hf_converter(sd, model.config)
@@ -110,12 +142,30 @@ class HFModelRegistry:
             load_times.append(partition_tik - load_tik)
             partition_times.append(time.perf_counter() - partition_tik)
 
-        copy_tik = time.perf_counter()
+        for k, v in state_dict.items():
+            if v.isnan().any() or v.isinf().any():
+                raise ValueError(f"Loaded checkpoint {k} has NaN or Inf. Aborted.")
+
+        # Remap embedding weights to the last layer if tied_embedding is True.
         if (
-            init_critic_from_actor
-            and f"{model.config.n_layers + 1}.weight" in state_dict
+            model.config.tied_embedding
+            and not model.config.is_critic
+            and constants.is_last_pipe_stage()
         ):
-            state_dict.pop(f"{model.config.n_layers + 1}.weight")
+            state_dict[f"{model.config.n_layers + 1}.weight"] = state_dict[
+                "0.wte.weight"
+            ]
+        if not constants.is_first_pipe_stage() and "0.wte.weight" in state_dict:
+            state_dict.pop("0.wte.weight")
+
+        copy_tik = time.perf_counter()
+        if init_critic_from_actor and constants.is_last_pipe_stage():
+            if f"{model.config.n_layers + 1}.weight" in state_dict:
+                state_dict.pop(f"{model.config.n_layers + 1}.weight")
+            assert len(state_dict) == len(model.state_dict()) - 1, (
+                len(state_dict),
+                len(model.state_dict()),
+            )
             model.load_state_dict(state_dict, strict=False)
         else:
             try:
@@ -127,16 +177,16 @@ class HFModelRegistry:
                     f"in the model config if you are initializing "
                     f"a critic model from a regular LLM? Err: {e}"
                 )
+                raise e
 
         # Some logging info
         copy_time = time.perf_counter() - copy_tik
         load_times = "[" + ", ".join(f"{t:.2f}" for t in load_times) + "]"
         partition_times = "[" + ", ".join(f"{t:.2f}" for t in partition_times) + "]"
-        if os.getenv("REAL_LOG_LOAD_TIME", None) == "1":
-            logger.info(
-                f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
-                f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s"
-            )
+        logger.debug(
+            f"Loading from HuggingFace Model setup time cost={setup_time:.2f}s, load time cost={load_times}, "
+            f"partition time cost={partition_times}, copy time cost={copy_time:.2f}s"
+        )
         return model
 
     def save(
@@ -197,6 +247,12 @@ class HFModelRegistry:
         cpu_sd = {}
         for k, v in sd.items():
             if (
+                model.config.tied_embedding
+                and not model.config.is_critic
+                and k == f"{model.config.n_layers + 1}.weight"
+            ):
+                continue
+            if (
                 "k_attn" in k or "v_attn" in k
             ) and model.config.n_kv_heads % mp_size != 0:
                 gathered = v
@@ -210,6 +266,10 @@ class HFModelRegistry:
 
         hf_sd = self.sd_to_hf_converter(cpu_sd, model.config)
         hf_config = self.config_to_hf_converter(model.config)
+
+        for k, v in hf_sd.items():
+            if v.isnan().any() or v.isinf().any():
+                raise ValueError(f"Saving checkpoint {k} with NaN or Inf. Aborted.")
 
         param_size = sum(
             [value.numel() * value.element_size() for value in hf_sd.values()]
@@ -289,7 +349,8 @@ class HFModelRegistry:
         metadata_t = t1 - tik
         gather_cpu_t = t2 - t1
         dump_t = t3 - t2
-        logger.info(
-            f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, gather/cpu copy cost={gather_cpu_t:.2f}s, "
+        logger.debug(
+            f"Saving to HuggingFace Model metadata cost={metadata_t:.2f}s, "
+            f"gather/cpu copy cost={gather_cpu_t:.2f}s, "
             f"dump cost={dump_t:.2f}s"
         )

@@ -214,7 +214,7 @@ def maybe_capture_cudagraph(
     cache_seqlens = ys[0].cache_seqlens
     input_buffers = dict(
         input_ids=torch.ones((bs,), dtype=torch.long, device="cuda"),
-        position_ids=cache_seqlens.unsqueeze(-1).clone(),
+        position_ids=cache_seqlens.clone(),
         k_caches=[y.k_cache for y in ys],
         v_caches=[y.v_cache for y in ys],
         cache_seqlens=cache_seqlens.clone(),
@@ -318,7 +318,7 @@ def generate(
         if graph is not None:
             input_buffers["input_ids"][:bs].copy_(next_tokens, non_blocking=True)
             input_buffers["position_ids"][:bs].copy_(
-                ys[0].cache_seqlens.unsqueeze(-1), non_blocking=True
+                ys[0].cache_seqlens, non_blocking=True
             )
             input_buffers["cache_seqlens"][:bs].copy_(
                 ys[0].cache_seqlens, non_blocking=True

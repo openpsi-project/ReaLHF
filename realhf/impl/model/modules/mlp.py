@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from transformers.activations import ACT2FN
 
 import realhf.base.constants as constants
 import realhf.base.logging as logging
@@ -20,16 +21,7 @@ logger = logging.getLogger("Modules")
 
 
 def get_activation_fn(activation_function: str) -> Callable:
-    if activation_function == "gelu":
-        return nn.functional.gelu
-    elif activation_function == "gelu_new":
-        from .activations import new_gelu_activation
-
-        return new_gelu_activation
-    elif activation_function == "silu":
-        return nn.SiLU()
-    else:
-        raise NotImplementedError('Only "gelu" activation function is available.')
+    return ACT2FN[activation_function]
 
 
 SEQUENCE_PARALLEL_WARNED = False
@@ -46,6 +38,7 @@ class LayerNormQKVLinear(nn.Module):
         layer_norm_epsilon: float,
         use_attention_bias: bool,
         layer_norm_type: Optional[str] = None,
+        do_layernorm_before: bool = True,
         # parallelism
         model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         gradient_accumulation_fusion: bool = False,
@@ -71,6 +64,8 @@ class LayerNormQKVLinear(nn.Module):
             layer_norm_fn = nn.LayerNorm
         elif layer_norm_type == "rms":
             layer_norm_fn = LlamaRMSNorm
+        elif layer_norm_type == "gemma":
+            layer_norm_fn = GemmaRMSNorm
         self.ln = layer_norm_fn(
             input_dim, eps=layer_norm_epsilon, dtype=dtype, device=device
         )
@@ -183,8 +178,11 @@ class LayerNormQKVLinear(nn.Module):
         self.nq = n_q_heads
         self.nkv = n_kv_heads
 
+        self.do_layernorm_before = do_layernorm_before
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.ln(x)
+        if self.do_layernorm_before:
+            hidden_states = self.ln(x)
         if not self.model_parallel:
             q = self.q_attn(hidden_states)
             k = self.k_attn(hidden_states)
@@ -236,6 +234,7 @@ class LayerNormMLP(nn.Module):
         resid_pdrop: float,
         activation_function: str,
         layer_norm_epsilon: float,
+        do_layernorm_before: bool = True,
         # parallelism
         model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         gradient_accumulation_fusion: bool = False,
@@ -286,9 +285,11 @@ class LayerNormMLP(nn.Module):
             )
         self.act = get_activation_fn(activation_function)
         self.dropout = nn.Dropout(resid_pdrop)
+        self.do_layernorm_before = do_layernorm_before
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.ln(hidden_states)
+        if self.do_layernorm_before:
+            hidden_states = self.ln(hidden_states)
         hidden_states = self.c_fc(hidden_states)
         hidden_states = self.act(hidden_states)
         hidden_states = self.c_proj(hidden_states)
@@ -303,6 +304,7 @@ class LlamaLayerNormMLP(nn.Module):
         intermediate_dim: int,
         activation_function: str,
         layer_norm_epsilon: float,
+        layer_norm_type: str,
         # parallelism
         model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         gradient_accumulation_fusion: bool = False,
@@ -326,9 +328,17 @@ class LlamaLayerNormMLP(nn.Module):
             dtype = torch.float16
         self.hidden_size = hidden_dim
         self.intermediate_size = intermediate_dim
-        self.ln = LlamaRMSNorm(
-            hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device
-        )
+
+        if layer_norm_type == "rms":
+            self.ln = LlamaRMSNorm(
+                hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device
+            )
+        elif layer_norm_type == "gemma":
+            self.ln = GemmaRMSNorm(
+                hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device
+            )
+        else:
+            raise NotImplementedError()
 
         self.model_parallel = model_parallel
         if not model_parallel:
@@ -429,6 +439,29 @@ class _LlamaRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
+class GemmaRMSNorm(nn.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        eps: float = 1e-6,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(hidden_size, dtype=dtype, device=device))
+
+    def _norm(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x: torch.Tensor):
+        output = self._norm(x.float())
+        # Llama does x.to(float16) * w whilst Gemma is (x * w).to(float16)
+        # See https://github.com/huggingface/transformers/pull/29402
+        output = output * (1.0 + self.weight.float())
+        return output.type_as(x)
+
+
 if constants.use_te_impl():
     try:
         # HACK: we use transformer engine's rms norm as long as we can find the transformer engine package
@@ -467,6 +500,7 @@ if constants.use_te_impl():
         intermediate_dim: int,
         activation_function: str,
         layer_norm_epsilon: float,
+        layer_norm_type: str,
         # parallelism
         model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         gradient_accumulation_fusion: bool = False,
@@ -474,6 +508,7 @@ if constants.use_te_impl():
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
+        assert layer_norm_type == "rms"
         assert activation_function == "silu"
         return _TELayerNormMLP(
             hidden_size=hidden_dim,

@@ -4,6 +4,7 @@ import functools
 import inspect
 import json
 import os
+import random
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -189,6 +190,16 @@ def make_dataloader(
 
 
 def PackedDataLoader(dataset, *args, **kwargs):
+    if not isinstance(getattr(dataset, "util", None), DatasetUtility):
+        raise ValueError("Dataset must have a `util` attribute of type DatasetUtility.")
+    g = torch.Generator()
+    g.manual_seed(dataset.util.seed)
+
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
     return torch.utils.data.DataLoader(
         dataset,
         *args,
@@ -197,11 +208,15 @@ def PackedDataLoader(dataset, *args, **kwargs):
         # It is just a proper size to load data to workers.
         batch_size=512,
         shuffle=True,
+        generator=g,
+        worker_init_fn=seed_worker,
         **kwargs,
     )
 
 
 def PackedEvalDataLoader(dataset, *args, **kwargs):
+    if not isinstance(getattr(dataset, "util", None), DatasetUtility):
+        raise ValueError("Dataset must have a `util` attribute of type DatasetUtility.")
     return torch.utils.data.DataLoader(
         dataset,
         *args,
@@ -223,11 +238,13 @@ def split_sequences(
     min_size: int = 1,
     return_partitions=False,
 ) -> List[namedarray.NamedArray]:
-    # FIXME: remove cu_seqlens here
     if src.metadata.get("seqlens", None) is None:
         raise ValueError("seqlens must be in the metadata of the input namedarray.")
 
     seqlens = src.metadata["seqlens"]
+
+    n_seqs = len(seqlens)
+    total_seqlens = sum(seqlens)
 
     if n_dp is None:
         partitions = [(i, i + 1) for i in range(len(seqlens))]
@@ -258,7 +275,7 @@ def split_sequences(
             # so we must enumerate each possible key and deal with them separately, etc.
             if v is None:
                 sp[k] = None
-            elif k in ["prompt_cu_seqlens", "cu_seqlens"]:
+            elif "cu_seqlens" in k:
                 continue
             elif k in [
                 "prompt_lens",
@@ -272,6 +289,7 @@ def split_sequences(
                 "group_input_lens",
                 "seqlogp",
             ]:
+                assert v.shape[0] == n_seqs, (k, v.shape, total_seqlens, n_seqs)
                 start, end = partitions[i]
                 sp[k] = v[start:end]
             elif k in [
@@ -283,6 +301,7 @@ def split_sequences(
                 "logits_mask",
                 "packed_prompts",
             ]:
+                assert v.shape[0] == total_seqlens, (k, v.shape, total_seqlens, n_seqs)
                 sp[k] = v[offsets[i] : offsets[i] + batch_seqlens[i]]
             elif k in [
                 "packed_logprobs",
@@ -294,6 +313,12 @@ def split_sequences(
                 "kl_rewards",
                 "returns",
             ]:
+                assert v.shape[0] == total_seqlens - n_seqs, (
+                    k,
+                    v.shape,
+                    total_seqlens,
+                    n_seqs,
+                )
                 sp[k] = v[short1offsets[i] : short1offsets[i] + short1batch_seqlens[i]]
             elif not torch.is_tensor(src[k]):
                 # for constant, preserve value for each splitted instance
@@ -303,25 +328,6 @@ def split_sequences(
                     f"Unknown key {k} in packed data. We don't know how to split it. "
                     f"Check api/core/data_api.py for implemented keys."
                 )
-
-    if "cu_seqlens" in src.keys():
-        for x, (start, end) in zip(splitted_data, partitions):
-            slens = torch.tensor(
-                seqlens[start:end],
-                dtype=torch.int32,
-                device=src["cu_seqlens"].device,
-            )
-            x["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
-
-    if "prompt_cu_seqlens" in src.keys():
-        raw_prompt_lens = src["prompt_cu_seqlens"][1:] - src["prompt_cu_seqlens"][:-1]
-        all_prompt_lens: List[torch.IntTensor] = [
-            raw_prompt_lens[start:end].int() for start, end in partitions
-        ]
-        for x, pslens in zip(splitted_data, all_prompt_lens):
-            x["prompt_cu_seqlens"] = torch.nn.functional.pad(
-                pslens.cumsum(dim=0), (1, 0)
-            ).int()
 
     splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
     for x, (start, end) in zip(splitted_data, partitions):

@@ -59,18 +59,6 @@ def _ppo_actor_loss_from_model_outputs(
         loss_mask=ppo_loss_mask,
     )
 
-    # FIXME: The memory efficient loss function is buggy. It does not produce gradients correctly.
-    # assert ppo_loss_mask is not None
-    # (loss, importance_weight, clip_ratio, approx_kl) = (ppo_functional.memory_efficient_ppo_loss_fn(
-    #     logits=logits,
-    #     cu_seqlens=cu_seqlens,
-    #     packed_input_ids=packed_input_ids,
-    #     ppo_loss_mask=ppo_loss_mask,
-    #     old_logprobs=old_logp,
-    #     advantages=advantages,
-    #     eps_clip=eps_clip,
-    # ))
-    # loss = torch.where(ppo_loss_mask, loss, 0.0).sum() / ppo_loss_mask.count_nonzero()
     importance_weight = ppo_stat["importance_weight"].float() * n_tokens
     clip_ratio = ppo_stat["clip_ratio"].float() * n_tokens
     approx_kl = ppo_stat["approx_kl"].float() * n_tokens
@@ -236,12 +224,9 @@ class PPOActorInterface(model_api.ModelInterface):
             gen_lengths=gen_lengths,
         )
 
-        cu_seqlens = torch.nn.functional.pad(gen_lengths.cumsum(0), (1, 0))
-
         res = dict(
             seq_no_eos_mask=seq_no_eos_mask,
             packed_seq=packed_seq,
-            cu_seqlens=cu_seqlens,
             packed_logprobs=packed_logprobs,
             packed_logits_mask=(
                 packed_logits_mask.bool()
@@ -261,9 +246,10 @@ class PPOActorInterface(model_api.ModelInterface):
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
 
-        cu_seqlens = data["cu_seqlens"].int()
-        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-        max_seqlen = int(max(input_lens))
+        input_lens = torch.tensor(
+            data.metadata["seqlens"], dtype=torch.int32, device=model.device
+        )
+        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
 
         logits = module.forward(
             seqlens_cpu=data.metadata["seqlens"],
@@ -292,7 +278,10 @@ class PPOActorInterface(model_api.ModelInterface):
         old_logp: torch.FloatTensor = data_["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = data_["packed_ref_logprobs"].float()
         prompt_mask = data_["prompt_mask"]
-        cu_seqlens = data_["cu_seqlens"].int()
+        input_lens = torch.tensor(
+            data_.metadata["seqlens"], dtype=torch.int32, device=model.device
+        )
+        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         reward_score = data_["rewards"].float()
         values = data_["values"].float()
         seq_no_eos_mask = data_["seq_no_eos_mask"]
@@ -309,7 +298,6 @@ class PPOActorInterface(model_api.ModelInterface):
                 values[cu_seqlens[i + 1] - 1] = 0.0
 
         # Shift the loss mask by one token for each packed sequences.
-        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         short1cu_seqlens = cu_seqlens.clone()
         short1cu_seqlens[1:] -= torch.ones_like(cu_seqlens[1:]).cumsum(0)
         loss_mask = prompt_mask.logical_not()
@@ -363,7 +351,7 @@ class PPOActorInterface(model_api.ModelInterface):
                 old_logp=old_logp,
                 ppo_loss_mask=loss_mask,
                 packed_seq=data_["packed_seq"],
-                cu_seqlens=data_["cu_seqlens"].int(),
+                cu_seqlens=cu_seqlens.int(),
                 kl_rewards=kl_rewards,
                 packed_logits_mask=(
                     data_["packed_logits_mask"]
@@ -388,7 +376,7 @@ class PPOActorInterface(model_api.ModelInterface):
         _advantages = advantages.sum()
         _kl_rewards = (kl_rewards * loss_mask).sum()
         prompt_len = prompt_mask.count_nonzero().float()
-        seq_len = (cu_seqlens[1:] - cu_seqlens[:-1]).float().sum()
+        seq_len = input_lens.float().sum()
         dist.all_reduce(_n_seqs, group=constants.data_parallel_group())
         dist.all_reduce(task_reward, group=constants.data_parallel_group())
         dist.all_reduce(_advantages, group=constants.data_parallel_group())
@@ -425,8 +413,10 @@ class PPOActorInterface(model_api.ModelInterface):
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
         for data in datas:
-            cu_seqlens = data["cu_seqlens"]
-            input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+            input_lens = torch.tensor(
+                data.metadata["seqlens"], dtype=torch.int32, device=model.device
+            )
+            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
             logits_mask = (
                 data["packed_logits_mask"] if "packed_logits_mask" in data else None
             )
@@ -448,7 +438,7 @@ class PPOActorInterface(model_api.ModelInterface):
             stats = module.train_batch(
                 seqlens_cpu=seqlens,
                 packed_input_ids=data["packed_seq"],
-                cu_seqlens=data["cu_seqlens"],
+                cu_seqlens=cu_seqlens,
                 version_steps=model.version.global_step,
                 loss_fn=_ppo_actor_loss_from_model_outputs,
                 **loss_fn_kwargs,
@@ -598,8 +588,10 @@ class PPOCriticInterface(model_api.ModelInterface):
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
 
-        cu_seqlens = data["cu_seqlens"].int()
-        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+        input_lens = torch.tensor(
+            data.metadata["seqlens"], dtype=torch.int32, device=model.device
+        )
+        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         max_seqlen = int(max(input_lens))
 
         scores = module.forward(
@@ -624,7 +616,10 @@ class PPOCriticInterface(model_api.ModelInterface):
         old_logp: torch.FloatTensor = data_["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = data_["packed_ref_logprobs"].float()
         prompt_mask = data_["prompt_mask"]
-        cu_seqlens = data_["cu_seqlens"].int()
+        input_lens = torch.tensor(
+            data_.metadata["seqlens"], dtype=torch.int32, device=model.device
+        )
+        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         reward_score = data_["rewards"].float()
         values = data_["values"].float()
         seq_no_eos_mask = data_["seq_no_eos_mask"]
@@ -697,7 +692,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                 ppo_loss_mask=loss_mask,
                 kl_rewards=kl_rewards,
                 packed_seq=data_["packed_seq"],
-                cu_seqlens=data_["cu_seqlens"],
+                cu_seqlens=cu_seqlens,
             )
         )
         data_.register_metadata(seqlens=batch_seqlens)
@@ -718,7 +713,10 @@ class PPOCriticInterface(model_api.ModelInterface):
         train_stats = collections.defaultdict(lambda: 0)
         offset = 0
         for data in datas:
-            input_lens = data["cu_seqlens"][1:] - data["cu_seqlens"][:-1]
+            input_lens = torch.tensor(
+                data.metadata["seqlens"], dtype=torch.int32, device=model.device
+            )
+            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
             seqlens_cpu = batch_seqlens[offset : offset + input_lens.shape[0]]
             offset += input_lens.shape[0]
 
@@ -736,7 +734,7 @@ class PPOCriticInterface(model_api.ModelInterface):
             stats = module.train_batch(
                 seqlens_cpu=seqlens_cpu,
                 packed_input_ids=data["packed_seq"],
-                cu_seqlens=data["cu_seqlens"],
+                cu_seqlens=cu_seqlens,
                 version_steps=model.version.global_step,
                 loss_fn=_ppo_critic_loss_from_model_outputs,
                 **loss_kwargs,

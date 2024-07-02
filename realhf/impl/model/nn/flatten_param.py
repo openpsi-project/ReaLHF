@@ -1,4 +1,5 @@
 import dataclasses
+import math
 from typing import *
 
 import numpy as np
@@ -17,23 +18,14 @@ except ImportError:
     )
 
 from .real_llm_base import (
-    OutputHead,
-    ReaLModelBlock,
-    SequenceParallelActorHead,
-    SequenceParallelCriticHead,
-    VocabPositionEmbedding,
-    real_model_embed_param_count,
     real_model_embedding_param_keys,
-    real_model_head_param_count,
     real_model_head_param_keys,
-    real_model_tblock_param_count,
     real_model_tblock_param_keys,
 )
 from .real_llm_parallel import (
     get_real_model_param_shape,
     intervals_partition_fn,
     mp_partition_key,
-    partition_pipeline_layers,
     shape_partition_fn,
 )
 
@@ -78,22 +70,43 @@ def slice_intervals(
     output_size: int,
 ) -> torch.Tensor:
     assert len(tensor.shape) == 1
-    if len(intervals_cpu) == 1:
-        return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
-    elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
-        return torch.cat([tensor[start:end] for start, end in intervals_cpu])
-
-    interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-    assert tensor.dtype == torch.half
-    return interval_op_cuda.slice_intervals_cuda_half(
-        tensor,
-        intervals,
-        interval_sizes,
-        offsets,
-        max_interval_size,
-        output_size,
+    assert sum(intervals[:, 1] - intervals[:, 0]) == output_size
+    assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
+    assert intervals[:, 0].min().item() >= 0, (
+        intervals[:, 0].min().item(),
+        tensor.shape[0],
     )
+    assert intervals[:, 1].max().item() <= tensor.shape[0], (
+        tensor.shape[0],
+        intervals[:, 1].max().item(),
+    )
+
+    # NOTE: these following assertions will take ten years to finish.
+    # assert len(intervals) == len(intervals_cpu)
+    # assert len(set([x[0] for x in intervals_cpu])) == len(intervals_cpu)
+
+    # FIXME: This is a temporary fix for interval slicing.
+    # It's correct but slow. We should use the CUDA/C++ version in the future.
+    res = torch._C._nn.flatten_dense_tensors(
+        [tensor[start:end] for start, end in intervals_cpu]
+    )
+    return res
+    # if len(intervals_cpu) == 1:
+    #     return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
+    # elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+    #     return torch.cat([tensor[start:end] for start, end in intervals_cpu])
+
+    # interval_sizes = intervals[:, 1] - intervals[:, 0]
+    # offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    # assert tensor.dtype == torch.half
+    # return interval_op_cuda.slice_intervals_cuda_half(
+    #     tensor,
+    #     intervals,
+    #     interval_sizes,
+    #     offsets,
+    #     max_interval_size,
+    #     output_size,
+    # )
 
 
 def set_intervals(
@@ -104,37 +117,84 @@ def set_intervals(
     max_interval_size: int,
 ):
     assert len(dst.shape) == len(src.shape) == 1
-    if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
-        offset = 0
-        for i, j in intervals_cpu:
-            dst[i:j] = src[offset : offset + j - i]
-            offset += j - i
-        assert offset == src.shape[0]
-        return
-    interval_sizes = intervals[:, 1] - intervals[:, 0]
-    offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-    interval_op_cuda.set_intervals_cuda_half(
-        src,
-        dst,
-        intervals,
-        interval_sizes,
-        offsets,
-        max_interval_size,
+    assert sum(intervals[:, 1] - intervals[:, 0]) == src.shape[0], (
+        src.shape[0],
+        (intervals[:, 1] - intervals[:, 0]),
+        (intervals[:, 1] - intervals[:, 0]).sum(),
     )
+    assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
+    # if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
+
+    # FIXME: This is a temporary fix for interval value scattering.
+    # It's correct but slow. We should use the CUDA/C++ version in the future.
+    offset = 0
+    for i, j in intervals_cpu:
+        assert i >= 0
+        assert j <= dst.shape[0], (j, dst.shape[0])
+        dst[i:j] = src[offset : offset + j - i]
+        offset += j - i
+    assert offset == src.shape[0]
     return
+    # interval_sizes = intervals[:, 1] - intervals[:, 0]
+    # offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
+    # interval_op_cuda.set_intervals_cuda_half(
+    #     src,
+    #     dst,
+    #     intervals,
+    #     interval_sizes,
+    #     offsets,
+    #     max_interval_size,
+    # )
+    # return
+
+
+def param_size_from_keys(
+    config: model_api.ReaLModelConfig,
+    src_mp_size: int,
+    sequence_parallel: bool,
+    sd_keys: List[str],
+    src2dst_tp_size: int,
+    src2dst_tp_rank: int,
+    head_param_point_to_embedding: bool,
+) -> Tuple[List[int], int]:
+    param_size = 0
+    for k in sd_keys:
+        if (
+            head_param_point_to_embedding
+            and k == f"{config.n_layers + 1}.weight"
+            and "0.wte.weight" in sd_keys
+        ):
+            continue
+        new_shape = mp_partition_key(
+            k,
+            get_real_model_param_shape(k, config, src_mp_size, sequence_parallel),
+            src2dst_tp_rank,
+            src2dst_tp_size,
+            config,
+            partition_fn=shape_partition_fn,
+        )
+        param_size += int(np.prod(new_shape))
+    return param_size
 
 
 def build_param_spec(
     layer_indices: List[int],
     config: model_api.ReaLModelConfig,
+    dp_size: int,
     mp_size: int,
+    pp_size: int,
     sequence_parallel: bool,
+    head_param_point_to_embedding: bool,
+    bucket_size: int = 40000000,
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
+    # TODO: omit parameters that do not require gradient?
     if len(layer_indices) == 0:
         return {}, 0
 
+    disable_bucketing = 0 not in layer_indices
+
     sd_keys = []
-    for layer_idx in layer_indices:
+    for layer_idx in sorted(layer_indices):
         if layer_idx == 0:
             sd_keys += real_model_embedding_param_keys(config)
         elif layer_idx == config.n_layers + 1:
@@ -143,22 +203,72 @@ def build_param_spec(
             sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
 
     # In the reverse order as backpropagation, consistent with Megatron.
-    sd_keys = reversed(sd_keys)
+    sd_keys = list(reversed(sd_keys))
+
+    data_start_index = 0
+    bucket_data_start_index = data_start_index
+    bucket_params = set()
+
+    def _requires_new_allreduce_bucket(k):
+        if pp_size == 1:
+            return False
+        if config.is_critic:
+            return False
+        if not config.tied_embedding:
+            return False
+        return k == f"{config.n_layers + 1}.weight" or k == "0.wte.weight"
+
+    def _pad_to_multiple(x, m):
+        return int(math.ceil(x / m)) * m
+
+    def _create_fake_bucket(data_end_index) -> int:
+        nonlocal bucket_data_start_index, bucket_params
+        data_end_index = _pad_to_multiple(data_end_index, dp_size)
+        # Update bucket metadata.
+        bucket_data_start_index = data_end_index
+        # Re-set bucket_params and increment bucket_id for next bucket.
+        bucket_params = set()
+        # Return the potentially padded data_end_index.
+        return data_end_index
 
     param_spec = {}
-    param_size = 0
     for k in sd_keys:
+        if head_param_point_to_embedding and k == f"{config.n_layers + 1}.weight":
+            continue
+
         shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
+        numel = int(np.prod(shape))
+        data_end_index = data_start_index + numel
+
+        if _requires_new_allreduce_bucket(k) and len(bucket_params) > 0:
+            _create_fake_bucket(data_start_index)
+
         param_spec[k] = ContiguousParamSpec(
-            param_size, param_size + int(np.prod(shape)), shape
+            data_start_index,
+            data_end_index,
+            shape,
         )
-        param_size += int(np.prod(shape))
-    return param_spec, param_size
+        bucket_params.add(k)
+        if (
+            not disable_bucketing
+            and (data_end_index - bucket_data_start_index) >= bucket_size
+        ) or _requires_new_allreduce_bucket(k):
+            data_end_index = _create_fake_bucket(data_end_index)
+
+        data_start_index = data_end_index
+
+    if len(bucket_params) > 0:
+        data_end_index = _create_fake_bucket(data_end_index)
+
+    if head_param_point_to_embedding and f"{config.n_layers + 1}.weight" in sd_keys:
+        param_spec[f"{config.n_layers + 1}.weight"] = param_spec["0.wte.weight"]
+    return param_spec, data_end_index
 
 
 def param_intervals_from_keys(
     model_name: ModelName,
     config: model_api.ReaLModelConfig,
+    head_param_point_to_embedding: bool,
     param_spec: Dict[str, ContiguousParamSpec],
     mp_size: int,
     sequence_parallel: bool,
@@ -166,17 +276,55 @@ def param_intervals_from_keys(
     portion_size: int,
     portion_rank: int,
 ) -> List[int]:
-    if portion_size == 1:
-        start, end = None, None
-        for k in sd_keys:
-            if start is None or param_spec[k].start_idx < start:
-                start = param_spec[k].start_idx
-            if end is None or param_spec[k].end_idx > end:
-                end = param_spec[k].end_idx
-        return [(start, end)]
+    # if portion_size == 1:
+    #     if head_param_point_to_embedding and f"{config.n_layers + 1}.weight" in sd_keys:
+    #         # The embeddings and output weights are shared.
+    #         intervals = [(param_spec[f"{config.n_layers + 1}.weight"].start_idx, param_spec[f"{config.n_layers + 1}.weight"].end_idx)]
+    #         start, end = None, None
+    #         for k in sd_keys:
+    #             if k == f"{config.n_layers + 1}.weight":
+    #                 continue
+    #             if start is None or param_spec[k].start_idx < start:
+    #                 start = param_spec[k].start_idx
+    #             if end is None or param_spec[k].end_idx > end:
+    #                 end = param_spec[k].end_idx
+    #         intervals += [(start, end)]
+    #         intervals = sorted(intervals, key=lambda x: x[0])
+    #         # Merge these two intervals if possible.
+    #         if intervals[1][0]<= intervals[0][1]:
+    #             return [(intervals[0][0], intervals[1][1])]
+    #         else:
+    #             return intervals
+    #     else:
+    #         # In this case, all parameters have unique unoverlapped memory allocations.
+    #         # If the portion size is also one, we can merge these contiguous intervals.
+    #         start, end = None, None
+    #         for k in sd_keys:
+    #             if start is None or param_spec[k].start_idx < start:
+    #                 start = param_spec[k].start_idx
+    #             if end is None or param_spec[k].end_idx > end:
+    #                 end = param_spec[k].end_idx
+    #         return [(start, end)]
 
+    param_size = param_size_from_keys(
+        config=config,
+        src_mp_size=mp_size,
+        sequence_parallel=sequence_parallel,
+        sd_keys=sd_keys,
+        src2dst_tp_size=portion_size,
+        src2dst_tp_rank=portion_rank,
+        head_param_point_to_embedding=head_param_point_to_embedding,
+    )
+
+    interval_size = 0
     intervals = []
     for k in sd_keys:
+        if (
+            head_param_point_to_embedding
+            and k == f"{config.n_layers + 1}.weight"
+            and "0.wte.weight" in sd_keys
+        ):
+            continue
         if (
             model_name,
             k.split(".", 1)[1],
@@ -212,30 +360,37 @@ def param_intervals_from_keys(
                 )
             ]
         intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
+        interval_size += sum(zero_start_intervals[:, 1] - zero_start_intervals[:, 0])
     # assert len(set([x[0] for x in intervals])) == len(intervals)
+    assert interval_size == param_size, (interval_size, param_size)
     intervals = sorted(intervals, key=lambda x: x[0])
     return intervals
 
 
 def map_param_to_contigous_memory(
     layers: torch.nn.ModuleList,
+    config: model_api.ReaLModelConfig,
+    head_param_point_to_embedding: bool,
     param_spec: Dict[str, ContiguousParamSpec],
     contiguous_param: torch.Tensor,
     layer_idx_offset: int,
+    allocate_only: bool,
 ):
     for local_layer_idx, l in enumerate(layers):
         layer_idx = local_layer_idx + layer_idx_offset
         for k, v in l.named_parameters():
             spec = param_spec[f"{layer_idx}.{k}"]
             old_param_data = v.data
-            recursive_getattr(l, k).data = contiguous_param[
-                spec.start_idx : spec.end_idx
-            ].view(spec.shape)
-            # This is for reward model. We should initialize the reward head instead of letting it be all-zero.
-            if old_param_data.shape == spec.shape:
-                v.data.copy_(old_param_data)
+            target = contiguous_param[spec.start_idx : spec.end_idx].view(spec.shape)
+            if not allocate_only:
+                target.copy_(old_param_data)
             else:
-                assert old_param_data.shape == torch.Size([0]), (
-                    old_param_data.shape,
-                    spec.shape,
-                )
+                if not (
+                    head_param_point_to_embedding and layer_idx == config.n_layers + 1
+                ):
+                    assert old_param_data.shape == torch.Size([0]), (
+                        old_param_data.shape,
+                        spec.shape,
+                        f"{layer_idx}.{k}",
+                    )
+            recursive_getattr(l, k).data = target

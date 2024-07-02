@@ -1,11 +1,12 @@
-SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/release/default/epoch7epochstep5globalstep50/
+MODEL_FAMILY=opt
+SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/$MODEL_FAMILY/default/epoch7epochstep5globalstep50/
 CLUSTER_SPEC_PATH=/lustre/aigc/llm/cluster/qh.json python3 -m realhf.apps.quickstart rw \
-    experiment_name=quickstart-rw trial_name=release \
+    experiment_name=quickstart-rw trial_name=$MODEL_FAMILY \
     allocation_mode=manual \
-    total_train_epochs=1 \
+    total_train_epochs=4 \
     save_freq_steps=5 eval_freq_epochs=1 \
-    model.type._class=llama \
-    model.type.size=7 \
+    model.type._class=$MODEL_FAMILY \
+    model.type.size=0 \
     model.type.is_critic=True \
     model.path=$SFT_MODEL_PATH \
     n_nodes=1 \

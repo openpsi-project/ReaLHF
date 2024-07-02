@@ -24,16 +24,20 @@ from realhf.impl.model.comm.param_realloc import (
     is_trainable,
     store_trainable_params,
 )
-from realhf.impl.model.nn.flatten_param import set_intervals, slice_intervals
+from realhf.impl.model.nn.flatten_param import (
+    recursive_getattr,
+    set_intervals,
+    slice_intervals,
+)
 from realhf.impl.model.utils.padding import pad_input, unpad_input
 
 from .flatten_param import build_param_spec, map_param_to_contigous_memory
 from .real_llm_base import (
     OutputHead,
+    ParallelActorHead,
     PipeCacheData,
     PipeTransferData,
     ReaLModelBlock,
-    SequenceParallelActorHead,
     SequenceParallelCriticHead,
     VocabPositionEmbedding,
     real_model_embed_param_count,
@@ -56,6 +60,33 @@ class DuckGenerationOutput:
     sequences: torch.Tensor
     scores: Optional[torch.Tensor] = None
     logits_mask: Optional[torch.Tensor] = None
+
+
+def _sync_embedding_and_output_weights(layers: nn.ModuleList):
+    pp_size = constants.pipe_parallel_world_size()
+    pp_rank = constants.pipe_parallel_rank()
+    if pp_size == 1:
+        old_head_w = layers[-1].weight.data
+        layers[-1].weight = layers[0].wte.weight
+        del old_head_w
+        layers[0].wte.weight.zero_out_wgrad = True
+        return
+
+    if pp_rank != 0 and pp_rank != pp_size - 1:
+        return
+
+    if pp_rank == 0:
+        weight = layers[0].wte.weight
+        weight.shared_embedding = True
+    else:
+        weight = layers[-1].weight
+        weight.data.fill_(0.0)
+        # To make Megatron happy
+        weight.shared = True
+        weight.shared_embedding = True
+
+    group = constants.grid().embedding_proc_group
+    torch.distributed.all_reduce(weight.data, group=group)
 
 
 class ReaLModel(nn.Module):
@@ -121,11 +152,19 @@ class ReaLModel(nn.Module):
         self._offloaded = False
 
         # Attributes used for flattening parameters.
+        self.head_param_point_to_embedding = (
+            self.config.tied_embedding
+            and not self.config.is_critic
+            and constants.pipe_parallel_world_size() == 1
+        )
         self._param_spec, self._param_size = build_param_spec(
             list(range(self.layer_idx_start, self.layer_idx_end)),
             self.config,
-            constants.model_parallel_world_size(),
-            constants.sequence_parallel(),
+            mp_size=constants.model_parallel_world_size(),
+            pp_size=constants.pipe_parallel_world_size(),
+            dp_size=constants.data_parallel_world_size(),
+            sequence_parallel=constants.sequence_parallel(),
+            head_param_point_to_embedding=self.head_param_point_to_embedding,
         )
         self.contiguous_param = None
 
@@ -145,9 +184,15 @@ class ReaLModel(nn.Module):
             return self.layers[-1]
         return None
 
-    @property
-    def share_embeddings_and_output_weights(self):
-        return self.config.share_embeddings_and_output_weights
+    def shared_embedding_or_output_weight(self) -> None | torch.Tensor:
+        # NOTE: Use this name in consistent with Megatron-LM.
+        if not self.config.tied_embedding or self.config.is_critic:
+            return None
+        if constants.is_first_pipe_stage():
+            return self.layers[0].wte.weight
+        elif constants.is_last_pipe_stage():
+            return self.layers[-1].weight
+        return None
 
     def instantiate(self):
         """Instantiate the model parameters.
@@ -159,17 +204,22 @@ class ReaLModel(nn.Module):
         layers = []
         for idx in range(self.layer_idx_start, self.layer_idx_end):
             layers.append(self._build_layer(idx, self.config))
-
         self.layers = nn.ModuleList(layers)
+
+        if self.config.tied_embedding and not self.config.is_critic:
+            _sync_embedding_and_output_weights(self.layers)
 
         self.contiguous_param = torch.empty(
             self._param_size, dtype=self.dtype, device=self.device
         )
         map_param_to_contigous_memory(
             self.layers,
+            self.config,
+            self.head_param_point_to_embedding,
             self._param_spec,
             self.contiguous_param,
             self.layer_idx_start,
+            allocate_only=False,
         )
 
         for h in self._instantiation_hooks:
@@ -216,7 +266,7 @@ class ReaLModel(nn.Module):
                 dtype=dtype,
             )
         elif not config.is_critic and constants.model_parallel_world_size() > 1:
-            l = SequenceParallelActorHead(
+            l = ParallelActorHead(
                 config.hidden_dim,
                 config.vocab_size,
                 bias=False,
@@ -257,6 +307,11 @@ class ReaLModel(nn.Module):
             with torch.cuda.stream(self._offload_stream):
                 for k, p in l.named_parameters():
                     spec = self._param_spec[f"{layer_idx}.{k}"]
+                    if (
+                        self.head_param_point_to_embedding
+                        and layer_idx == self.config.n_layers + 1
+                    ):
+                        continue
                     self._offload_buffer[spec.start_idx : spec.end_idx].copy_(
                         p.data.view(-1), non_blocking=True
                     )
@@ -279,9 +334,12 @@ class ReaLModel(nn.Module):
         )
         map_param_to_contigous_memory(
             self.layers,
+            self.config,
+            self.head_param_point_to_embedding,
             self._param_spec,
             self.contiguous_param,
             self.layer_idx_start,
+            allocate_only=True,
         )
         self.wait_for_offload()
 
@@ -455,7 +513,7 @@ class ReaLModel(nn.Module):
                 (
                     OutputHead,
                     SequenceParallelCriticHead,
-                    SequenceParallelActorHead,
+                    ParallelActorHead,
                 ),
             ):
                 h = l._forward(h)
@@ -522,11 +580,19 @@ class ReaLModel(nn.Module):
                     for v in l.parameters():
                         v.data = torch.tensor((), dtype=self.dtype, device=self.device)
                     to_layers_handle_dict[_to_layer_idx] = l
+        to_model_head_param_point_to_embedding = (
+            to_model_config.tied_embedding
+            and not to_model_config.is_critic
+            and to_topo.get_dim("pipe") == 1
+        )
         to_param_spec, to_param_size = build_param_spec(
             to_layer_indices,
             to_model_config,
-            to_topo.get_dim("model"),
-            to_topo.sequence_parallel,
+            mp_size=to_topo.get_dim("model"),
+            dp_size=to_topo.get_dim("data"),
+            pp_size=to_topo.get_dim("pipe"),
+            sequence_parallel=to_topo.sequence_parallel,
+            head_param_point_to_embedding=to_model_head_param_point_to_embedding,
         )
         if len(to_layer_indices) > 0:
             to_layer_idx_start = min(to_layer_indices)
@@ -600,8 +666,11 @@ class ReaLModel(nn.Module):
                 from_model_name, (self.layers, self.contiguous_param)
             )
         elif is_trainable(to_model_name):
-            del self.layers, self.contiguous_param
-            self.layers = self.contiguous_param = None
+            if self.layers is not None:
+                for p in self.layers.parameters():
+                    p.data = torch.tensor((), dtype=self.dtype, device=self.device)
+                del self.layers, self.contiguous_param
+                self.layers = self.contiguous_param = None
             if torch.distributed.get_rank() in to_model_ranks:
                 layers, param = fetch_trainable_params(to_model_name)
             else:
@@ -610,16 +679,24 @@ class ReaLModel(nn.Module):
 
         # The following tensor holds the contiguous memory of incoming parameters
         # If this process is not a receiver, to_param_size is 0 and it's an empty tensor.
-        to_contiguous_param = torch.empty(
+        to_contiguous_param = torch.zeros(
             rtgt.to_param_size,
             dtype=self.dtype,
             device="cuda",
         )
+        to_model_head_param_point_to_embedding = (
+            to_model_config.tied_embedding
+            and not to_model_config.is_critic
+            and to_topo.get_dim("pipe") == 1
+        )
         map_param_to_contigous_memory(
             rtgt.to_layers_handle,
+            to_model_config,
+            to_model_head_param_point_to_embedding,
             rtgt.to_param_spec,
             to_contiguous_param,
             rtgt.to_layer_start_idx,
+            allocate_only=True,
         )
 
         # Allocate tensors in advance to reduce overhead.
@@ -668,13 +745,16 @@ class ReaLModel(nn.Module):
                         step.param_size,
                     )
                     send_buf_specs.append(buf)
-                # if step.remove:
-                #     for param_key in step.param_keys:
-                #         layer_idx, k = param_key.split(".", 1)
-                #         layer_idx = int(layer_idx)
-                #         dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
-                #         recursive_getattr(self.layers[layer_idx - self.layer_idx_start],
-                #                           k).data = dummy_tensor
+                if step.remove and not is_trainable(from_model_name):
+                    for param_key in step.param_keys:
+                        layer_idx, k = param_key.split(".", 1)
+                        layer_idx = int(layer_idx)
+                        dummy_tensor = torch.tensor(
+                            (), dtype=self.dtype, device=self.device
+                        )
+                        recursive_getattr(
+                            self.layers[layer_idx - self.layer_idx_start], k
+                        ).data = dummy_tensor
 
         # Run boradcast!
         streams = [torch.cuda.Stream() for step in rtgt.comm_plan]

@@ -32,9 +32,9 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
             dataset_builder (Optional[Callable[[], List[Dict]]], optional): Alternative to dataset_path.
                 A callable that returns a list of dictionary. Defaults to None.
         """
-        self.util = util
-        seed = self.util.seed
-        tokenizer = self.util.tokenizer
+        self._util = util
+        seed = util.seed
+        tokenizer = util.tokenizer
 
         self.max_pairs_per_prompt = max_pairs_per_prompt
 
@@ -103,6 +103,10 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
             == len(self.pos_answer_tokens)
             == len(self.neg_answer_tokens)
         )
+
+    @property
+    def util(self):
+        return self._util
 
     def __len__(self):
         return len(self.pos_answer_tokens)

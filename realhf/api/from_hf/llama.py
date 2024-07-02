@@ -5,11 +5,10 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
-from realhf.base import constants
+from realhf.base.constants import use_te_impl
 
 
 def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
-
     new_state_dict = {}
     for k, v in state_dict.items():
         if k == "model.embed_tokens.weight":
@@ -37,7 +36,7 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
                     name = name.replace(k1, k2)
             new_state_dict[f"{block_idx + 1}.{name}"] = v
 
-    if constants.use_te_impl():
+    if use_te_impl():
         state_dict = new_state_dict
         new_state_dict = {}
         te_replace_pairs = [
@@ -65,7 +64,7 @@ def convert_state_dict_llama(state_dict: Dict, config: ReaLModelConfig) -> Dict:
 def to_llama_state_dict(
     state_dict: Dict[str, torch.Tensor], config: ReaLModelConfig
 ) -> Dict:
-    if constants.use_te_impl():
+    if use_te_impl():
         # remove all extra states
         keys = list(state_dict.keys())
         for k in keys:
@@ -103,7 +102,8 @@ def to_llama_state_dict(
         if i == 0:
             new_sd["model.embed_tokens.weight"] = state_dict["0.wte.weight"]
         elif i == config.n_layers + 1:
-            new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
+            if config.is_critic or not config.tied_embedding:
+                new_sd["lm_head.weight"] = state_dict[f"{i}.weight"]
         else:
             new_sd[f"model.layers.{i-1}.input_layernorm.weight"] = state_dict[
                 f"{i}.attn.c_attn.ln.weight"
@@ -132,6 +132,20 @@ def to_llama_state_dict(
             new_sd[f"model.layers.{i-1}.self_attn.v_proj.weight"] = state_dict[
                 f"{i}.attn.c_attn.v_attn.weight"
             ]
+            if config.use_attention_bias:
+                new_sd[f"model.layers.{i-1}.self_attn.q_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.q_attn.bias"
+                ]
+                new_sd[f"model.layers.{i-1}.self_attn.k_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.k_attn.bias"
+                ]
+                new_sd[f"model.layers.{i-1}.self_attn.v_proj.bias"] = state_dict[
+                    f"{i}.attn.c_attn.v_attn.bias"
+                ]
+            if config.use_attn_proj_bias:
+                new_sd[f"model.layers.{i-1}.self_attn.o_proj.bias"] = state_dict[
+                    f"{i}.attn.c_proj.bias"
+                ]
             new_sd[f"model.layers.{i-1}.self_attn.rotary_emb.inv_freq"] = 1.0 / (
                 config.rotary_base
                 ** (
@@ -157,25 +171,30 @@ def llama_embedding_layer_names(config: ReaLModelConfig) -> List[str]:
 
 
 def llama_transformer_block_param_name(config: ReaLModelConfig, idx: int) -> List[str]:
-    names = [
-        f"model.layers.{idx}.input_layernorm.weight",
-        f"model.layers.{idx}.mlp.down_proj.weight",
-        f"model.layers.{idx}.mlp.gate_proj.weight",
-        f"model.layers.{idx}.mlp.up_proj.weight",
-        f"model.layers.{idx}.post_attention_layernorm.weight",
-        f"model.layers.{idx}.self_attn.k_proj.weight",
-        f"model.layers.{idx}.self_attn.o_proj.weight",
-        f"model.layers.{idx}.self_attn.q_proj.weight",
-        # f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
-        f"model.layers.{idx}.self_attn.v_proj.weight",
-    ]
-    if idx == config.n_layers - 1:
-        names += ["model.norm.weight"]
+    names = []
+    for k in ["weight", "bias"]:
+        names += [
+            f"model.layers.{idx}.input_layernorm.{k}",
+            f"model.layers.{idx}.mlp.down_proj.{k}",
+            f"model.layers.{idx}.mlp.gate_proj.{k}",
+            f"model.layers.{idx}.mlp.up_proj.{k}",
+            f"model.layers.{idx}.post_attention_layernorm.{k}",
+            f"model.layers.{idx}.self_attn.k_proj.{k}",
+            f"model.layers.{idx}.self_attn.o_proj.{k}",
+            f"model.layers.{idx}.self_attn.q_proj.{k}",
+            # f"model.layers.{idx}.self_attn.rotary_emb.inv_freq",
+            f"model.layers.{idx}.self_attn.v_proj.{k}",
+        ]
+        if idx == config.n_layers - 1:
+            names += [f"model.norm.{k}"]
     return names
 
 
 def llama_output_head_param_name(config: ReaLModelConfig) -> List[str]:
-    return ["lm_head.weight"]
+    if config.tied_embedding and not config.is_critic:
+        return ["model.embed_tokens.weight"]
+    else:
+        return ["lm_head.weight"]
 
 
 def convert_config_llama(
@@ -184,6 +203,7 @@ def convert_config_llama(
     return ReaLModelConfig(
         n_layers=hf_config.num_hidden_layers,
         n_kv_heads=hf_config.num_key_value_heads,
+        n_q_heads=hf_config.num_attention_heads,
         hidden_dim=hf_config.hidden_size,
         head_dim=hf_config.hidden_size // hf_config.num_attention_heads,
         intermediate_dim=hf_config.intermediate_size,
@@ -198,6 +218,7 @@ def convert_config_llama(
         layer_norm_epsilon=hf_config.rms_norm_eps,
         activation_function=hf_config.hidden_act,
         use_attention_bias=hf_config.attention_bias,
+        use_attn_proj_bias=hf_config.attention_bias,
         scale_attn_by_inverse_layer_idx=False,
         layer_norm_type="rms",
         mlp_type="llama",
@@ -227,7 +248,7 @@ def convert_config_back_llama(
         intermediate_size=config.intermediate_dim,
         num_hidden_layers=config.n_layers,
         num_key_value_heads=config.n_kv_heads,
-        num_attention_heads=config.hidden_dim // config.head_dim,
+        num_attention_heads=config.n_q_heads,
         max_position_embeddings=config.n_positions,
         rms_norm_eps=config.layer_norm_epsilon,
         hidden_act=config.activation_function,
@@ -239,28 +260,17 @@ def convert_config_back_llama(
 
 
 def make_real_config_llama():
-    return ReaLModelConfig(
-        n_layers=8,
-        n_kv_heads=1,
-        hidden_dim=256,
-        head_dim=32,
-        intermediate_dim=512,
+    hf_config = transformers.LlamaConfig(
         vocab_size=200,
-        n_positions=200,
-        embd_pdrop=0.0,
-        attn_pdrop=0.1,
-        layer_norm_epsilon=1e-5,
-        activation_function="silu",
-        use_attention_bias=False,
-        scale_attn_by_inverse_layer_idx=False,
-        layer_norm_type="rms",
-        mlp_type="llama",
-        apply_rotary=True,
-        rotary_base=10000,
-        rotary_interleaved=False,
-        rotary_scaling=None,
-        rotary_scaling_type=None,
+        hidden_size=128,
+        intermediate_size=200,
+        num_hidden_layers=8,
+        num_attention_heads=8,
+        num_key_value_heads=8,
+        hidden_act="silu",
+        rms_norm_eps=1e-5,
     )
+    return convert_config_llama(hf_config)
 
 
 for name in [

@@ -74,7 +74,6 @@ def _paired_rw_loss_from_model_outputs(
         op=dist.ReduceOp.MIN,
         group=constants.data_parallel_group(),
     )
-
     return loss, dict(
         loss=loss_logging,
         correct_predictions=correct_predictions,
@@ -167,7 +166,6 @@ class PairedRewardInterface(model_api.ModelInterface):
             packed_input_ids=packed_input_ids,
             cu_seqlens=cu_seqlens,
             loss_fn=_paired_rw_loss_from_model_outputs,
-            input_lens_for_partition=pair_lens,
             version_steps=model.version.global_step,
             **loss_fn_kwargs,
         )
@@ -238,11 +236,9 @@ class PairedRewardInterface(model_api.ModelInterface):
             input_lens = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(
                 -1
             )
-            group_factor: torch.Tensor = data["group_factor"]
             cu_seqlens = torch.cat(
                 [input_lens.new_zeros(1), input_lens.cumsum(0)], 0
             ).int()
-            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
 
             loss_fn_kwargs = dict(
                 input_lens=pair_lens,
@@ -253,7 +249,6 @@ class PairedRewardInterface(model_api.ModelInterface):
                 packed_input_ids=packed_input_ids,
                 cu_seqlens=cu_seqlens,
                 loss_fn=_paired_rw_loss_from_model_outputs,
-                input_lens_for_partition=pair_lens,
                 **loss_fn_kwargs,
             )
 

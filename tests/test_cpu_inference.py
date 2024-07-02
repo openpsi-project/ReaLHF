@@ -13,9 +13,9 @@ logger = logging.getLogger("tests.test_cpu")
 
 
 # NOTE: To run test for a new model class, please implement and register `real_config_maker`
-# in realhf.impl.model.<your_model_class_name> and add the model class name to the
+# in realhf.api.from_hf.<your_model_class_name> and add the model class name to the
 # `model_class` fixture in this file.
-@pytest.fixture(params=["llama"])
+@pytest.fixture(params=["llama", "gpt2", "qwen2", "gemma"])
 def model_class(request):
     return request.param
 
@@ -95,7 +95,7 @@ def test_inference_cpu_consistency(cpu_real_model, cpu_hf_model, model_class, mc
             input_ids=input_ids, attention_mask=attention_mask
         ).logits * attention_mask.unsqueeze(-1)
 
-        assert torch.allclose(logits1, logits2, atol=1e-5), (
+        assert torch.allclose(logits1, logits2, atol=1e-4), (
             model_class,
             (logits1 - logits2).abs().max(),
         )

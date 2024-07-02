@@ -2,32 +2,28 @@ import dataclasses
 from contextlib import contextmanager
 from typing import *
 
-try:
-    from megatron.core import parallel_state
-    from megatron.core.distributed.distributed_data_parallel import (
-        DistributedDataParallel,
-    )
-    from megatron.core.distributed.finalize_model_grads import finalize_model_grads
-    from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
-    from megatron.core.optimizer import get_megatron_optimizer
-    from megatron.core.optimizer.optimizer_config import OptimizerConfig
-    from megatron.core.transformer.transformer_config import TransformerConfig
-except ImportError or ModuleNotFoundError:
-    # dummy class for type hint, due to missing files in megatron CPU installation
-    class TransformerConfig:
-        pass
-
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import transformers
+from megatron.core import parallel_state
+from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
+from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
+from megatron.core.optimizer import DistributedOptimizer, get_megatron_optimizer
+from megatron.core.optimizer.optimizer_config import OptimizerConfig
+from megatron.core.transformer.transformer_config import TransformerConfig
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
-from realhf.impl.model.backend.utils import MegatronEngine, OptimizerParamScheduler
+from realhf.impl.model.backend.utils import (
+    MegatronEngine,
+    OptimizerParamScheduler,
+    finalize_grads_megatron,
+    step_megatron_distrb_optimizer,
+)
 from realhf.impl.model.modules.mlp import get_activation_fn
+from realhf.impl.model.nn.flatten_param import ContiguousParamSpec
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 
 WITHIN_MEGATRON_CONTEXT = False
@@ -148,7 +144,10 @@ class ReaLMegatronEngine:
                 lambda p: p.requires_grad, self.module.parameters()
             )
             num_params = sum([p.numel() for p in model_parameters])
-            unique_params = num_params
+            shared_params = 0
+            if module.shared_embedding_or_output_weight() is not None:
+                shared_params = module.shared_embedding_or_output_weight().numel()
+            unique_params = num_params - shared_params
 
             params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(
                 self.device
@@ -197,7 +196,6 @@ class ReaLMegatronEngine:
         cu_seqlens: torch.Tensor,
         loss_fn: Callable,
         version_steps: int,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
@@ -211,7 +209,6 @@ class ReaLMegatronEngine:
                     cu_seqlens=cu_seqlens,
                     loss_fn=loss_fn,
                     version_steps=version_steps,
-                    input_lens_for_partition=input_lens_for_partition,
                     num_micro_batches=num_micro_batches,
                     **loss_fn_kwargs,
                 )
@@ -227,8 +224,15 @@ class ReaLMegatronEngine:
                     model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs
                 )
                 self.engine.optim.scale_loss(loss).backward()
-                finalize_model_grads([self.engine.ddp])
-                update_successful, grad_norm, _ = self.engine.optim.step()
+
+                finalize_grads_megatron(self.engine)
+
+                if isinstance(self.engine.optim, DistributedOptimizer):
+                    update_successful, grad_norm, _ = step_megatron_distrb_optimizer(
+                        self.engine.optim
+                    )
+                else:
+                    update_successful, grad_norm, _ = self.engine.optim.step()
                 if update_successful:
                     self.engine.lr_scheduler.step_absolute(version_steps)
                 if (
@@ -249,7 +253,6 @@ class ReaLMegatronEngine:
         packed_input_ids: torch.Tensor,
         cu_seqlens: torch.Tensor,
         loss_fn: Callable,
-        input_lens_for_partition: Optional[torch.Tensor] = None,
         num_micro_batches: Optional[int] = None,
         **loss_fn_kwargs,
     ):
@@ -260,7 +263,6 @@ class ReaLMegatronEngine:
                     packed_input_ids=packed_input_ids,
                     cu_seqlens=cu_seqlens,
                     loss_fn=loss_fn,
-                    input_lens_for_partition=input_lens_for_partition,
                     num_micro_batches=num_micro_batches,
                     **loss_fn_kwargs,
                 )
@@ -387,7 +389,11 @@ class MegatronTrainBackend(model_api.ModelBackend):
             real_model.contiguous_param = param_grad_buf.param_data
 
             # Sanity checks.
-            assert real_model._param_size == param_grad_buf.numel
+            assert real_model._param_size == param_grad_buf.numel, (
+                real_model._param_size,
+                param_grad_buf.numel,
+                module.bucket_size,
+            )
             for n, p in real_model.layers.named_parameters():
                 n = ".".join(
                     [

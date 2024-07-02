@@ -16,9 +16,12 @@ import realhf.impl.model.parallelism.model_parallel.mappings as tensor_parallel
 from realhf.api.core import model_api
 from realhf.impl.model.modules import (
     CausalSelfAttentionLayer,
+    GemmaRMSNorm,
     LayerNormMLP,
     LlamaLayerNormMLP,
     LlamaRMSNorm,
+    OffsetParallelPositionalEmbedding,
+    OffsetPositionalEmbedding,
 )
 from realhf.impl.model.parallelism.model_parallel.modules import (
     ColumnParallelLinear,
@@ -110,18 +113,23 @@ class ReaLModelBlock(nn.Module):
         super().__init__()
         if dtype is None:
             dtype = torch.float16
+        self.config = config
         self.layer_index = layer_index
         self.attn = CausalSelfAttentionLayer(
             hidden_dim=config.hidden_dim,
             n_kv_heads=config.n_kv_heads,
+            n_q_heads=config.n_q_heads,
             head_dim=config.head_dim,
             resid_pdrop=config.resid_pdrop,
             attn_pdrop=config.attn_pdrop,
             layer_index=layer_index,
             layer_norm_epsilon=config.layer_norm_epsilon,
             scale_attn_by_inverse_layer_idx=config.scale_attn_by_inverse_layer_idx,
+            scale_attn_weights=config.scale_attn_weights,
             layer_norm_type=config.layer_norm_type,
             use_attention_bias=config.use_attention_bias,
+            use_attn_proj_bias=config.use_attn_proj_bias,
+            do_layernorm_before=config.do_layernorm_before,
             apply_rotary=config.apply_rotary,
             rotary_base=config.rotary_base,
             rotary_interleaved=config.rotary_interleaved,
@@ -137,6 +145,7 @@ class ReaLModelBlock(nn.Module):
                 hidden_dim=config.hidden_dim,
                 intermediate_dim=config.intermediate_dim,
                 resid_pdrop=config.resid_pdrop,
+                do_layernorm_before=config.do_layernorm_before,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
                 model_parallel=constants.model_parallel_world_size() > 1,
@@ -150,6 +159,7 @@ class ReaLModelBlock(nn.Module):
                 intermediate_dim=config.intermediate_dim,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
+                layer_norm_type=config.layer_norm_type,
                 model_parallel=constants.model_parallel_world_size() > 1,
                 gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
@@ -161,6 +171,8 @@ class ReaLModelBlock(nn.Module):
                 layer_norm_fn = nn.LayerNorm
             elif config.layer_norm_type == "rms":
                 layer_norm_fn = LlamaRMSNorm
+            elif config.layer_norm_type == "gemma":
+                layer_norm_fn = GemmaRMSNorm
             self.ln_f = layer_norm_fn(
                 config.hidden_dim,
                 eps=config.layer_norm_epsilon,
@@ -225,7 +237,17 @@ class ReaLModelBlock(nn.Module):
             cache_seqlens=cache_seqlens,
         )
         h = h + attn_out
+
+        # For opt-350m
+        if not self.config.do_layernorm_before:
+            h = self.attn.c_attn.ln(h)
+
         h = self.mlp(h) + h
+
+        # For opt-350m
+        if not self.config.do_layernorm_before:
+            h = self.mlp.ln(h)
+
         if self.output_layernorm:
             h = self.ln_f(h)
         return h, k, v
@@ -241,6 +263,7 @@ class VocabPositionEmbedding(nn.Module):
     ):
         super().__init__()
         self.n_positions = config.n_positions
+        self.hidden_dim = config.hidden_dim
 
         model_parallel = constants.model_parallel_world_size() > 1
         if model_parallel:
@@ -254,22 +277,21 @@ class VocabPositionEmbedding(nn.Module):
 
         self.apply_abs_pos_embed = not config.apply_rotary
         if self.apply_abs_pos_embed:
-            self.wpe = embed_cls(
+            p_embed_cls = (
+                OffsetParallelPositionalEmbedding
+                if model_parallel
+                else OffsetPositionalEmbedding
+            )
+            self.wpe = p_embed_cls(
                 config.n_positions,
                 config.hidden_dim,
+                offset=config.abs_position_embedding_offset,
                 dtype=dtype,
                 device=device,
             )
 
+        self.normalize_embed = config.normalize_embed
         self.embed_drop = nn.Dropout(config.embd_pdrop)
-
-        self.self_attention_mask = torch.tril(
-            torch.ones(
-                (config.n_positions, config.n_positions),
-                dtype=torch.bool,
-                device=device,
-            )
-        )
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         # Set position ids.
@@ -299,6 +321,9 @@ class VocabPositionEmbedding(nn.Module):
         inputs_embeds = self.wte(input_ids)
         if self.apply_abs_pos_embed:
             inputs_embeds = inputs_embeds + self.wpe(position_ids)
+        if self.normalize_embed:
+            normalizer = torch.tensor(self.hidden_dim**0.5, dtype=inputs_embeds.dtype)
+            inputs_embeds = inputs_embeds * normalizer
         if constants.sequence_parallel():
             inputs_embeds = tensor_parallel.scatter_to_sequence_parallel_region(
                 inputs_embeds
@@ -338,7 +363,7 @@ class SequenceParallelCriticHead(nn.Linear):
         return super().forward(x)
 
 
-class SequenceParallelActorHead(ColumnParallelLinear):
+class ParallelActorHead(ColumnParallelLinear):
 
     def forward(self, x: PipeTransferData, y: PipeCacheData) -> PipeTransferData:
         x.pp_output = parallel_lm_logits(
@@ -369,7 +394,9 @@ class SequenceParallelActorHead(ColumnParallelLinear):
 def real_model_embed_param_count(config: model_api.ReaLModelConfig) -> int:
     count = config.vocab_size * config.hidden_dim
     if not config.apply_rotary:
-        count += config.n_positions * config.hidden_dim
+        count += (
+            config.n_positions + config.abs_position_embedding_offset
+        ) * config.hidden_dim
     return count
 
 
@@ -382,12 +409,12 @@ def real_model_embedding_param_keys(config: model_api.ReaLModelConfig) -> int:
 
 def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -> int:
     count = 0
-    nq = config.hidden_dim // config.head_dim
+    nq = config.n_q_heads
 
     if config.layer_norm_type is None:
         # nn.LayerNorm
         ln_count = 2 * config.hidden_dim
-    elif config.layer_norm_type == "rms":
+    elif config.layer_norm_type in ["gemma", "rms"]:
         # Llama RMSNorm
         ln_count = config.hidden_dim
     else:
@@ -402,7 +429,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
 
     # attention projection
     count += config.hidden_dim * config.hidden_dim
-    if config.use_attention_bias:
+    if config.use_attn_proj_bias:
         count += config.hidden_dim
     # NOTE: we ignore the parameters of RotoaryEmbedding here
 
@@ -423,22 +450,21 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
 def real_model_tblock_param_keys(
     config: model_api.ReaLModelConfig, idx: int
 ) -> List[str]:
-    keys = [
-        f"{idx + 1}.attn.c_attn.ln.weight",
-        f"{idx + 1}.attn.c_attn.q_attn.weight",
-        f"{idx + 1}.attn.c_attn.k_attn.weight",
-        f"{idx + 1}.attn.c_attn.v_attn.weight",
-    ]
+    # NOTE: The order matters, we should not change the order of keys.
+    keys = [f"{idx + 1}.attn.c_attn.ln.weight"]
     if config.layer_norm_type is None:
         keys += [f"{idx + 1}.attn.c_attn.ln.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.q_attn.weight"]
     if config.use_attention_bias:
-        keys += [
-            f"{idx + 1}.attn.c_attn.q_attn.bias",
-            f"{idx + 1}.attn.c_attn.k_attn.bias",
-            f"{idx + 1}.attn.c_attn.v_attn.bias",
-        ]
+        keys += [f"{idx + 1}.attn.c_attn.q_attn.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.k_attn.weight"]
+    if config.use_attention_bias:
+        keys += [f"{idx + 1}.attn.c_attn.k_attn.bias"]
+    keys += [f"{idx + 1}.attn.c_attn.v_attn.weight"]
+    if config.use_attention_bias:
+        keys += [f"{idx + 1}.attn.c_attn.v_attn.bias"]
     keys += [f"{idx + 1}.attn.c_proj.weight"]
-    if config.use_attention_bias:
+    if config.use_attn_proj_bias:
         keys += [f"{idx + 1}.attn.c_proj.bias"]
     keys += [f"{idx + 1}.mlp.ln.weight"]
     if config.layer_norm_type is None:
@@ -446,8 +472,8 @@ def real_model_tblock_param_keys(
     if config.mlp_type is None:
         keys += [
             f"{idx + 1}.mlp.c_fc.weight",
-            f"{idx + 1}.mlp.c_proj.weight",
             f"{idx + 1}.mlp.c_fc.bias",
+            f"{idx + 1}.mlp.c_proj.weight",
             f"{idx + 1}.mlp.c_proj.bias",
         ]
     elif config.mlp_type == "llama":
@@ -481,7 +507,7 @@ def keys_from_layer_indices(
 ) -> List[str]:
     # assert _is_integer_list_contiguous(layer_indices)
     sd_keys = []
-    for layer_idx in layer_indices:
+    for layer_idx in sorted(layer_indices):
         if layer_idx == 0:
             sd_keys += real_model_embedding_param_keys(config)
         elif layer_idx == config.n_layers + 1:
