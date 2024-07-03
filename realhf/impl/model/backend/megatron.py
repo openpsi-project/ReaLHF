@@ -6,12 +6,22 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import transformers
-from megatron.core import parallel_state
-from megatron.core.distributed.distributed_data_parallel import DistributedDataParallel
-from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
-from megatron.core.optimizer import DistributedOptimizer, get_megatron_optimizer
-from megatron.core.optimizer.optimizer_config import OptimizerConfig
-from megatron.core.transformer.transformer_config import TransformerConfig
+
+try:
+    from megatron.core import parallel_state
+    from megatron.core.distributed.distributed_data_parallel import (
+        DistributedDataParallel,
+    )
+    from megatron.core.distributed.param_and_grad_buffer import ParamAndGradBuffer
+    from megatron.core.optimizer import DistributedOptimizer, get_megatron_optimizer
+    from megatron.core.optimizer.optimizer_config import OptimizerConfig
+    from megatron.core.transformer.transformer_config import TransformerConfig
+except (ModuleNotFoundError, ImportError):
+    # importing megatron.core in CPU container will fail due to the requirement of apex
+    # Here class types must be defined for type hinting
+    class TransformerConfig:
+        pass
+
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging

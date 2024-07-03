@@ -4,16 +4,27 @@ from typing import *
 
 import torch
 import torch.distributed as dist
-from megatron.core.distributed.distributed_data_parallel import (
-    DistributedDataParallel as MegatronDDP,
-)
-from megatron.core.optimizer.clip_grads import clip_grad_norm_fp32, count_zeros_fp32
-from megatron.core.optimizer.distrib_optimizer import (
-    DistributedOptimizer as MegatronDistOptim,
-)
-from megatron.core.optimizer.distrib_optimizer import (
-    MixedPrecisionOptimizer as MegatronMixedPrecOptim,
-)
+
+try:
+    from megatron.core.distributed.distributed_data_parallel import (
+        DistributedDataParallel as MegatronDDP,
+    )
+    from megatron.core.optimizer.clip_grads import clip_grad_norm_fp32, count_zeros_fp32
+    from megatron.core.optimizer.distrib_optimizer import (
+        DistributedOptimizer as MegatronDistOptim,
+    )
+    from megatron.core.optimizer.distrib_optimizer import (
+        MixedPrecisionOptimizer as MegatronMixedPrecOptim,
+    )
+except (ModuleNotFoundError, ImportError):
+    # importing megatron.core in CPU container will fail due to the requirement of apex
+    # Here class types must be defined for type hinting
+    class MegatronDDP:
+        pass
+
+    class MegatronDistOptim:
+        pass
+
 
 from realhf.base import constants, logging
 

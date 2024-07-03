@@ -33,7 +33,7 @@ def search_rpc_allocations(
     from realhf.search_engine.enumerate import build_graph
     from realhf.search_engine.estimate import get_param_realloc_stats
 
-    from_file = os.environ.get("IS_REMOTE", "0") == "1"
+    from_file = os.environ.get("REAL_IS_REMOTE", "0") == "1"
     dump_dir = os.path.join(
         constants.LOG_ROOT,
         constants.experiment_name(),
