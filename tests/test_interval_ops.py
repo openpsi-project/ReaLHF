@@ -27,11 +27,14 @@ def make_intervals(maxsize, n_intervals):
     return np.array(intervals, dtype=np.int64), interval_size
 
 
+@pytest.mark.parametrize("device", [torch.device("cuda"), torch.device("cpu")])
 @pytest.mark.parametrize("n_intervals", list(reversed([1, 100, 10000, 100000])))
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32, torch.float16])
-def test_get(n_intervals: int, dtype: torch.dtype):
-    # Usage example
-    input_tensor = torch.randn(int(1e8), device="cuda", dtype=dtype)
+def test_get(n_intervals: int, dtype: torch.dtype, device: torch.device):
+    if device == torch.device("cuda") and not torch.cuda.is_available():
+        pytest.skip("This test requires a GPU.")
+
+    input_tensor = torch.randn(int(1e8), device=device, dtype=dtype)
     intervals, _ = make_intervals(input_tensor.size(0), n_intervals)
 
     # warmup
@@ -61,7 +64,9 @@ def test_get(n_intervals: int, dtype: torch.dtype):
 )
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 def test_set(n_intervals: int, dtype: torch.dtype):
-    # Usage example
+    # NOTE: Since the set_intervals degenerate to the python implementation with CPU tensors,
+    # We don't need to test it with CPU tensors.
+
     x = torch.randn(int(1e8), device="cuda", dtype=dtype)
     intervals, interval_size = make_intervals(x.size(0), n_intervals)
     src = torch.randn(interval_size, device="cuda", dtype=dtype)
