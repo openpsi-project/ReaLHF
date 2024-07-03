@@ -3,7 +3,7 @@ import json
 import os
 import time
 from typing import *
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import torch
 import torch.distributed as dist
 import transformers
@@ -64,9 +64,6 @@ class HFModelRegistry:
         load_dir: str,
         init_critic_from_actor: bool = False,
     ):
-        # TODO: expand odd vocab size to support tensor parallel
-        # NOTE: moving this upwards will result in circular import
-
         tik = time.perf_counter()
         with open(os.path.join(load_dir, "config.json"), "r") as f:
             hf_config = json.load(f)
@@ -120,9 +117,9 @@ class HFModelRegistry:
             )
         setup_time = time.perf_counter() - tik
 
-        load_times, partition_times = [], []
-        state_dict = {}
-        for fn in files_to_load:
+        
+
+        def _load_ckpt(fn):
             load_tik = time.perf_counter()
             if fn.endswith(".safetensors"):
                 sd = load_safetensor(os.path.join(load_dir, fn))
@@ -138,13 +135,24 @@ class HFModelRegistry:
                 constants.model_parallel_world_size(),
                 constants.model_parallel_rank(),
             )
-            state_dict.update(psd)
-            load_times.append(partition_tik - load_tik)
-            partition_times.append(time.perf_counter() - partition_tik)
+            return psd, partition_tik - load_tik, time.perf_counter() - partition_tik
+            
+        
+        load_times, partition_times = [], []
+        state_dict = {}
+        with ThreadPoolExecutor(max_workers=min(4, max(1, os.cpu_count() // 8))) as executor:
+            future_to_checkpoint = {executor.submit(_load_ckpt, path): path for path in files_to_load}
 
-        for k, v in state_dict.items():
-            if v.isnan().any() or v.isinf().any():
-                raise ValueError(f"Loaded checkpoint {k} has NaN or Inf. Aborted.")
+            for future in as_completed(future_to_checkpoint):
+                path = future_to_checkpoint[future]
+                try:
+                    psd, loat_t, part_t = future.result()
+                    state_dict.update(psd)
+                    load_times.append(loat_t)
+                    partition_times.append(part_t)
+                except Exception as e:
+                    raise RuntimeError(f"Error loading checkpoint from {path}: {e}")
+            
 
         # Remap embedding weights to the last layer if tied_embedding is True.
         if (

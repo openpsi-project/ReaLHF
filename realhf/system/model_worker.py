@@ -310,6 +310,9 @@ class ModelWorker(worker_base.Worker):
                     s.model.args["model_path"] = model_path
                     s.model.args["init_critic_from_actor"] = False
 
+                if constants.parallelism_rank() == 0:
+                    self.logger.info(f"Making model {s.id.model_name}...")
+
                 self.__models[s.id.model_name] = model = model_api.make_model(
                     s.model, name=s.id.model_name, device=self.__device
                 )
