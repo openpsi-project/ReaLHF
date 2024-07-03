@@ -424,23 +424,8 @@ def get_repo_path() -> pathlib.Path:
 
 
 def get_env_vars(**kwargs):
-    cluster_spec_path = os.environ.get("CLUSTER_SPEC_PATH", "")
-    if not cluster_spec_path and "REAL_MODE" in kwargs:
-        if kwargs["REAL_MODE"] == "SLURM":
-            raise ValueError(
-                "Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
-                "See example/cluster_config.json for a template."
-            )
-        logger.warning(
-            "Environment variable CLUSTER_SPEC_PATH is not set. "
-            "Files of the experiment (logs, checkpoints, cache ...) "
-            "will be saved to temporary directory of the system. "
-            "To change the fileroot, set the fileroot option of your choice in your CLUSTER_SPEC_PATH."
-        )
-
     return {
         **kwargs,
         "REAL_PACKAGE_PATH": str(get_repo_path()),
-        "CLUSTER_SPEC_PATH": cluster_spec_path,
         **BASE_ENVIRONS,
     }

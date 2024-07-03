@@ -117,10 +117,25 @@ def main_start(args, recover_count: int = 0):
     ) or args.recover_mode == "resume"
     save_recover_states = args.recover_mode != "disabled"
 
+    cluster_spec_path = os.environ.get("CLUSTER_SPEC_PATH", "")
+    if not cluster_spec_path:
+        if args.mode == "slurm":
+            raise ValueError(
+                "Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
+                "See example/cluster_config.json for a template."
+            )
+        logger.warning(
+            "Environment variable CLUSTER_SPEC_PATH is not set. "
+            "Files of the experiment (logs, checkpoints, cache ...) "
+            "will be saved to temporary directory of the system. "
+            "To change the fileroot, set the fileroot option of your choice in your CLUSTER_SPEC_PATH."
+        )
+
     # set env vars
     BASE_ENVIRONS = constants.get_env_vars(
         WANDB_MODE=args.wandb_mode,
         REAL_MODE=args.mode.upper(),
+        CLUSTER_SPEC_PATH=cluster_spec_path,
         REAL_RECOVER_RUN="1" if is_recover_run else "0",
         REAL_SAVE_RECOVER_STATES="1" if save_recover_states else "0",
     )
@@ -292,7 +307,11 @@ def _main_profile_layers(model_family, model_path):
     )
 
     if check_slurm_availability():
-        BASE_ENVIRONS = constants.get_env_vars(WANDB_MODE="disabled", REAL_MODE="slurm")
+        BASE_ENVIRONS = constants.get_env_vars(
+            WANDB_MODE="disabled",
+            REAL_MODE="slurm",
+            CLUSTER_SPEC_PATH=os.environ.get("CLUSTER_SPEC_PATH", ""),
+        )
         clear_name_resolve(expr_name, trial_name)
         sched = sched_client.make(
             mode="slurm", expr_name=expr_name, trial_name=trial_name
