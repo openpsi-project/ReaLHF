@@ -87,13 +87,6 @@ def _submit_workers(
     return scheduled_jobs
 
 
-def get_repo_path():
-    file_path = os.path.abspath(__file__)
-    realhf_path = os.path.dirname(os.path.dirname(file_path))
-    repo_path = os.path.dirname(realhf_path)
-    return repo_path
-
-
 def main_start(args, recover_count: int = 0):
     if recover_count == 0:
         constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
@@ -119,42 +112,18 @@ def main_start(args, recover_count: int = 0):
     )
     trial_name = args.trial_name or f"test-{getpass.getuser()}"
     expr_name = args.experiment_name
-    repo_path = get_repo_path()
     is_recover_run = (
         args.recover_mode == "auto" and recover_count > 0
     ) or args.recover_mode == "resume"
     save_recover_states = args.recover_mode != "disabled"
 
     # set env vars
-    cluster_spec_path = os.environ.get("CLUSTER_SPEC_PATH", None)
-    if not cluster_spec_path:
-        if args.mode == "slurm":
-            raise ValueError(
-                "Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
-                "See example/cluster_config.json for a template."
-            )
-        logger.warning(
-            "Environment variable CLUSTER_SPEC_PATH is not set. "
-            "Files of the experiment (logs, checkpoints, cache ...) "
-            "will be saved to temporary directory of the system. "
-            "To change the fileroot, set the fileroot option of your choice in your CLUSTER_SPEC_PATH."
-        )
-
-    BASE_ENVIRONS = {
-        "PYTHONPATH": "/realhf",
-        "REAL_PACKAGE_PATH": repo_path,
-        "WANDB_MODE": args.wandb_mode,
-        "REAL_MODE": args.mode.upper(),
-        "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
-        "IS_REMOTE": "1",
-        # identify whether this run is automatically recovering the last failed run
-        "RECOVER_RUN": "1" if is_recover_run else "0",
-        "SAVE_RECOVER_STATES": "1" if save_recover_states else "0",
-        "CLUSTER_SPEC_PATH": cluster_spec_path if cluster_spec_path else "",
-    }
-
-    os.environ["IS_REMOTE"] = "0" if not force_allocation_use_cache else "1"
-    os.environ["REAL_PACKAGE_PATH"] = repo_path
+    BASE_ENVIRONS = constants.get_env_vars(
+        args.wandb_mode, args.mode, is_recover_run, save_recover_states
+    )
+    for k, v in BASE_ENVIRONS.items():
+        os.environ[k] = v
+    os.environ["REAL_IS_REMOTE"] = "0" if not force_allocation_use_cache else "1"
 
     # setup experiments
     if args.allocation_mode == "search":
@@ -320,18 +289,7 @@ def _main_profile_layers(model_family, model_path):
     )
 
     if check_slurm_availability():
-        repo_path = get_repo_path()
-
-        from realhf.api.core.system_api import _LLM_ENVVARS
-
-        BASE_ENVIRONS = {
-            "PYTHONPATH": "/realhf",
-            "REAL_PACKAGE_PATH": repo_path,
-            "WANDB_MODE": "disabled",
-            "DLLM_MODE": "SLURM",
-            "DLLM_TRACE": "0",
-            **_LLM_ENVVARS,
-        }
+        BASE_ENVIRONS = constants.get_env_vars("disabled", "slurm", False, False)
         clear_name_resolve(expr_name, trial_name)
         sched = sched_client.make(
             mode="slurm", expr_name=expr_name, trial_name=trial_name
