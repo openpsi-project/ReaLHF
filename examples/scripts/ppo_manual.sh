@@ -1,15 +1,15 @@
 # MODEL_FAMILY specifies how the pretrained checkpoint is loaded, e.g., as a LLaMA model or a GPT model.
 # You can specify different model families for the SFT and the RW model, but you need to
 # re-tokenize the sequences if necessary.
-MODEL_FAMILY=llama
+MODEL_FAMILY=gpt2
 
 # SFT_MODEL_PATH and RW_MODEL_PATH are the saved SFT and RW checkpoints.
 # ReaL saves checkpoints with the same format as HuggingFace,
 # so you don't need to convert or split checkpoints explicitly.
 # You can also directly use the pre-trained HuggingFace checkpoint, but this
 # will not ensure the optimal algorithm performance.
-SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/$MODEL_FAMILY-local-manual/default/epoch7epochstep5globalstep50/
-RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw/$MODEL_FAMILY-ray-manual/default/epoch1epochstep10globalstep10/
+SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/$MODEL_FAMILY/default/epoch7epochstep5globalstep50/
+RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw/$MODEL_FAMILY/default/epoch1epochstep15globalstep15/
 
 # Option 1: The experiment runs locally with subprocesses.
 # MODE=local
@@ -23,17 +23,13 @@ MODE=ray
 # `experiment_name` and `trial_name` can be arbitrary.
 # Logs and saved checkpoints will be indexed by them.
 EXP_NAME=quickstart-ppo
-TRIAL_NAME=$MODEL_FAMILY-$MODE-heuristic
+TRIAL_NAME=$MODEL_FAMILY-$MODE-manual
 
-# We use the "heuristic" allocation mode here to automatically determine the parallelism strategy
-# for each model function call, i.e., actor generation, critic inference, actor train, etc.
+# When using the "manual" allocation mode, the user should specify the device allocation
+# and parallel strategies for each model function calls.
 # The number of GPUs is `n_nodes` * `n_gpus_per_node` (not set explictly here, defaults to 8).
-# ReaL will make full use of these available GPUs to design allocations.
-# This does not ensure the optimal throughput, but it is a good starting point.
-
-# The `heuristic` allocation mode is not ensured to run with every model configurations.
-# For example, if the vocabulary size is an odd number, the model parallelism may not work.
-# In these cases, you can use the `ppo_manual.sh` to specify the parallelism strategy manually.
+# We provide a template in the following command and the user can modify it according to
+# the specific model and the available GPUs.
 
 # The `ppo` subcommand specifies that this is a PPO experiment.
 # The `save_freq_steps` is set to `null` to disable saving checkpoints.
@@ -41,14 +37,18 @@ TRIAL_NAME=$MODEL_FAMILY-$MODE-heuristic
 # The `ppo` option is used to control the generation and PPO algorithm hyperparameters.
 # Note that the performance of PPO is sensitive to the the pre-trained model and hyperparameters.
 # It's the user's responsibility to tune them appropriately.
+# The allocation of model function calls is specified by a pattern `hostname:gpu_id1,gpu_id2,...`.
+# If the CLUSTER_SPEC_PATH is not set, `hostname`s are NODE01, NODE02, etc, otherwise it's the
+# hostname specified in this file. The `gpu_id`s are the GPU indices on the host,
+# from 0 to `n_gpus_per_node` (defaults to 8, can be changed) - 1.
+# Once allocations are all set, parallel strategies can be specified as long as the world size
+# equals to the number of GPUs in the allocation.
 python3 -m realhf.apps.quickstart ppo \
     mode=$MODE \
     experiment_name=$EXP_NAME \
     trial_name=$TRIAL_NAME \
     total_train_epochs=1 \
     save_freq_steps=null \
-    n_nodes=1 \
-    allocation_mode=heuristic \
     actor.type._class=$MODEL_FAMILY \
     actor.path=$SFT_MODEL_PATH \
     critic.type._class=$MODEL_FAMILY \
@@ -68,5 +68,31 @@ python3 -m realhf.apps.quickstart ppo \
     ppo.ppo_n_minibatches=4 \
     ppo.kl_ctl=0.1 \
     ppo.value_eps_clip=0.2 \
-    ppo.reward_output_scaling=1.0 \
-    ppo.adv_norm=True ppo.value_norm=True
+    ppo.reward_output_scaling=10.0 \
+    ppo.adv_norm=True ppo.value_norm=True \
+    allocation_mode=manual \
+    n_nodes=1 \
+    actor_train.device_mesh=\'NODE01:0,1,2,3\' \
+    actor_train.parallel.data_parallel_size=2 \
+    actor_train.parallel.model_parallel_size=1 \
+    actor_train.parallel.pipeline_parallel_size=2 \
+    actor_gen.device_mesh=\'NODE01:0,1,2,3,4,5,6,7\' \
+    actor_gen.parallel.data_parallel_size=4 \
+    actor_gen.parallel.model_parallel_size=1 \
+    actor_gen.parallel.pipeline_parallel_size=2 \
+    critic_train.device_mesh=\'NODE01:4,5,6,7\' \
+    critic_train.parallel.data_parallel_size=2 \
+    critic_train.parallel.model_parallel_size=1 \
+    critic_train.parallel.pipeline_parallel_size=2 \
+    critic_inf.device_mesh=\'NODE01:0,1\' \
+    critic_inf.parallel.data_parallel_size=2 \
+    critic_inf.parallel.model_parallel_size=1 \
+    critic_inf.parallel.pipeline_parallel_size=1 \
+    rew_inf.device_mesh=\'NODE01:2,3\' \
+    rew_inf.parallel.data_parallel_size=1 \
+    rew_inf.parallel.model_parallel_size=1 \
+    rew_inf.parallel.pipeline_parallel_size=2 \
+    ref_inf.device_mesh=\'NODE01:4,5,6,7\' \
+    ref_inf.parallel.data_parallel_size=1 \
+    ref_inf.parallel.model_parallel_size=1 \
+    ref_inf.parallel.pipeline_parallel_size=4

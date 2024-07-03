@@ -56,8 +56,8 @@ class ModelName:
 @dataclasses.dataclass(unsafe_hash=True)
 class ModelFamily:
     _class: str
-    size: int
-    is_critic: bool
+    size: int = 0
+    is_critic: bool = False
 
     def __repr__(self):
         s = f"{self._class}-{self.size}"
