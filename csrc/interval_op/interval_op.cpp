@@ -22,7 +22,3 @@ std::vector<std::pair<size_t, size_t>> merge_intervals(
   merged_intervals.push_back({start, end});
   return merged_intervals;
 }
-
-PYBIND11_MODULE(interval_op, m) {
-  m.def("merge_intervals", &merge_intervals, "Merge neighbour intervals into contiguous ones.");
-}
