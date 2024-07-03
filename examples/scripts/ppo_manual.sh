@@ -39,11 +39,15 @@ TRIAL_NAME=$MODEL_FAMILY-$MODE-manual
 # It's the user's responsibility to tune them appropriately.
 # The allocation of model function calls is specified by a pattern `hostname:gpu_id1,gpu_id2,...`
 # for slicing GPUS of a single node, and `hostname1,hostname2` for multiple nodes.
+# Only 1, 2, 4, 8 GPUs on a single node or multiple complete nodes (e.g., 16, 24) are supported.
 # If the CLUSTER_SPEC_PATH is not set, `hostname`s are NODE01, NODE02, etc, otherwise it's the
 # hostname specified in this file. The `gpu_id`s are the GPU indices on the host,
 # from 0 to `n_gpus_per_node` (defaults to 8, can be changed) - 1.
 # Once allocations are all set, parallel strategies can be specified as long as the world size
 # equals to the number of GPUs in the allocation.
+
+# The following command shows an example of manual allocation on two nodes,
+# but it can be modified according to the specific model and the available GPUs.
 python3 -m realhf.apps.quickstart ppo \
     mode=$MODE \
     experiment_name=$EXP_NAME \

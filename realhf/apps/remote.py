@@ -152,12 +152,6 @@ def main_controller(args):
     logger.debug("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
 
-    # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
-    # profiler.import_profiler_registers()
-    import realhf.impl.dataset
-    import realhf.impl.model
-    import realhf.system
-
     controller = system.make_controller(
         type_=args.type,
         experiment_name=args.experiment_name,
