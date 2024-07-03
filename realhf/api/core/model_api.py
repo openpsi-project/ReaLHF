@@ -36,7 +36,8 @@ class GenerationHyperparameters:
     :type temperature: float
     :param num_samples: The number of samples to generate.
     :type num_samples: int
-    :param use_cuda_graph: Whether to use CUDA graph.
+    :param use_cuda_graph: Whether to use CUDA graph to reduce kernel launch overhead
+        during generation. Recommended for pure generation.
     :type use_cuda_graph: bool
     """
 
