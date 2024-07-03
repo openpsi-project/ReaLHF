@@ -119,7 +119,10 @@ def main_start(args, recover_count: int = 0):
 
     # set env vars
     BASE_ENVIRONS = constants.get_env_vars(
-        args.wandb_mode, args.mode, is_recover_run, save_recover_states
+        WANDB_MODE=args.wandb_mode,
+        REAL_MODE=args.mode.upper(),
+        REAL_RECOVER_RUN="1" if is_recover_run else "0",
+        REAL_SAVE_RECOVER_STATES="1" if save_recover_states else "0",
     )
     for k, v in BASE_ENVIRONS.items():
         os.environ[k] = v
@@ -289,7 +292,7 @@ def _main_profile_layers(model_family, model_path):
     )
 
     if check_slurm_availability():
-        BASE_ENVIRONS = constants.get_env_vars("disabled", "slurm", False, False)
+        BASE_ENVIRONS = constants.get_env_vars(WANDB_MODE="disabled", REAL_MODE="slurm")
         clear_name_resolve(expr_name, trial_name)
         sched = sched_client.make(
             mode="slurm", expr_name=expr_name, trial_name=trial_name

@@ -3,6 +3,7 @@ import contextlib
 import copy
 import getpass
 import os
+import pathlib
 from typing import *
 
 import numpy as np
@@ -64,6 +65,42 @@ TORCH_EXTENSIONS_DIR = (
     f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/torch/extensions"
 )
 QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/"
+BASE_ENVIRONS = {
+    "PYTHONPATH": "/realhf",
+    "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
+    "REAL_IS_REMOTE": "1",
+    # "NCCL_P2P_DISABLE": "1",
+    # "NCCL_IB_DISABLE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+    "PYTORCH_KERNEL_CACHE_PATH": PYTORCH_KERNEL_CACHE_PATH,
+    "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
+    "TOKENIZERS_PARALLELISM": "true",
+    "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
+    # "NCCL_DEBUG": "INFO",
+    # "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
+    # "NCCL_SOCKET_IFNAME": "ibp71s0",
+    # "GLOO_SOCKET_IFNAME": "ibp71s0",
+    # "TORCH_USE_CUDA_DSA": "1",
+    # "NCCL_IGNORE_DISABLED_P2P": "1",
+    # "CUDA_LAUNCH_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if CUDA_LAUNCH_BLOCKING is set to 1.
+    # "NCCL_COMM_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_COMM_BLOCKING is set to 1.
+    # "NCCL_BLOCKING_WAIT": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_BLOCKING_WAIT is set to 1.
+    # "TORCH_SHOW_CPP_STACKTRACES": "1",
+    "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
+    "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+    "PYTHONUSERBASE": "/nonsense",  # a random PYTHONUSERBASE to avoid local user site-packages interference
+    "OMP_NUM_THREADS": str(min(os.cpu_count(), 32)),
+    # torch.distributed.all_reduce does not free the input tensor until
+    # the synchronization point. This causes the memory usage to grow
+    # as the number of all_reduce calls increases. This env var disables
+    # this behavior.
+    # Related issue:
+    # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
+    "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
+    # Whether to enable time mark to plot timelines.
+    "REAL_CUDA_TMARK": "1",
+}
+
 
 # make directories if does not exist
 os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
@@ -382,19 +419,14 @@ def clear_global_memory_buffer():
     _global_memory_buffer = GlobalMemoryBuffer()
 
 
-def get_repo_path():
-    file_path = os.path.abspath(__file__)
-    realhf_path = os.path.dirname(os.path.dirname(file_path))
-    repo_path = os.path.dirname(realhf_path)
-    return repo_path
+def get_repo_path() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parent.parent
 
 
-def get_env_vars(
-    wandb_mode: str, real_mode: str, is_recover_run: bool, save_recover_states: bool
-):
-    cluster_spec_path = os.environ.get("CLUSTER_SPEC_PATH", None)
-    if not cluster_spec_path:
-        if real_mode == "slurm":
+def get_env_vars(**kwargs):
+    cluster_spec_path = os.environ.get("CLUSTER_SPEC_PATH", "")
+    if not cluster_spec_path and "REAL_MODE" in kwargs:
+        if kwargs["REAL_MODE"] == "SLURM":
             raise ValueError(
                 "Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
                 "See example/cluster_config.json for a template."
@@ -407,44 +439,8 @@ def get_env_vars(
         )
 
     return {
-        "PYTHONPATH": "/realhf",
-        "REAL_PACKAGE_PATH": get_repo_path(),
-        "WANDB_MODE": wandb_mode,
-        "REAL_MODE": real_mode.upper(),
-        "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
-        "REAL_IS_REMOTE": "1",
-        # identify whether this run is automatically recovering the last failed run
-        "REAL_RECOVER_RUN": "1" if is_recover_run else "0",
-        "REAL_SAVE_RECOVER_STATES": "1" if save_recover_states else "0",
-        "CLUSTER_SPEC_PATH": cluster_spec_path if cluster_spec_path else "",
-        # "NCCL_P2P_DISABLE": "1",
-        # "NCCL_IB_DISABLE": "1",
-        "TRANSFORMERS_OFFLINE": "1",
-        "PYTORCH_KERNEL_CACHE_PATH": PYTORCH_KERNEL_CACHE_PATH,
-        "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
-        "TOKENIZERS_PARALLELISM": "true",
-        "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
-        # "NCCL_DEBUG": "INFO",
-        # "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
-        # "NCCL_SOCKET_IFNAME": "ibp71s0",
-        # "GLOO_SOCKET_IFNAME": "ibp71s0",
-        # "TORCH_USE_CUDA_DSA": "1",
-        # "NCCL_IGNORE_DISABLED_P2P": "1",
-        # "CUDA_LAUNCH_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if CUDA_LAUNCH_BLOCKING is set to 1.
-        # "NCCL_COMM_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_COMM_BLOCKING is set to 1.
-        # "NCCL_BLOCKING_WAIT": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_BLOCKING_WAIT is set to 1.
-        # "TORCH_SHOW_CPP_STACKTRACES": "1",
-        "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
-        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-        "PYTHONUSERBASE": "/nonsense",  # a random PYTHONUSERBASE to avoid local user site-packages interference
-        "OMP_NUM_THREADS": str(min(os.cpu_count(), 32)),
-        # torch.distributed.all_reduce does not free the input tensor until
-        # the synchronization point. This causes the memory usage to grow
-        # as the number of all_reduce calls increases. This env var disables
-        # this behavior.
-        # Related issue:
-        # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
-        "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
-        # Whether to enable time mark to plot timelines.
-        "REAL_CUDA_TMARK": "1",
+        **kwargs,
+        "REAL_PACKAGE_PATH": str(get_repo_path()),
+        "CLUSTER_SPEC_PATH": cluster_spec_path,
+        **BASE_ENVIRONS,
     }
