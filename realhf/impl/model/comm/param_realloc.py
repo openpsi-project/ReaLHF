@@ -13,8 +13,6 @@ from realhf.api.core.config import ModelName
 from realhf.base import constants, topology
 from realhf.impl.model.comm.global_comm import filter_match_mwids
 from realhf.impl.model.nn.flatten_param import (
-    CUDA_INTERVAL_OP_CHUNK_SIZE,
-    MAX_PYTORCH_N_INTERVALS,
     ContiguousParamSpec,
     build_param_spec,
     param_intervals_from_keys,
@@ -301,9 +299,7 @@ class ReparallelizeSenderStep:
     sender_mp_portion_id: int
     receiver_mp_portion_id: int
     param_keys: List[str]
-    param_intervals: torch.Tensor
     param_intervals_cpu: List[Tuple[int, int]]
-    max_interval_size: int
     param_size: int
     group: torch.distributed.ProcessGroup
     dst_ranks: List[int]
@@ -315,38 +311,14 @@ class ReparallelizeReceiverStep:
     rank: int
     sender_mp_portion_id: int
     receiver_mp_portion_id: int
-    sender_param_intervals: torch.Tensor
     sender_param_intervals_cpu: List[Tuple[int, int]]
-    sender_max_interval_size: int
-    receiver_param_intervals: torch.Tensor
     receiver_param_intervals_cpu: List[Tuple[int, int]]
-    receiver_max_interval_size: int
     param_size: int
     param_keys: List[str]
     param_dtype: torch.dtype
     src: int
     dst_ranks: List[int]
     group: torch.distributed.ProcessGroup
-
-
-def _split_intervals(intervals, K):
-    result = []
-    for start, end in intervals:
-        if end - start <= K:
-            result.append((start, end))
-        else:
-            # Calculate how many chunks are needed
-            num_chunks = (end - start) // K
-            remainder = (end - start) % K
-
-            # Generate the chunks
-            for i in range(num_chunks):
-                result.append((start, start + K))
-                start += K
-            if remainder:
-                result.append((start, start + remainder))
-
-    return result
 
 
 def _derive_reparallelize_comm_plan(
@@ -468,8 +440,7 @@ def _derive_reparallelize_comm_plan(
                     group = pg_info.param_realloc_groups[key]
                     dst_ranks = pg_info.param_realloc_dst_ranks[key]
 
-                    param_intervals = param_keys = receiver_param_intervals = None
-                    max_param_interval_size = max_receiver_param_interval_size = -1
+                    param_keys = None
                     param_intervals_cpu = receiver_param_intervals_cpu = None
                     param_keys = keys_from_layer_indices(
                         from_model_config, layer_indices
@@ -497,21 +468,6 @@ def _derive_reparallelize_comm_plan(
                                 sequence_parallel=from_topo.sequence_parallel,
                                 head_param_point_to_embedding=from_model_head_param_point_to_embedding,
                             )
-                            if len(param_intervals_cpu) > MAX_PYTORCH_N_INTERVALS:
-                                param_intervals_cpu = _split_intervals(
-                                    param_intervals_cpu,
-                                    CUDA_INTERVAL_OP_CHUNK_SIZE,
-                                )
-                                max_param_interval_size = CUDA_INTERVAL_OP_CHUNK_SIZE
-                            else:
-                                max_param_interval_size = max(
-                                    j - i for i, j in param_intervals_cpu
-                                )
-                            param_intervals = torch.tensor(
-                                param_intervals_cpu,
-                                dtype=torch.long,
-                                device="cuda",
-                            )
                         if torch.distributed.get_rank() in dst_ranks:
                             receiver_param_intervals_cpu = param_intervals_from_keys(
                                 model_name=to_model_name,
@@ -524,26 +480,6 @@ def _derive_reparallelize_comm_plan(
                                 sequence_parallel=to_topo.sequence_parallel,
                                 head_param_point_to_embedding=to_model_head_param_point_to_embedding,
                             )
-                            if (
-                                len(receiver_param_intervals_cpu)
-                                > MAX_PYTORCH_N_INTERVALS
-                            ):
-                                receiver_param_intervals_cpu = _split_intervals(
-                                    receiver_param_intervals_cpu,
-                                    CUDA_INTERVAL_OP_CHUNK_SIZE,
-                                )
-                                max_receiver_param_interval_size = (
-                                    CUDA_INTERVAL_OP_CHUNK_SIZE
-                                )
-                            else:
-                                max_receiver_param_interval_size = max(
-                                    j - i for i, j in receiver_param_intervals_cpu
-                                )
-                            receiver_param_intervals = torch.tensor(
-                                receiver_param_intervals_cpu,
-                                dtype=torch.long,
-                                device="cuda",
-                            )
 
                     for dst_rank in dst_ranks:
                         comm_plan.append(
@@ -553,11 +489,7 @@ def _derive_reparallelize_comm_plan(
                                 receiver_mp_portion_id=receiver_mp_portion_id,
                                 param_keys=param_keys,
                                 sender_param_intervals_cpu=param_intervals_cpu,
-                                sender_param_intervals=param_intervals,
-                                sender_max_interval_size=max_param_interval_size,
                                 receiver_param_intervals_cpu=receiver_param_intervals_cpu,
-                                receiver_param_intervals=receiver_param_intervals,
-                                receiver_max_interval_size=max_receiver_param_interval_size,
                                 param_size=param_size,
                                 param_dtype=dtype,
                                 src=src,
@@ -571,9 +503,7 @@ def _derive_reparallelize_comm_plan(
                             sender_mp_portion_id=sender_mp_portion_id,
                             receiver_mp_portion_id=receiver_mp_portion_id,
                             param_keys=param_keys,
-                            param_intervals=param_intervals,
                             param_intervals_cpu=param_intervals_cpu,
-                            max_interval_size=max_param_interval_size,
                             param_size=param_size,
                             group=group,
                             dst_ranks=dst_ranks,

@@ -1,21 +1,19 @@
+import contextlib
 import dataclasses
 import math
+import os
+import subprocess
 from typing import *
 
 import numpy as np
 import torch
+import torch.utils.cpp_extension as torch_cpp_ext
+from packaging.version import Version, parse
 
+import realhf
 from realhf.api.core import model_api
 from realhf.api.core.config import ModelName
 from realhf.base import logging
-
-try:
-    import realhf._C.interval_op_cuda as interval_op_cuda
-except ImportError:
-    print(
-        "interval_op_cuda not found. "
-        "This should only appear on workers without CUDA supports."
-    )
 
 from .real_llm_base import (
     real_model_embedding_param_keys,
@@ -29,11 +27,41 @@ from .real_llm_parallel import (
     shape_partition_fn,
 )
 
+try:
+    from realhf._C.interval_op import merge_intervals
+except ImportError:
+    merge_intervals = None
 logger = logging.getLogger("FlattenParam")
 
-MAX_PYTORCH_N_INTERVALS = 1024
-CUDA_INTERVAL_OP_CHUNK_SIZE = 2048
 _FLAT_PARAM_INDICES_CACHE = {}
+_SET_INTERVAL_FN = {}
+_GET_INTERVAL_FN = {}
+
+
+def get_nvcc_cuda_version(cuda_dir: str) -> Version:
+    """Get the CUDA version from nvcc.
+
+    Adapted from https://github.com/NVIDIA/apex/blob/8b7a1ff183741dd8f9b87e7bafd04cfde99cea28/setup.py
+    """
+    nvcc_output = subprocess.check_output(
+        [cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True
+    )
+    output = nvcc_output.split()
+    release_idx = output.index("release") + 1
+    nvcc_cuda_version = parse(output[release_idx].split(",")[0])
+    return nvcc_cuda_version
+
+
+def _torch_dtype_to_cpp_dtype(dtype: torch.dtype) -> str:
+    if dtype == torch.float32:
+        return "float"
+    if dtype == torch.float64:
+        return "double"
+    if dtype == torch.float16:
+        return "at::Half"
+    if dtype == torch.bfloat16:
+        return "at::BFloat16"
+    raise ValueError(f"Unsupported dtype: {dtype}")
 
 
 @dataclasses.dataclass
@@ -62,90 +90,146 @@ def recursive_getattr(obj, attr_string):
     return obj
 
 
-def slice_intervals(
-    tensor: torch.Tensor,
-    intervals: torch.IntTensor,
-    intervals_cpu: List[Tuple[int, int]],
-    max_interval_size: int,
-    output_size: int,
-) -> torch.Tensor:
-    assert len(tensor.shape) == 1
-    assert sum(intervals[:, 1] - intervals[:, 0]) == output_size
-    assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
-    assert intervals[:, 0].min().item() >= 0, (
-        intervals[:, 0].min().item(),
-        tensor.shape[0],
+def _slice_interval_dispatch(N: int) -> Callable:
+    global _GET_INTERVAL_FN
+    if N in _GET_INTERVAL_FN:
+        return _GET_INTERVAL_FN[N]
+    src_path = os.path.join(
+        realhf.__path__[0], os.pardir, "csrc", "interval_op", "slice_interval.cpp"
     )
-    assert intervals[:, 1].max().item() <= tensor.shape[0], (
-        tensor.shape[0],
-        intervals[:, 1].max().item(),
+    with open(src_path, "r") as f:
+        src = f.read()
+    # NOTE: We embed the C++ binding code in python docstring because we want to dynamically compile
+    # for a specific template value N. This ensures the optimal performance.
+    src += f"""
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{
+  m.def("slice_intervals", &slice_intervals<{N}>, "Slice intervals of a 1D tensor");
+}}
+"""
+    ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
+    logger.info(f">>> Building slice interval extension with N={N}. <<<")
+    slice_fn = torch_cpp_ext.load_inline(
+        f"slice_intervals_{N}",
+        cpp_sources=[src],
+        extra_cflags=[
+            "-O3",
+            "-std=c++17",
+            f"-D_GLIBCXX_USE_CXX11_ABI={ABI}",
+            "-fopenmp",
+        ],
+        extra_ldflags=["-fopenmp"],
+        verbose=False,
+    ).slice_intervals
+    _GET_INTERVAL_FN[N] = slice_fn
+    return slice_fn
+
+
+def _set_interval_dispatch(N: int, torch_dtype: torch.dtype) -> Callable:
+    global _SET_INTERVAL_FN
+    dtype = _torch_dtype_to_cpp_dtype(torch_dtype)
+    if (N, dtype) in _SET_INTERVAL_FN:
+        return _SET_INTERVAL_FN[(N, dtype)]
+
+    src_path = os.path.join(
+        realhf.__path__[0], os.pardir, "csrc", "interval_op", "set_interval.cu"
     )
+    with open(src_path, "r") as f:
+        src = f.read()
+    # NOTE: We embed the C++ binding code in python docstring because we want to dynamically compile
+    # for a specific template value N. This ensures the optimal performance.
+    src += f"""
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{
+  m.def("set_intervals", &set_intervals<{N}, {dtype}>, "Set intervals of a 1D tensor");
+}}
+"""
+    ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
+    NVCC_FLAGS = ["-O3", "-std=c++17", f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
+    nvcc_cuda_version = get_nvcc_cuda_version(torch_cpp_ext.CUDA_HOME)
+    # Use NVCC threads to parallelize the build.
+    if nvcc_cuda_version >= Version("11.2"):
+        nvcc_threads = int(os.getenv("NVCC_THREADS", 8))
+        num_threads = min(os.cpu_count(), nvcc_threads)
+        NVCC_FLAGS += ["--threads", str(num_threads)]
 
-    # NOTE: these following assertions will take ten years to finish.
-    # assert len(intervals) == len(intervals_cpu)
-    # assert len(set([x[0] for x in intervals_cpu])) == len(intervals_cpu)
-
-    # FIXME: This is a temporary fix for interval slicing.
-    # It's correct but slow. We should use the CUDA/C++ version in the future.
-    res = torch._C._nn.flatten_dense_tensors(
-        [tensor[start:end] for start, end in intervals_cpu]
+    if nvcc_cuda_version >= Version("11.8"):
+        NVCC_FLAGS += ["-DENABLE_FP8_E5M2"]
+    NVCC_FLAGS += torch_cpp_ext.COMMON_NVCC_FLAGS
+    REMOVE_NVCC_FLAGS = [
+        "-D__CUDA_NO_HALF_OPERATORS__",
+        "-D__CUDA_NO_HALF_CONVERSIONS__",
+        "-D__CUDA_NO_BFLOAT16_CONVERSIONS__",
+        "-D__CUDA_NO_HALF2_OPERATORS__",
+    ]
+    for flag in REMOVE_NVCC_FLAGS:
+        with contextlib.suppress(ValueError):
+            torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
+    logger.info(
+        f">>> Building set interval extension with N={N} and dtype={dtype}. <<<"
     )
-    return res
-    # if len(intervals_cpu) == 1:
-    #     return tensor[intervals_cpu[0][0] : intervals_cpu[0][1]]
-    # elif len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
-    #     return torch.cat([tensor[start:end] for start, end in intervals_cpu])
-
-    # interval_sizes = intervals[:, 1] - intervals[:, 0]
-    # offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-    # assert tensor.dtype == torch.half
-    # return interval_op_cuda.slice_intervals_cuda_half(
-    #     tensor,
-    #     intervals,
-    #     interval_sizes,
-    #     offsets,
-    #     max_interval_size,
-    #     output_size,
-    # )
+    set_fn = torch_cpp_ext.load_inline(
+        f"set_intervals_{N}_{str(torch_dtype).split('.')[1]}",
+        cpp_sources=[],
+        cuda_sources=[src],
+        extra_cuda_cflags=NVCC_FLAGS,
+        with_cuda=True,
+        verbose=False,
+    ).set_intervals
+    _SET_INTERVAL_FN[(N, dtype)] = set_fn
+    return set_fn
 
 
-def set_intervals(
+def _slice_intervals_py(src: torch.Tensor, intervals: List[Tuple[int, int]]):
+    # Drop-in replacement for the C++ implementation.
+    assert len(src.shape) == 1
+    assert all([x[0] >= 0 for x in intervals])
+    assert all([x[1] <= src.shape[0] for x in intervals])
+    N = len(intervals)
+    slices = []
+    for i, j in intervals:
+        slices.append(src[i:j])
+    return torch.cat(slices, dim=0)
+
+
+def _set_intervals_py(
     src: torch.Tensor,
     dst: torch.Tensor,
-    intervals: torch.IntTensor,
-    intervals_cpu: List[Tuple[int, int]],
-    max_interval_size: int,
+    intervals: List[Tuple[int, int]],
 ):
+    # Drop-in replacement for the C++ implementation.
     assert len(dst.shape) == len(src.shape) == 1
-    assert sum(intervals[:, 1] - intervals[:, 0]) == src.shape[0], (
-        src.shape[0],
-        (intervals[:, 1] - intervals[:, 0]),
-        (intervals[:, 1] - intervals[:, 0]).sum(),
-    )
-    assert torch.all((intervals[:, 1] - intervals[:, 0]) <= max_interval_size)
-    # if len(intervals_cpu) <= MAX_PYTORCH_N_INTERVALS:
-
-    # FIXME: This is a temporary fix for interval value scattering.
-    # It's correct but slow. We should use the CUDA/C++ version in the future.
     offset = 0
-    for i, j in intervals_cpu:
+    for i, j in intervals:
         assert i >= 0
         assert j <= dst.shape[0], (j, dst.shape[0])
         dst[i:j] = src[offset : offset + j - i]
         offset += j - i
     assert offset == src.shape[0]
-    return
-    # interval_sizes = intervals[:, 1] - intervals[:, 0]
-    # offsets = torch.nn.functional.pad(interval_sizes.cumsum(0)[:-1], (1, 0), value=0)
-    # interval_op_cuda.set_intervals_cuda_half(
-    #     src,
-    #     dst,
-    #     intervals,
-    #     interval_sizes,
-    #     offsets,
-    #     max_interval_size,
-    # )
-    # return
+
+
+def slice_intervals(
+    src: torch.Tensor,
+    intervals: List[Tuple[int, int]],
+):
+    N = len(intervals)
+    if N < 1000:
+        # NOTE: The C++ implementation has no negative effect, but for small Ns
+        # using the python implementation can omit compliation.
+        return _slice_intervals_py(src, intervals)
+    slice_fn = _slice_interval_dispatch(N)
+    return slice_fn(src, intervals)
+
+
+def set_intervals(
+    src: torch.Tensor,
+    dst: torch.Tensor,
+    intervals: List[Tuple[int, int]],
+):
+    if len(intervals) < 2048 or not (src.is_cuda() and dst.is_cuda()):
+        # NOTE: The CUDA implementation will launch a thread for each interval,
+        # which has a negative effect when the number of intervals is small.
+        return _set_intervals_py(src, dst, intervals)
+    set_fn = _set_interval_dispatch(len(intervals), src.dtype)
+    return set_fn(src, dst, intervals)
 
 
 def param_size_from_keys(
@@ -276,36 +360,6 @@ def param_intervals_from_keys(
     portion_size: int,
     portion_rank: int,
 ) -> List[int]:
-    # if portion_size == 1:
-    #     if head_param_point_to_embedding and f"{config.n_layers + 1}.weight" in sd_keys:
-    #         # The embeddings and output weights are shared.
-    #         intervals = [(param_spec[f"{config.n_layers + 1}.weight"].start_idx, param_spec[f"{config.n_layers + 1}.weight"].end_idx)]
-    #         start, end = None, None
-    #         for k in sd_keys:
-    #             if k == f"{config.n_layers + 1}.weight":
-    #                 continue
-    #             if start is None or param_spec[k].start_idx < start:
-    #                 start = param_spec[k].start_idx
-    #             if end is None or param_spec[k].end_idx > end:
-    #                 end = param_spec[k].end_idx
-    #         intervals += [(start, end)]
-    #         intervals = sorted(intervals, key=lambda x: x[0])
-    #         # Merge these two intervals if possible.
-    #         if intervals[1][0]<= intervals[0][1]:
-    #             return [(intervals[0][0], intervals[1][1])]
-    #         else:
-    #             return intervals
-    #     else:
-    #         # In this case, all parameters have unique unoverlapped memory allocations.
-    #         # If the portion size is also one, we can merge these contiguous intervals.
-    #         start, end = None, None
-    #         for k in sd_keys:
-    #             if start is None or param_spec[k].start_idx < start:
-    #                 start = param_spec[k].start_idx
-    #             if end is None or param_spec[k].end_idx > end:
-    #                 end = param_spec[k].end_idx
-    #         return [(start, end)]
-
     param_size = param_size_from_keys(
         config=config,
         src_mp_size=mp_size,
@@ -364,6 +418,8 @@ def param_intervals_from_keys(
     # assert len(set([x[0] for x in intervals])) == len(intervals)
     assert interval_size == param_size, (interval_size, param_size)
     intervals = sorted(intervals, key=lambda x: x[0])
+    if merge_intervals is not None:
+        intervals = merge_intervals(intervals)
     return intervals
 
 

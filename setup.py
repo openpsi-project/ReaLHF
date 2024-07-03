@@ -12,12 +12,7 @@ import setuptools
 import torch
 import torch.utils.cpp_extension as torch_cpp_ext
 from packaging.version import Version, parse
-from torch.utils.cpp_extension import (
-    CUDA_HOME,
-    ROCM_HOME,
-    BuildExtension,
-    CUDAExtension,
-)
+from torch.utils.cpp_extension import CUDA_HOME, BuildExtension, CUDAExtension
 
 ROOT_DIR = os.path.dirname(__file__)
 
@@ -226,19 +221,6 @@ if _is_cuda():
     )
     ext_modules.append(cr_extension)
 
-    interval_extension = CUDAExtension(
-        name="realhf._C.interval_op_cuda",
-        sources=[
-            "csrc/interval_op/interval_ops.cu",
-        ],
-        extra_compile_args={
-            "cxx": CXX_FLAGS,
-            "nvcc": NVCC_FLAGS,
-        },
-        libraries=["cuda"] if _is_cuda() else [],
-    )
-    ext_modules.append(interval_extension)
-
     gae_extension = CUDAExtension(
         name="realhf._C.cugae",
         sources=[
@@ -280,6 +262,23 @@ search_extension = setuptools.Extension(
     ],
 )
 ext_modules.append(search_extension)
+
+interval_extension = setuptools.Extension(
+    name="realhf._C.interval_op",
+    sources=[
+        "csrc/interval_op/interval_op.cpp",
+    ],
+    language="c++",
+    extra_compile_args=[
+        "-O3",
+        "-Wall",
+        "-std=c++17",
+    ],
+    include_dirs=[
+        get_pybind11_include_path(),
+    ],
+)
+ext_modules.append(interval_extension)
 
 if os.getenv("REAL_NO_EXT", "0") == "1":
     ext_modules = []
