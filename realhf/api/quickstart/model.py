@@ -7,7 +7,7 @@ from realhf.api.core.config import Model, ModelFamily, ModelWrapper
 logger = logging.getLogger("Quickstart Model Config")
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(unsafe_hash=True)
 class ParallelismConfig:
     """Model 3D parallelism configuration.
 
@@ -44,17 +44,6 @@ class ParallelismConfig:
             f"pp={self.pipeline_parallel_size},"
             f"dp={self.data_parallel_size})"
         )
-
-
-def parallelism_config_equal(
-    parallel1: ParallelismConfig, parallel2: ParallelismConfig
-) -> bool:
-    # NOTE: Implementing __eq__ in dataclass will cause error in hydra and omegaconf
-    return (
-        parallel1.model_parallel_size == parallel2.model_parallel_size
-        and parallel1.pipeline_parallel_size == parallel2.pipeline_parallel_size
-        and parallel1.data_parallel_size == parallel2.data_parallel_size
-    )
 
 
 @dataclasses.dataclass

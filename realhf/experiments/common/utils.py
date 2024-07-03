@@ -117,7 +117,6 @@ def make_model_config(cfg: ModelTrainEvalConfig):
 
 
 def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
-    from realhf.api.quickstart.model import parallelism_config_equal
 
     role_cnt = collections.defaultdict(int)
     for rpc_alloc in rpc_allocs:
@@ -130,8 +129,7 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                 if rpc.name == other.rpc.name:
                     continue
                 if rpc.model_name.role == other.rpc.model_name.role and not (
-                    parallelism_config_equal(parallel, other.parallel)
-                    and device_mesh == other.device_mesh
+                    parallel == other.parallel and device_mesh == other.device_mesh
                 ):
                     other.rpc.model_name = ModelName(
                         rpc.model_name.role, role_cnt[rpc.model_name.role] + 1
