@@ -24,4 +24,4 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest "not slow"
+          pytest -m "not slow"
