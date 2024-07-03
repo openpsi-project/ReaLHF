@@ -12,7 +12,9 @@ def parse_node_id(node_name: str, prefix: str) -> int:
 
 def parse_nodelist(nodelist: str, prefix: str) -> List[str]:
     if not nodelist.startswith(prefix):
-        raise ValueError(f"Node list `{nodelist}` does not start with hostname prefix `{prefix}`.")
+        raise ValueError(
+            f"Node list `{nodelist}` does not start with hostname prefix `{prefix}`."
+        )
     nodelist = nodelist.replace(prefix, "")
     if "[" not in nodelist:
         return [prefix + nodelist]
