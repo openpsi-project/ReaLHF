@@ -1,8 +1,6 @@
 name: Run Pytest
 
-on:
-  release:
-    types: [pull_request]
+on: [pull_request]
 
 jobs:
   build:
