@@ -711,10 +711,7 @@ class ReaLModel(nn.Module):
                 if step.rank == step.src:
                     buf = slice_intervals(
                         self.contiguous_param,
-                        step.sender_param_intervals,
                         step.sender_param_intervals_cpu,
-                        max_interval_size=step.sender_max_interval_size,
-                        output_size=step.param_size,
                     )
                 else:
                     buf = torch.zeros(
@@ -726,9 +723,7 @@ class ReaLModel(nn.Module):
                     dict(
                         src=buf,
                         dst=to_contiguous_param,
-                        intervals=step.receiver_param_intervals,
-                        intervals_cpu=step.receiver_param_intervals_cpu,
-                        max_interval_size=step.receiver_max_interval_size,
+                        intervals=step.receiver_param_intervals_cpu,
                     )
                 )
 
@@ -739,10 +734,7 @@ class ReaLModel(nn.Module):
                 if step.group is not None:
                     buf = slice_intervals(
                         self.contiguous_param,
-                        step.param_intervals,
                         step.param_intervals_cpu,
-                        step.max_interval_size,
-                        step.param_size,
                     )
                     send_buf_specs.append(buf)
                 if step.remove and not is_trainable(from_model_name):
