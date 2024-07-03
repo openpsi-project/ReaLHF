@@ -11,11 +11,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import ray
-import torch
 import ray.util.queue as rq
+import torch
 
 import realhf.api.core.system_api as system_api
-from realhf.base import logging, name_resolve, names, gpu_utils
+from realhf.base import gpu_utils, logging, name_resolve, names
 from realhf.base.cluster import spec as cluster_spec
 from realhf.system import WORKER_TYPES, load_worker, worker_base, worker_control
 from realhf.system.worker_base import WorkerServerStatus as Wss
@@ -108,9 +108,11 @@ class Controller:
             if not isinstance(schedules, List):
                 schedules = [schedules]
             if len(worker_setups) != sum(s.count for s in schedules):
-                raise ValueError(f"Configuration and scheduling mismatch. "
-                                 f"Number of worker configurations: {len(worker_setups)}, "
-                                 f"Scheduling configs: {schedules}.")
+                raise ValueError(
+                    f"Configuration and scheduling mismatch. "
+                    f"Number of worker configurations: {len(worker_setups)}, "
+                    f"Scheduling configs: {schedules}."
+                )
 
         for name, config, schedule in workers_configs:
             count = (

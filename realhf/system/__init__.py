@@ -67,8 +67,6 @@ def make_controller(type_, experiment_name, trial_name):
         )
         return getattr(module, "Controller")(experiment_name, trial_name, panel)
     elif type_ == "ray":
-        return getattr(module, "RayController")(
-            experiment_name, trial_name
-        )
+        return getattr(module, "RayController")(experiment_name, trial_name)
     else:
         raise NotImplementedError(f"Unknown controller type {type_}.")

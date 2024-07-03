@@ -108,7 +108,9 @@ class CommonExperimentConfig(Experiment):
 
     experiment_name: str = MISSING
     trial_name: str = MISSING
-    mode: str = dataclasses.field(metadata={"choices": ["slurm", "local", "ray"]}, default="slurm")
+    mode: str = dataclasses.field(
+        metadata={"choices": ["slurm", "local", "ray"]}, default="slurm"
+    )
     debug: bool = True
     partition: str = "dev"
     wandb_mode: str = "disabled"

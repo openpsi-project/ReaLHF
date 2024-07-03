@@ -139,8 +139,6 @@ def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_ty
     return bash_cmd
 
 
-
-
 def make(mode, expr_name, trial_name, **kwargs) -> SchedulerClient:
     if mode == "slurm":
         from realhf.scheduler.slurm.client import SlurmSchedulerClient

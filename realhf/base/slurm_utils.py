@@ -1,7 +1,7 @@
-import re
-from typing import List
 import os
+import re
 import subprocess
+from typing import List
 
 import numpy as np
 
@@ -71,7 +71,6 @@ def slurm_hostname_key(hostname):
 
 
 def check_slurm_availability():
-    
 
     slurm_available = (
         int(

@@ -15,8 +15,8 @@ from omegaconf import MISSING, OmegaConf
 
 import realhf.api.core.system_api as system_api
 from realhf.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
-from realhf.base.slurm_utils import check_slurm_availability
 from realhf.base.ray_utils import check_ray_availability
+from realhf.base.slurm_utils import check_slurm_availability
 
 
 def kind_reminder(config_name, logger, args):
@@ -31,18 +31,14 @@ def kind_reminder(config_name, logger, args):
     if args.mode == "slurm":
         slurm_available = check_slurm_availability()
         if slurm_available:
-            logger.info(
-                "Launching experiments with SLURM..."
-            )
+            logger.info("Launching experiments with SLURM...")
         else:
             logger.warning("Slurm is not available. Using local mode.")
             args.mode = "local"
     elif args.mode == "ray":
         ray_available = check_ray_availability()
         if ray_available:
-            logger.info(
-                "Launching experiments with RAY..."
-            )
+            logger.info("Launching experiments with RAY...")
         else:
             logger.warning("Ray is not available. Using local mode.")
             args.mode = "local"

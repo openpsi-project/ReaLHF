@@ -39,9 +39,7 @@ def _submit_workers(
     scheduled_jobs = []
     for sch_cfg in scheduling_configs:
         job_environs = {**environs, **sch_cfg.scheduling.env_vars}
-        cmd = sched_client.remote_worker_cmd(
-            expr_name, trial_name, debug, worker_type
-        )
+        cmd = sched_client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
 
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
