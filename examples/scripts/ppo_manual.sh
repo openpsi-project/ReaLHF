@@ -37,7 +37,8 @@ TRIAL_NAME=$MODEL_FAMILY-$MODE-manual
 # The `ppo` option is used to control the generation and PPO algorithm hyperparameters.
 # Note that the performance of PPO is sensitive to the the pre-trained model and hyperparameters.
 # It's the user's responsibility to tune them appropriately.
-# The allocation of model function calls is specified by a pattern `hostname:gpu_id1,gpu_id2,...`.
+# The allocation of model function calls is specified by a pattern `hostname:gpu_id1,gpu_id2,...`
+# for slicing GPUS of a single node, and `hostname1,hostname2` for multiple nodes.
 # If the CLUSTER_SPEC_PATH is not set, `hostname`s are NODE01, NODE02, etc, otherwise it's the
 # hostname specified in this file. The `gpu_id`s are the GPU indices on the host,
 # from 0 to `n_gpus_per_node` (defaults to 8, can be changed) - 1.
@@ -71,15 +72,16 @@ python3 -m realhf.apps.quickstart ppo \
     ppo.reward_output_scaling=10.0 \
     ppo.adv_norm=True ppo.value_norm=True \
     allocation_mode=manual \
-    n_nodes=1 \
+    n_nodes=2 \
+    nodelist=\'NODE[01-02]\' \
     actor_train.device_mesh=\'NODE01:0,1,2,3\' \
     actor_train.parallel.data_parallel_size=2 \
     actor_train.parallel.model_parallel_size=1 \
     actor_train.parallel.pipeline_parallel_size=2 \
-    actor_gen.device_mesh=\'NODE01:0,1,2,3,4,5,6,7\' \
+    actor_gen.device_mesh=\'NODE[01-02]\' \
     actor_gen.parallel.data_parallel_size=4 \
     actor_gen.parallel.model_parallel_size=1 \
-    actor_gen.parallel.pipeline_parallel_size=2 \
+    actor_gen.parallel.pipeline_parallel_size=4 \
     critic_train.device_mesh=\'NODE01:4,5,6,7\' \
     critic_train.parallel.data_parallel_size=2 \
     critic_train.parallel.model_parallel_size=1 \

@@ -2,23 +2,16 @@ import getpass
 import json
 import os
 import re
-import socket
-import tempfile
 from typing import Dict, List, Optional, Union
 
 CLUSTER_SPEC_PATH = os.environ.get("CLUSTER_SPEC_PATH", "")
 
 
 def get_user_tmp():
-    tmp = tempfile.gettempdir()
     user = getpass.getuser()
-    user_tmp = os.path.join(tmp, user)
+    user_tmp = os.path.join("/home", user, ".cache", "realhf")
     os.makedirs(user_tmp, exist_ok=True)
     return user_tmp
-
-
-def get_random_tmp():
-    return tempfile.mkdtemp()
 
 
 class ClusterSpec:

@@ -451,14 +451,5 @@ class RayController:
             self._launch_workers(workers_configs)
             self.__base_controller.start(experiment, ignore_worker_error)
         except Exception as e:
-            self.shutdown()
-
-    def shutdown(self):
-        ray_exiting_name = names.ray_cluster(
-            self.__experiment_name, self.__trial_name, "exiting"
-        )
-        name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
-        del self.__workers_reply_comm
-        del self.__workers_request_comm
-        del self.__workers_ref
-        ray.shutdown()
+            ray.shutdown()
+            raise e
