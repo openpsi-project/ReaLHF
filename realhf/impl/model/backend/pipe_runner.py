@@ -8,7 +8,13 @@ import torch.distributed as dist
 import transformers
 from deepspeed.runtime.engine import MEMORY_OPT_ALLREDUCE_SIZE, DeepSpeedEngine
 from deepspeed.runtime.zero.config import ZeroStageEnum
-from megatron.core.optimizer import DistributedOptimizer
+
+try:
+    from megatron.core.optimizer import DistributedOptimizer
+except (ModuleNotFoundError, ImportError):
+    # importing megatron.core in CPU container will fail due to the requirement of apex
+    pass
+
 
 import realhf.base.constants as constants
 import realhf.base.logging as logging

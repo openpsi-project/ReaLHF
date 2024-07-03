@@ -224,7 +224,7 @@ def set_intervals(
     dst: torch.Tensor,
     intervals: List[Tuple[int, int]],
 ):
-    if len(intervals) < 2048 or not (src.is_cuda() and dst.is_cuda()):
+    if len(intervals) < 2048 or not (src.is_cuda and dst.is_cuda):
         # NOTE: The CUDA implementation will launch a thread for each interval,
         # which has a negative effect when the number of intervals is small.
         return _set_intervals_py(src, dst, intervals)
