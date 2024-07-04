@@ -873,14 +873,14 @@ class MasterWorker(worker_base.Worker):
         # Save and eval control.
         self.__total_train_epochs = config.exp_ctrl.total_train_epochs
         self.__save_ctl = timeutil.EpochStepTimeFreqCtl(
-            freq_epoch=config.exp_ctrl.save_frequency_epochs,
-            freq_step=config.exp_ctrl.save_frequency_steps,
-            freq_sec=config.exp_ctrl.save_frequency_seconds,
+            freq_epoch=config.exp_ctrl.save_freq_epochs,
+            freq_step=config.exp_ctrl.save_freq_steps,
+            freq_sec=config.exp_ctrl.save_freq_secs,
         )
         self.__eval_ctl = timeutil.EpochStepTimeFreqCtl(
-            freq_epoch=config.exp_ctrl.eval_frequency_epochs,
-            freq_step=config.exp_ctrl.eval_frequency_steps,
-            freq_sec=config.exp_ctrl.eval_frequency_seconds,
+            freq_epoch=config.exp_ctrl.eval_freq_epochs,
+            freq_step=config.exp_ctrl.eval_freq_steps,
+            freq_sec=config.exp_ctrl.eval_freq_secs,
         )
 
         self.MODEL_SAVE_ROOT = os.path.join(

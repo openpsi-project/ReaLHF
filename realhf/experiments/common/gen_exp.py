@@ -96,8 +96,8 @@ class GenerationConfig(CommonExperimentConfig):
     def exp_ctrl(self):
         return ExperimentSaveEvalControl(
             total_train_epochs=1,
-            save_frequency_steps=None,
-            eval_frequency_epochs=None,
+            save_freq_steps=None,
+            eval_freq_epochs=None,
         )
 
 

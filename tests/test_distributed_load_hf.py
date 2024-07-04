@@ -139,7 +139,7 @@ def _save_then_load(
 )
 @pytest.mark.slow
 @pytest.mark.distributed
-@pytest.mark.parametrize("model_family_name", ["gemma", "gpt2", "llama", "qwen2"])
+@pytest.mark.parametrize("model_family_name", ["gemma", "gpt2", "llama", "qwen2", "mistral"])
 @pytest.mark.parametrize("is_critic", [True, False])
 @pytest.mark.parametrize("init_critic_from_actor", [True, False])
 @pytest.mark.parametrize("pp_dp_mp", [(4, 2, 1), (2, 2, 2), (1, 2, 4), (1, 8, 1)])

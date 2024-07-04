@@ -25,6 +25,7 @@ def get_activation_fn(activation_function: str) -> Callable:
 
 
 SEQUENCE_PARALLEL_WARNED = False
+SPLIT_KV_HEADS_WARNED = False
 
 
 class LayerNormQKVLinear(nn.Module):
@@ -131,12 +132,14 @@ class LayerNormQKVLinear(nn.Module):
                     device=device,
                 )
             else:
-                if n_kv_heads > 1:
+                global SPLIT_KV_HEADS_WARNED
+                if n_kv_heads > 1 and not SPLIT_KV_HEADS_WARNED:
                     logger.warning(
                         f"Cannot split {n_kv_heads} kv heads evenly among "
                         f"{self.mp_worldsize} model parallel ranks, "
                         f"use unsplitted linear for kv heads instead"
                     )
+                    SPLIT_KV_HEADS_WARNED = True
                 self.k_attn = nn.Linear(
                     hidden_dim,
                     head_dim * n_kv_heads,
