@@ -128,6 +128,9 @@ class ReaLModelConfig:
     :param tied_embedding: Whether to share the embeddings and output weights.
         Used by models like GPT-2 and Gemma.
     :type tied_embedding: bool
+    :param sliding_window: Sliding window size for the attention.
+        Currently a placeholder and not supported.
+    :type sliding_window: Optional[int]
     :param is_critic: Whether the model is a critic model.
     :type is_critic: bool
     :param gradient_accumulation_fusion: Whether to fuse
@@ -170,6 +173,7 @@ class ReaLModelConfig:
     do_layernorm_before: bool = True
     # Tied embedding
     tied_embedding: bool = False
+    sliding_window: Optional[int] = None
     # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False
 

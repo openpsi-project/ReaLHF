@@ -150,9 +150,6 @@ def mp_partition_key(
         if (
             ("k_attn" in key) or ("v_attn" in key)
         ) and config.n_kv_heads % mp_size != 0:
-            # logger.warning(f"Cannot split {config.n_kv_heads} kv heads evenly among "
-            #                f"{mp_size} model parallel ranks, "
-            #                f"use unsplitted linear for kv heads instead")
             return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
         # partition both weight and bias
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)

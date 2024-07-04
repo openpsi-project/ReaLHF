@@ -151,24 +151,24 @@ class ExperimentSaveEvalControl:
 
     :param total_train_epochs: The total number of epochs to train the model.
     :type total_train_epochs: int
-    :param save_frequency_epochs: Save the model every this number of epochs.
+    :param save_freq_epochs: Save the model every this number of epochs.
         If None, the model will not be saved if the epoch number changes during training.
-    :type save_frequency_epochs: Optional[int]
-    :param save_frequency_steps: Save the model every this number of steps.
+    :type save_freq_epochs: Optional[int]
+    :param save_freq_steps: Save the model every this number of steps.
         If None, the model will not be saved if the step number changes during training.
-    :type save_frequency_steps: Optional[int]
-    :param save_frequency_seconds: Save the model every this number of seconds.
+    :type save_freq_steps: Optional[int]
+    :param save_freq_secs: Save the model every this number of seconds.
         If None, the model will not be saved if the time changes during training.
-    :type save_frequency_seconds: Optional[int]
-    :param eval_frequency_epochs: Evaluate the model every this number of epochs.
+    :type save_freq_secs: Optional[int]
+    :param eval_freq_epochs: Evaluate the model every this number of epochs.
         If None, the model will not be evaluated if the epoch number changes during training.
-    :type eval_frequency_epochs: Optional[int]
-    :param eval_frequency_steps: Evaluate the model every this number of steps.
+    :type eval_freq_epochs: Optional[int]
+    :param eval_freq_steps: Evaluate the model every this number of steps.
         If None, the model will not be evaluated if the step number changes during training.
-    :type eval_frequency_steps: Optional[int]
-    :param eval_frequency_seconds: Evaluate the model every this number of seconds.
+    :type eval_freq_steps: Optional[int]
+    :param eval_freq_secs: Evaluate the model every this number of seconds.
         If None, the model will not be evaluated if the time changes during training.
-    :type eval_frequency_seconds: Optional[int]
+    :type eval_freq_secs: Optional[int]
     :param benchmark_steps: Terminate the training after this number of steps.
         Used by system benchmark only. Please leave it to None for normal training.
     :type benchmark_steps: Optional[int]
@@ -176,13 +176,13 @@ class ExperimentSaveEvalControl:
 
     total_train_epochs: int = 1
     # save control
-    save_frequency_epochs: Optional[int] = None
-    save_frequency_steps: Optional[int] = None
-    save_frequency_seconds: Optional[int] = None
+    save_freq_epochs: Optional[int] = None
+    save_freq_steps: Optional[int] = None
+    save_freq_secs: Optional[int] = None
     # eval control
-    eval_frequency_epochs: Optional[int] = None
-    eval_frequency_steps: Optional[int] = None
-    eval_frequency_seconds: Optional[int] = None
+    eval_freq_epochs: Optional[int] = None
+    eval_freq_steps: Optional[int] = None
+    eval_freq_secs: Optional[int] = None
     # benchmark
     benchmark_steps: Optional[int] = None
 
