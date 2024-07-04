@@ -55,6 +55,19 @@ class ModelName:
 
 @dataclasses.dataclass(unsafe_hash=True)
 class ModelFamily:
+    """An identifier for the HF model type, e.g., llama, gpt2, etc.
+
+    :param _class: The class of the model, e.g. "llama".
+        It's the registered name in the ``register_hf_family`` function.
+        Please check files in ``realhf/api/from_hf``.
+    :type _class: str
+    :param size: The size of the model. Only be used by the ``search``
+        allocation mode. Can be 0 otherwise.
+    :type size: int
+    :param is_critic: Whether the model is a critic or reward
+        instead of a normal LLM.
+    :type is_critic: bool
+    """
     _class: str
     size: int = 0
     is_critic: bool = False

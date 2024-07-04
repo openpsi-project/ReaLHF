@@ -32,8 +32,8 @@ python3 -m realhf.apps.quickstart dpo \
     mode=$MODE \
     experiment_name=$EXP_NAME \
     trial_name=$TRIAL_NAME \
-    total_train_epochs=2 \
-    save_freq_steps=null \
+    exp_ctrl.total_train_epochs=2 \
+    exp_ctrl.save_freq_steps=null \
     n_nodes=1 \
     allocation_mode=manual \
     actor.type._class=$MODEL_FAMILY \

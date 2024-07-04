@@ -58,7 +58,7 @@ class OptimizerConfig:
 
     For models that will not be trained, its type should be "empty".
 
-    :param type: Optimizer type. Currently only adam optimizer is supported.
+    :param type: Optimizer type. Currently only adam and empty optimizer are supported.
     :type type: str
     :param lr: Learning rate.
     :type lr: float
@@ -116,20 +116,23 @@ class ModelTrainEvalConfig:
     Model (or LLM) runtime configuration in ReaL.
 
     We use a customized model class instead of HuggingFace's.
-    This class enables 3D parallelism and flash-attn for efficiency.
-    The model uses non-pad flash-attn to save GPU memory,
-    i.e., input sequences are packed into a single 1D tensor.
+    Our customized model has the following highlights:
+
+    1. Support 3D parallelism and sequence parallelism.
+    
+    2. Support flash attention for both training and generation.
+
+    3. Input sequences are packed into a single 1D tensor to save GPU memory and improve efficiency.
+
     The price is that we need to convert each HuggingFace model
     of interest to this customized model manually.
+    Implemented models can be found in the ``realhf/api/from_hf/`` directory.
 
-    If you find that the model of your interest is not supported,
-    please reach out the developers for help.
-
-    :param type: Model family type, e.g., LLaMA, QWen, etc.
+    :param type: Model family type, e.g., llama, qwen2, etc.
     :type type: ModelFamily
     :param backend: Backend for training.
         Currently only "megatron" and "deepspeed" are supported.
-        For offloaing parameters or optimizer states, use "deepspeed".
+        For offloading parameters or optimizer states, use "deepspeed".
         For parameter reallocation, use "megatron".
     :type backend: str
     :param path: Path or identifier of the HuggingFace checkpoint.

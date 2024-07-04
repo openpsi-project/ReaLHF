@@ -21,18 +21,6 @@ class RWConfig(CommonExperimentConfig):
     It is a subclass of :class:`CommonExperimentConfig`,
     so all CLI options in the base class are available.
 
-    :param total_train_epochs: Total number of training epochs
-        (i.e., the number of times the training dataset is iterated).
-    :type total_train_epochs: int
-    :param save_freq_steps: Save the model every this number of steps.
-        "step" is an optimizer step or a single update of model parameters.
-        If None, the model will not be saved during training.
-        The directory to save the model will be automatically resolved
-        and prompted in the terminal when the experiment starts.
-    :type save_freq_steps: Optional[int]
-    :param eval_freq_epochs: Evaluate the model every this number of epochs.
-        If None, the model will not be evaluated during training.
-    :type eval_freq_epochs: Optional[int]
     :param is_sft_lora: Whether LoRA was used for SFT.
         If so, the saved SFT model should only contain LoRA parameters.
         Since LoRA is currently not supported for SFT,
@@ -49,9 +37,6 @@ class RWConfig(CommonExperimentConfig):
     :type dataset: PairedComparisonDatasetConfig
     """
 
-    total_train_epochs: int = 1
-    save_freq_steps: Optional[int] = 20
-    eval_freq_epochs: Optional[int] = 1
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
     model: ModelTrainEvalConfig = dataclasses.field(
@@ -130,14 +115,6 @@ class RWConfig(CommonExperimentConfig):
     @property
     def tokenizer_name_or_path(self):
         return self.model.path
-
-    @property
-    def exp_ctrl(self):
-        return ExperimentSaveEvalControl(
-            total_train_epochs=self.total_train_epochs,
-            save_frequency_steps=self.save_freq_steps,
-            eval_frequency_epochs=self.eval_freq_epochs,
-        )
 
 
 register_quickstart_exp("rw", RWConfig)

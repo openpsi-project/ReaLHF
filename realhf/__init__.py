@@ -2,7 +2,8 @@
 # otherwise the name will have a long prefix like
 # realhf.api.quickstart.model.ModelTrainEvalConfig.
 from .api.core.dfg import MFCDef
-from .api.core.model_api import ModelInterface, ReaLModelConfig
+from .api.core.config import ModelFamily
+from .api.core.model_api import ModelInterface, ReaLModelConfig, GenerationHyperparameters
 from .api.quickstart.dataset import (
     PairedComparisonDatasetConfig,
     PromptAnswerDatasetConfig,
@@ -15,7 +16,7 @@ from .api.quickstart.model import (
     ParallelismConfig,
 )
 from .base.namedarray import NamedArray
-from .experiments.common.common import CommonExperimentConfig
+from .experiments.common.common import CommonExperimentConfig, ExperimentSaveEvalControl
 from .experiments.common.dpo_exp import DPOConfig
 from .experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 from .experiments.common.rw_exp import RWConfig
