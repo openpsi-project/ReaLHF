@@ -30,7 +30,7 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
-        <link rel="next" title="Customization" href="customization.html" />
+        <link rel="next" title="Setting Up Distributed Experiments" href="distributed.html" />
         <link rel="prev" title="Configurations" href="expconfig.html" />
     <style>
       :root {
@@ -175,8 +175,8 @@
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 
@@ -213,6 +213,10 @@ including SFT, reward modeling, and PPO.</p>
 to follow this tutorial.
 The sample dataset is used for controlled sentiment generation,
 where the LLM learns to generate positive movie comments given a context.</p>
+<p>All example scripts with detailed explanations can be found in the
+<code class="docutils literal notranslate"><span class="pre">examples/scripts/</span></code> directory.</p>
+<p>If you want to find more details about the configuration options,
+please check <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a>.</p>
 </div>
 <section id="stage-1-supervised-fine-tuning">
 <h3>Stage 1: Supervised Fine-Tuning<a class="headerlink" href="#stage-1-supervised-fine-tuning" title="Link to this heading">¶</a></h3>
@@ -235,22 +239,17 @@ For example:</p>
 <span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>manual<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">n_nodes</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">save_freq_steps</span><span class="o">=</span><span class="m">50</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">eval_freq_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.total_train_epochs<span class="o">=</span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.save_freq_steps<span class="o">=</span><span class="m">50</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.eval_freq_epochs<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>model.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>model.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>model.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>model.path<span class="o">=</span>/path/or/HF-identifier/of/llama-7b<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>model.gradient_checkpointing<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>model.optimizer.type<span class="o">=</span>adam<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>model.path<span class="o">=</span>/path/of/llama-7b<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.train_path<span class="o">=</span>/path/to/train/dataset.jsonl<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.valid_path<span class="o">=</span>/path/to/valid/dataset.jsonl<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.max_seqlen<span class="o">=</span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>allocation.parallel.pipeline_parallel_size<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>allocation.parallel.model_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>allocation.parallel.data_parallel_size<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>allocation.parallel.use_sequence_parallel<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.train_bs_n_seqs<span class="o">=</span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.valid_bs_n_seqs<span class="o">=</span><span class="m">512</span>
 </pre></div>
@@ -264,14 +263,12 @@ dataclass object: <a class="reference internal" href="expconfig.html#realhf.SFTC
 The attributes, including the model type, learning rate, and parallel strategy,
 can be recursively overwritten via command line options.
 Please check <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a> for more details.</p>
-</div>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
 <p>As a reminder, the value <cite>null</cite> should represent <cite>None</cite> in Python.</p>
 </div>
 <p>The user can specify the number of nodes and the parallel strategy to use with
 the above command, in addition to paths and hyperparameters.
-In the given example, the experiment will use 1 node (assuming each node has 8 GPUs),
+In the given example, the experiment will use 1 node
+(assuming each node has 8 GPUs, implicitly set by the <code class="docutils literal notranslate"><span class="pre">n_gpus_per_node</span></code> attribute),
 with a parallel strategy (pipe=1, tensor=2, data=4) and a batch size of 512.</p>
 <p>After the experiment has been successfully launched,
 you will see the training logs in the console like this:</p>
@@ -282,14 +279,45 @@ you will see the training logs in the console like this:</p>
 </pre></div>
 </div>
 <p>The above output shows the log and checkpoint paths of this experiment,
-according to the given <code class="docutils literal notranslate"><span class="pre">experiment_name</span></code> and <code class="docutils literal notranslate"><span class="pre">trial_name</span></code>.</p>
+according to the given <code class="docutils literal notranslate"><span class="pre">experiment_name</span></code> and <code class="docutils literal notranslate"><span class="pre">trial_name</span></code>.
+You can check the logs:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>ls<span class="w"> </span>/lustre/aigc/llm/logs/fw/quickstart-sft/release/
+<span class="go">ctl-0            master_worker-0  time_marks0.pkl  time_marks2.pkl  time_marks4.pkl  time_marks6.pkl</span>
+<span class="go">hydra-outputs/   model_worker-0   time_marks1.pkl  time_marks3.pkl  time_marks5.pkl  time_marks7.pkl</span>
+<span class="gp">$ </span><span class="c1"># Check the training statistics like loss and running time in the master worker.</span>
+<span class="gp">$ </span>cat<span class="w"> </span>/lustre/aigc/llm/logs/fw/quickstart-sft/release/master_worker-0
+<span class="gp">$ </span><span class="c1"># Check the runtime system metrics in the model worker.</span>
+<span class="gp">$ </span>cat<span class="w"> </span>/lustre/aigc/llm/logs/fw/quickstart-sft/release/model_worker-0
+</pre></div>
+</div>
+<p>You can also check the checkpoints:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>ls<span class="w"> </span>/lustre/aigc/llm/checkpoints/fw/quickstart-sft/release/default/epoch7epochstep5globalstep50/
+<span class="go">config.json                       pytorch_model-00007-of-00014.bin  pytorch_model-00014-of-00014.bin</span>
+<span class="go">pytorch_model-00001-of-00014.bin  pytorch_model-00008-of-00014.bin  pytorch_model.bin.index.json</span>
+<span class="go">pytorch_model-00002-of-00014.bin  pytorch_model-00009-of-00014.bin  special_tokens_map.json</span>
+<span class="go">pytorch_model-00003-of-00014.bin  pytorch_model-00010-of-00014.bin  tokenizer.json</span>
+<span class="go">pytorch_model-00004-of-00014.bin  pytorch_model-00011-of-00014.bin  tokenizer.model</span>
+<span class="go">pytorch_model-00005-of-00014.bin  pytorch_model-00012-of-00014.bin  tokenizer_config.json</span>
+<span class="go">pytorch_model-00006-of-00014.bin  pytorch_model-00013-of-00014.bin</span>
+</pre></div>
+</div>
+<p>Here, <code class="docutils literal notranslate"><span class="pre">default</span></code> is the model name. Since we would save multiple models for algorithms like PPO,
+the model name is used to distinguish different models.
+SFT has a single model named <code class="docutils literal notranslate"><span class="pre">default</span></code>.</p>
+<p>The directory suffix indicates the step of this checkpoint.
+It’s the checkpoint after 50 training steps at step 5 of epoch 7 (we have set <code class="docutils literal notranslate"><span class="pre">save_freq_steps=50</span></code>).
+You can change the save frequency by modifying the <code class="docutils literal notranslate"><span class="pre">exp_ctrl</span></code> attribute in <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a>.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>ReaL directly loads from HuggingFace models and also saves checkpoints
 as HuggingFace models, making it convenient to use pre-trained checkpoints
 and to deploy trained models with inference frameworks like vLLM.</p>
+<p>You can directly pass the path of the above checkpoint to
+<code class="docutils literal notranslate"><span class="pre">transformers.AutoModelForCausalLM.from_pretrained</span></code> or vLLM to load the model.</p>
 </div>
-<img alt="_images/sft_loss.svg" class="align-center" src="_images/sft_loss.svg" /><div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">0: 20240618-13:32:19.081 master worker INFO: Execution finished!</span>
+<img alt="_images/sft_loss.svg" class="align-center" src="_images/sft_loss.svg" /><div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>cat<span class="w"> </span>/lustre/aigc/llm/logs/fw/quickstart-sft/release/master_worker-0
+<span class="go">...</span>
+<span class="go">0: 20240618-13:32:19.081 master worker INFO: Execution finished!</span>
 <span class="go">0: 20240618-13:32:19.083 master worker INFO: Epoch 8/8 step 7/7 ... Total time consumption: 628.051s. ...</span>
 <span class="go">...</span>
 <span class="go">0: 20240618-13:32:34.906 master worker INFO: Execution finished!</span>
@@ -319,18 +347,15 @@ training and validation sets for reward modeling, respectively.</p>
 <span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>manual<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">save_freq_steps</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">eval_freq_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.total_train_epochs<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.save_freq_steps<span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.eval_freq_epochs<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>model.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>model.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>model.type.is_critic<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>model.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>allocation.parallel.pipeline_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>allocation.parallel.model_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>allocation.parallel.data_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>allocation.parallel.use_sequence_parallel<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>model.gradient_checkpointing<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.train_path<span class="o">=</span>/path/to/train/dataset.jsonl<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.valid_path<span class="o">=</span>/path/to/valid/dataset.jsonl<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.max_pairs_per_prompt<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
@@ -340,10 +365,22 @@ training and validation sets for reward modeling, respectively.</p>
 </pre></div>
 </div>
 <p>It’s a common practice to use the SFT model to initialize the reward model.
-Therefore, we can pass the path of the saved SFT model as the <code class="docutils literal notranslate"><span class="pre">model.path</span></code> option.
-Using the pre-trained LLaMA checkpoint is also feasible, but it may not perform as well.</p>
+Therefore, we can pass the path of the saved SFT model as <code class="docutils literal notranslate"><span class="pre">model.path</span></code>.
+Using the pre-trained LLaMA checkpoint is also feasible, but it may not
+perform as well as the SFT checkpoint.</p>
 <p>In reward modeling, the batch size is the number of paired comparisons.
 With a batch size of 512, there will be 512 positive samples and 512 negative samples in each batch.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>bash<span class="w"> </span>examples/scripts/rw.sh
+<span class="go">0: 20240618-13:52:00.094 master worker INFO: Running rw experiment.</span>
+<span class="go">0: 20240618-13:52:00.094 master worker INFO: Logs will be dumped to /lustre/aigc/llm/logs/fw/quickstart-rw/release</span>
+<span class="go">0: 20240618-13:52:00.094 master worker INFO: Model checkpoints will be saved to /lustre/aigc/llm/checkpoints/fw/quickstart-rw/release</span>
+<span class="go">...</span>
+</pre></div>
+</div>
+<p>The log and checkpoint paths are similar to that of SFT,
+except that the experiment name and trial name can be changed.
+Note that the saved RW checkpoint is not loadable by HuggingFace or vLLM,
+because the projection head has been replaced by a linear layer that outputs a scalar.</p>
 <img alt="_images/rw_loss.svg" class="align-center" src="_images/rw_loss.svg" /><p>Training the reward model to convergence can be very fast.
 In the given example, we can stop the training after 15 steps,
 which takes approximately 5 minutes.</p>
@@ -363,26 +400,21 @@ which avoids reward modeling.</p>
 <span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>manual<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">mode</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">save_freq_steps</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.total_train_epochs<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.save_freq_steps<span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>actor.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>actor.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>actor.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>actor.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>actor_train.parallel.pipeline_parallel_size<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>actor_train.parallel.model_parallel_size<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>actor_train.parallel.data_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>actor_train.parallel.use_sequence_parallel<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ref.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>ref.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>ref.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ref.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ref_inf.parallel.pipeline_parallel_size<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ref_inf.parallel.model_parallel_size<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ref_inf.parallel.data_parallel_size<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ref_inf.parallel.use_sequence_parallel<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.train_path<span class="o">=</span>/path/to/train/dataset.jsonl<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>dataset.max_pairs_per_prompt<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.max_seqlen<span class="o">=</span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.train_bs_n_seqs<span class="o">=</span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.valid_bs_n_seqs<span class="o">=</span><span class="m">512</span>
@@ -419,35 +451,27 @@ The dataset for PPO should be a JSON or JSONL file with each entry being a dicti
 <div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>ppo<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">experiment_name</span><span class="o">=</span>quickstart-ppo<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">trial_name</span><span class="o">=</span>release<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">total_train_epochs</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.total_train_epochs<span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>exp_ctrl.save_freq_steps<span class="o">=</span>null<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span><span class="nv">allocation_mode</span><span class="o">=</span>heuristic<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span><span class="nv">save_freq_steps</span><span class="o">=</span>null<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>actor.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>actor.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>actor.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>actor.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>actor.gradient_checkpointing<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>critic.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>critic.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>critic.type.is_critic<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>critic.path<span class="o">=</span>/saved/rw/model/path<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>critic.gradient_checkpointing<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ref.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>ref.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>ref.type.is_critic<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ref.path<span class="o">=</span>/saved/sft/model/path<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>rew.type._class<span class="o">=</span>llama<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>rew.type.size<span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>rew.type.is_critic<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>rew.path<span class="o">=</span>/saved/rw/model/path<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.path<span class="o">=</span>/path/to/prompt/dataset.jsonl<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.max_prompt_len<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>dataset.train_bs_n_seqs<span class="o">=</span><span class="m">128</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>ppo.max_new_tokens<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>ppo.min_new_tokens<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.gen.max_new_tokens<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>ppo.gen.min_new_tokens<span class="o">=</span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ppo.ppo_n_minibatches<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ppo.kl_ctl<span class="o">=</span><span class="m">0</span>.1<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>ppo.force_no_logits_mask<span class="o">=</span>False<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ppo.value_eps_clip<span class="o">=</span><span class="m">0</span>.2<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ppo.reward_output_scaling<span class="o">=</span><span class="m">10</span>.0<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>ppo.adv_norm<span class="o">=</span>True<span class="w"> </span>ppo.value_norm<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
@@ -540,10 +564,10 @@ and iterate on the algorithm design.</p>
             </a>
           </li>
         <li class="page-item ms-auto">
-            <a href="customization.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Customization">
+            <a href="distributed.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Setting Up Distributed Experiments">
               <div class="d-flex flex-column">
                 <span class="text-small text-end text-start text-muted">Next</span>
-                <span class="underline">Customization</span>
+                <span class="underline">Setting Up Distributed Experiments</span>
               </div>
               <span class="next-page"><i class="bi bi-caret-right"></i></span>
             </a>

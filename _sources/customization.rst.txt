@@ -83,6 +83,7 @@ model from the HuggingFace model hub.
 In ReaL, we implement the :class:`realhf.impl.model.nn.real_llm_api.ReaLModel`
 class that wraps the HuggingFace model and provides micro-batched pipelining,
 offload, and parameter reallocation functionalities.
+It's a decoder-only transformer model.
 
 There are helper functions in the model API used to convert HuggingFace models back and forth,
 such as ``from_llama`` and ``to_llama``. 
@@ -93,7 +94,7 @@ To register a convertible HuggingFace model, the user should implement:
 
 - Two functions to convert model configs between HuggingFace and :class:`realhf.ReaLModelConfig`.
 - Two functions to convert model state dicts between HuggingFace and ReaL, primarily involving key remapping.
-- Three functions specifying the names of parameters in the embedding layer, transformer blocks, and the output layer, respectively.
+- Three functions specifying the names of parameters in the embedding layer, transformer blocks, and the output layer, respectively. These functions are used to selectively load checkpoints with 3D parallelism.
 
 Steps to Support a New HuggingFace Model
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -101,16 +102,16 @@ Steps to Support a New HuggingFace Model
 - Create a new model file under ``api/from_hf/``.
 - Implement the required helper functions as described above.
 - Register the model with register_hf_family at the end of the file.
-- (Optional) Test the consistency of the implemented model with scripts in ``tests/``.
+- (Optional) Test the consistency of the implemented model with scripts in ``tests/test_cpu_inference.py``.
 
-We acknowledge that the current configuration and implementation of ``ReaLModel``
-do not support all features of HuggingFace models,
-such as MoE.
-As a result, supporting a new HuggingFace model
-often requires modifications to files in ``impl/model/nn/``,
-which can be a challenging experience for users unfamiliar with the code architecture.
-If you have any questions or wish to request a new model feature,
-please feel free to raise an issue on our GitHub repository.
+.. We acknowledge that the current configuration and implementation of ``ReaLModel``
+.. do not support all features of HuggingFace models,
+.. such as MoE.
+.. As a result, supporting a new HuggingFace model
+.. often requires modifications to files in ``impl/model/nn/``,
+.. which can be a challenging experience for users unfamiliar with the code architecture.
+.. If you have any questions or wish to request a new model feature,
+.. please feel free to raise an issue on our GitHub repository.
 
 
 Customizing Algorithms

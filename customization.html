@@ -30,8 +30,8 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
-        <link rel="next" title="Set Up Distributed Experiments" href="distributed.html" />
-        <link rel="prev" title="Quickstart" href="quickstart.html" />
+        <link rel="next" title="Contributing" href="contributing.html" />
+        <link rel="prev" title="Setting Up Distributed Experiments" href="distributed.html" />
     <style>
       :root {
         --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
@@ -175,8 +175,8 @@
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 
@@ -259,9 +259,10 @@ method of the dataset class, except that ReaL reserves a <code class="docutils l
 <h3>Overview<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h3>
 <p>For efficiency reasons, ReaL does not support every transformer
 model from the HuggingFace model hub.
-In ReaL, we implement the <a class="reference internal" href="expconfig.html#realhf.impl.model.nn.real_llm_api.ReaLModel" title="realhf.impl.model.nn.real_llm_api.ReaLModel"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.impl.model.nn.real_llm_api.ReaLModel</span></code></a>
+In ReaL, we implement the <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.impl.model.nn.real_llm_api.ReaLModel</span></code>
 class that wraps the HuggingFace model and provides micro-batched pipelining,
-offload, and parameter reallocation functionalities.</p>
+offload, and parameter reallocation functionalities.
+It’s a decoder-only transformer model.</p>
 <p>There are helper functions in the model API used to convert HuggingFace models back and forth,
 such as <code class="docutils literal notranslate"><span class="pre">from_llama</span></code> and <code class="docutils literal notranslate"><span class="pre">to_llama</span></code>.
 These helper functions are generated automatically by registering conversion functions in the <code class="docutils literal notranslate"><span class="pre">api/from_hf/</span></code> folder.</p>
@@ -270,7 +271,7 @@ To register a convertible HuggingFace model, the user should implement:</p>
 <ul class="simple">
 <li><p>Two functions to convert model configs between HuggingFace and <a class="reference internal" href="expconfig.html#realhf.ReaLModelConfig" title="realhf.ReaLModelConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ReaLModelConfig</span></code></a>.</p></li>
 <li><p>Two functions to convert model state dicts between HuggingFace and ReaL, primarily involving key remapping.</p></li>
-<li><p>Three functions specifying the names of parameters in the embedding layer, transformer blocks, and the output layer, respectively.</p></li>
+<li><p>Three functions specifying the names of parameters in the embedding layer, transformer blocks, and the output layer, respectively. These functions are used to selectively load checkpoints with 3D parallelism.</p></li>
 </ul>
 </section>
 <section id="steps-to-support-a-new-huggingface-model">
@@ -279,16 +280,8 @@ To register a convertible HuggingFace model, the user should implement:</p>
 <li><p>Create a new model file under <code class="docutils literal notranslate"><span class="pre">api/from_hf/</span></code>.</p></li>
 <li><p>Implement the required helper functions as described above.</p></li>
 <li><p>Register the model with register_hf_family at the end of the file.</p></li>
-<li><p>(Optional) Test the consistency of the implemented model with scripts in <code class="docutils literal notranslate"><span class="pre">tests/</span></code>.</p></li>
+<li><p>(Optional) Test the consistency of the implemented model with scripts in <code class="docutils literal notranslate"><span class="pre">tests/test_cpu_inference.py</span></code>.</p></li>
 </ul>
-<p>We acknowledge that the current configuration and implementation of <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code>
-do not support all features of HuggingFace models,
-such as MoE.
-As a result, supporting a new HuggingFace model
-often requires modifications to files in <code class="docutils literal notranslate"><span class="pre">impl/model/nn/</span></code>,
-which can be a challenging experience for users unfamiliar with the code architecture.
-If you have any questions or wish to request a new model feature,
-please feel free to raise an issue on our GitHub repository.</p>
 </section>
 </section>
 <section id="customizing-algorithms">
@@ -503,19 +496,19 @@ issues MFC requests to <em>ModelWorkers</em> once the dependencies are satisfied
       <nav id="paginator" class="py-4" aria-label="Documentation navigation">
     <div class="container">
       <ul class="pagination justify-content-between mb-0"><li class="page-item">
-            <a href="quickstart.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Quickstart">
+            <a href="distributed.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Setting Up Distributed Experiments">
               <span class="prev-page"><i class="bi bi-caret-left"></i></span>
               <div class="d-flex flex-column">
                 <span class="text-small text-start text-muted">Previous</span>
-                <span class="underline">Quickstart</span>
+                <span class="underline">Setting Up Distributed Experiments</span>
               </div>
             </a>
           </li>
         <li class="page-item ms-auto">
-            <a href="distributed.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Set Up Distributed Experiments">
+            <a href="contributing.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Contributing">
               <div class="d-flex flex-column">
                 <span class="text-small text-end text-start text-muted">Next</span>
-                <span class="underline">Set Up Distributed Experiments</span>
+                <span class="underline">Contributing</span>
               </div>
               <span class="next-page"><i class="bi bi-caret-right"></i></span>
             </a>

@@ -12,7 +12,7 @@
     <meta name="docsearch:release" content="0.1.0" />
     <meta name="docsearch:version" content="" />
     
-      <title>Set Up Distributed Experiments &mdash; ReaL 0.1.0 documentation</title>
+      <title>Setting Up Distributed Experiments &mdash; ReaL 0.1.0 documentation</title>
     
     <link rel="stylesheet" href="_static/bootstrap-icons.css" type="text/css" />
           <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments.css', priority=200, rel='stylesheet', type='text/css')" -->
@@ -30,8 +30,8 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
-        <link rel="next" title="Contributing" href="contributing.html" />
-        <link rel="prev" title="Customization" href="customization.html" />
+        <link rel="next" title="Customization" href="customization.html" />
+        <link rel="prev" title="Quickstart" href="quickstart.html" />
     <style>
       :root {
         --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
@@ -175,8 +175,8 @@
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1 current"><a class="current reference internal" href="#">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 
@@ -193,40 +193,148 @@
           </div>
         </aside>
         <article id="content" class="nftt-content" role="main">
-    <section id="set-up-distributed-experiments">
-<h1>Set Up Distributed Experiments<a class="headerlink" href="#set-up-distributed-experiments" title="Link to this heading">¶</a></h1>
-<p>Currently, ReaL supports launching distributed experiments using
-<a class="reference external" href="https://slurm.schedmd.com/documentation.html">SLURM</a>
-with the <a class="reference external" href="https://github.com/NVIDIA/pyxis">Pyxis</a> plugin.
-This plugin allows for launching enroot containers with the
-<code class="docutils literal notranslate"><span class="pre">srun</span></code> command.</p>
-<p>To set up distributed experiments, you need to create a JSON
-cluster configuration file, as shown in the example in  <code class="docutils literal notranslate"><span class="pre">examples/cluster_config.json</span></code>.</p>
+    <section id="setting-up-distributed-experiments">
+<h1>Setting Up Distributed Experiments<a class="headerlink" href="#setting-up-distributed-experiments" title="Link to this heading">¶</a></h1>
+<p>Currently, ReaL supports launching distributed experiments using <a class="reference external" href="https://slurm.schedmd.com/documentation.html">SLURM</a>
+with the <a class="reference external" href="https://github.com/NVIDIA/pyxis">Pyxis</a> plugin,
+or using <a class="reference external" href="https://docs.ray.io/en/latest/index.html">Ray</a>.
+We recommend Ray for its simplicity and flexibility.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">requirements.txt</span></code> file includes the Ray package,
+and it should be installed by following our instructions in the <a class="reference internal" href="install.html"><span class="doc">Installation</span></a> section.
+Pyxis and SLURM, however, need to be installed and set up separately
+by following their respective documentation.</p>
+<section id="cluster-spec">
+<h2>Cluster Spec<a class="headerlink" href="#cluster-spec" title="Link to this heading">¶</a></h2>
+<p>Before running experiments, ReaL needs to know some information about the cluster.
+You need to create a JSON cluster configuration file, as shown in the example in  <code class="docutils literal notranslate"><span class="pre">examples/cluster_config.json</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This file is necessary for SLURM, but optional for Ray.</p>
+</div>
 <ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">cluster_type</span></code>: The type of the cluster. Currently, only “slurm” is supported.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">cluster_name</span></code>: The name of the cluster. Arbitrary.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">fileroot</span></code>: An NFS path accessible by all nodes. This is where logs and checkpoints will be stored.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">default_mount</span></code>: A comma-separated list of paths to mount on all nodes. This should include the <code class="docutils literal notranslate"><span class="pre">fileroot</span></code> mentioned above..</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">node_type_from_node_name</span></code>: A dictionary mapping a regular expression to a node type. Every host in this cluster should match one of these regular expressions. Node types include [“g1”, “g2”, “g8”, “a100”]. “g” refers to low-end GPUs in the cluster.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">gpu_type_from_node_name</span></code>: A dictionary mapping a regular expression to a GPU type. The GPU type is used by SLURM.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">cpu_image</span></code>: The Docker image for the controller and the master worker.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">gpu_image</span></code>: The Docker image for the model worker.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">node_name_prefix</span></code>: The prefix of the host names. We assume that host names in the cluster are prefixed by a string followed by an integer, e.g., “com-01”, where “com-” is the prefix.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cluster_type</span></code>: The type of the cluster, either “slurm” or “ray”.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cluster_name</span></code>: The name of the cluster. This can be arbitrary.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">fileroot</span></code>: An NFS path accessible by all nodes, where logs and checkpoints will be stored. By default, ReaL assumes that the /home/ directory is shared by all nodes in the cluster. ReaL will not run correctly if this path is not accessible by all nodes.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">default_mount</span></code>: A comma-separated list of paths to mount on all nodes, including the fileroot mentioned above. This is only used by SLURM.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">node_type_from_node_name</span></code>: A dictionary mapping a regular expression to a node type. Every host in this cluster should match one of these regular expressions. Node types include [“g1”, “g2”, “g8”, “a100”], where “g” refers to low-end GPUs in the cluster. This is only used by SLURM.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpu_type_from_node_name</span></code>: A dictionary mapping a regular expression to a GPU type. This is used by SLURM.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cpu_image</span></code>: The Docker image for the controller and the master worker. This is only used by SLURM.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpu_image</span></code>: The Docker image for the model worker. This is only used by SLURM.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">node_name_prefix</span></code>: The prefix of the host names. We assume that host names in the cluster are prefixed by a string followed by an integer, e.g., “com-01”, where “com-” is the prefix. If not provided, the default prefix is “NODE”, i.e., NODE01, NODE02, etc.</p></li>
 </ul>
-<p>The path of this file should be specified in the <code class="docutils literal notranslate"><span class="pre">CLUSTER_SPEC_PATH</span></code> environment variable
-inside the Docker images used and when launching the experiment. For example:</p>
+<p>After creating this file, specify it using the <code class="docutils literal notranslate"><span class="pre">CLUSTER_SPEC_PATH</span></code> environment variable when launching experiments. For example:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">CLUSTER_SPEC_PATH=/tmp/my-cluster.json python3 -m realhf.apps.quickstart ppo ...</span>
 </pre></div>
 </div>
-<p>You also need to add an additional layer in the Docker images as shown below:</p>
-<div class="highlight-dockerfile notranslate"><div class="highlight"><pre><span></span><span class="k">FROM</span><span class="w"> </span><span class="s">garrett4wade/real-cpu:22.04-0.1.0</span>
-<span class="k">ENV</span><span class="w"> </span><span class="nv">CLUSTER_SPEC_PATH</span><span class="o">=</span>/tmp/my-cluster.json
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If this variable is not set, the Ray mode will use a default fileroot <code class="docutils literal notranslate"><span class="pre">/home/user/.cache/realhf</span></code>
+and a default node prefix “NODE”.
+This means that the user should specify manual allocations like <code class="docutils literal notranslate"><span class="pre">NODE[01-02]</span></code>.
+It is the user’s responsibility to ensure that the fileroot is accessible by all nodes in the cluster.</p>
+</div>
+</section>
+<section id="distributed-experiments-with-ray">
+<h2>Distributed Experiments with Ray<a class="headerlink" href="#distributed-experiments-with-ray" title="Link to this heading">¶</a></h2>
+<p>Assume you have installed Ray via PyPI on every node in your cluster.
+Ensure that the version of Ray is the same on all nodes.
+Next, we recommend <a class="reference external" href="https://docs.ray.io/en/latest/ray-core/starting-ray.html#start-ray-cli">setting up the Ray cluster with its CLI</a>.
+You can do this by running the following command:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="c1"># On the head node</span>
+<span class="gp">$ </span>ray<span class="w"> </span>start<span class="w"> </span>--head<span class="w"> </span>--port<span class="o">=</span><span class="m">6379</span>
+<span class="go">Local node IP: xxx.xxx.xxx.xxx</span>
+
+<span class="go">--------------------</span>
+<span class="go">Ray runtime started.</span>
+<span class="go">--------------------</span>
+
+<span class="go">Next steps</span>
+<span class="go">To add another node to this Ray cluster, run</span>
+<span class="go">    ray start --address=&#39;xxx.xxx.xxx.xxx:6379&#39;</span>
+
+<span class="go">To connect to this Ray cluster:</span>
+<span class="go">    import ray</span>
+<span class="go">    ray.init()</span>
+
+<span class="go">To terminate the Ray runtime, run</span>
+<span class="go">    ray stop</span>
+
+<span class="go">To view the status of the cluster, use</span>
+<span class="go">    ray status</span>
 </pre></div>
 </div>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="c1"># On the worker nodes</span>
+<span class="gp">$ </span>ray<span class="w"> </span>start<span class="w"> </span>--address<span class="o">=</span><span class="s1">&#39;xxx.xxx.xxx.xxx:6379&#39;</span>
+</pre></div>
+</div>
+<p>After setting up the Ray cluster, you can run experiments on the head node
+by replacing <code class="docutils literal notranslate"><span class="pre">mode=local</span></code> with <code class="docutils literal notranslate"><span class="pre">mode=ray</span></code> in the scripts.
+Now you can change <code class="docutils literal notranslate"><span class="pre">n_nodes</span></code>, the device allocation, and parallel strategies
+to scale up the experiments with more than <code class="docutils literal notranslate"><span class="pre">n_gpus_per_node</span></code> GPUs.
+No additional changes are required!</p>
+<p>We would like to append a few notes on the Ray cluster setup.</p>
+<section id="ray-resources">
+<h3>Ray Resources<a class="headerlink" href="#ray-resources" title="Link to this heading">¶</a></h3>
+<p>If your cluster is not homogeneous, for example,
+if the head node is a CPU machine without a GPU,
+you can specify the resources using the Ray CLI:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp"># </span>In<span class="w"> </span>the<span class="w"> </span>head<span class="w"> </span>node
+<span class="gp">$ </span>ray<span class="w"> </span>start<span class="w"> </span>--head<span class="w"> </span>--port<span class="o">=</span><span class="m">6379</span><span class="w"> </span>--num-cpus<span class="o">=</span><span class="m">1</span><span class="w"> </span>--num-gpus<span class="o">=</span><span class="m">0</span><span class="w"> </span>--mem<span class="o">=</span><span class="m">10000</span>
+</pre></div>
+</div>
+<p>This command will allocate 1 CPU core, 0 GPUs, and 10GB of memory for the head node.
+As a result, model workers and the master worker will not be scheduled on the head node.
+If the resource options are not given, Ray will detect the resources automatically.
+Check <a class="reference external" href="https://docs.ray.io/en/latest/cluster/cli.html">Ray’s documentation</a> for details.</p>
+<p>ReaL will detect all available resources by calling <code class="docutils literal notranslate"><span class="pre">ray.init()</span></code> on the head node.
+The driver process that calls <code class="docutils literal notranslate"><span class="pre">ray.init()</span></code> does not consume any resources.
+Only the workers (i.e., model workers and the master worker) will consume
+resources according to the scheduling setup in the experiment configuration.</p>
+<p>If there are not enough resources available, Ray jobs will wait until the requested resources become available,
+and ReaL will prompt a message in the terminal.
+You can elastically add new nodes with <code class="docutils literal notranslate"><span class="pre">ray</span> <span class="pre">start</span></code> in the cluster to increase resources.</p>
+</section>
+<section id="graceful-shutdown">
+<h3>Graceful Shutdown<a class="headerlink" href="#graceful-shutdown" title="Link to this heading">¶</a></h3>
+<p>Nodes in the Ray cluster can be shut down with the <code class="docutils literal notranslate"><span class="pre">ray</span> <span class="pre">stop</span></code> command. Currently, ReaL has an issue where, when the experiment terminates, it only kills the driver process, leaving the worker processes stale on remote nodes.</p>
+<p><strong>Users should manually kill the worker processes on the remote nodes using `ray stop`; otherwise, a new experiment on the same Ray cluster will get stuck.</strong></p>
+</section>
+</section>
+<section id="distributed-experiments-with-slurm-pyxis">
+<h2>Distributed Experiments with SLURM + Pyxis<a class="headerlink" href="#distributed-experiments-with-slurm-pyxis" title="Link to this heading">¶</a></h2>
+<p>After specifying the cluster configuration file, you can run experiments
+with <code class="docutils literal notranslate"><span class="pre">mode=slurm</span></code> in the scripts.
+ReaL’s scheduler will submit jobs to the SLURM resource manager automatically.</p>
+</section>
 </section>
 
 </article>
         <aside class="nftt-toc">
+          
+          <div class="mt-3 mb-1 my-lg-0 ps-xl-3 text-muted">
+            <button class="btn btn-link link-dark p-lg-0 mb-2 mb-lg-0 text-decoration-none nftt-toc-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#tocContents" aria-expanded="false" aria-controls="tocContents"
+            >On this page <i class="ms-2 bi bi-chevron-expand"></i></button>
+            <div class="title d-none d-lg-block">
+              <i class="bi bi-file-earmark-text"></i>&nbsp;&nbsp;<span class="small">On this page</span>
+            </div>
+            <div class="collapse nftt-toc-collapse" id="tocContents">
+              <nav id="TableOfContents">
+                <ul>
+<li><a class="reference internal" href="#">Setting Up Distributed Experiments</a><ul>
+<li><a class="reference internal" href="#cluster-spec">Cluster Spec</a></li>
+<li><a class="reference internal" href="#distributed-experiments-with-ray">Distributed Experiments with Ray</a><ul>
+<li><a class="reference internal" href="#ray-resources">Ray Resources</a></li>
+<li><a class="reference internal" href="#graceful-shutdown">Graceful Shutdown</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#distributed-experiments-with-slurm-pyxis">Distributed Experiments with SLURM + Pyxis</a></li>
+</ul>
+</li>
+</ul>
+
+              </nav>
+            </div>
+          </div>
           
         </aside>
       </div>
@@ -236,19 +344,19 @@ inside the Docker images used and when launching the experiment. For example:</p
       <nav id="paginator" class="py-4" aria-label="Documentation navigation">
     <div class="container">
       <ul class="pagination justify-content-between mb-0"><li class="page-item">
-            <a href="customization.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Customization">
+            <a href="quickstart.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Quickstart">
               <span class="prev-page"><i class="bi bi-caret-left"></i></span>
               <div class="d-flex flex-column">
                 <span class="text-small text-start text-muted">Previous</span>
-                <span class="underline">Customization</span>
+                <span class="underline">Quickstart</span>
               </div>
             </a>
           </li>
         <li class="page-item ms-auto">
-            <a href="contributing.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Contributing">
+            <a href="customization.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Customization">
               <div class="d-flex flex-column">
                 <span class="text-small text-end text-start text-muted">Next</span>
-                <span class="underline">Contributing</span>
+                <span class="underline">Customization</span>
               </div>
               <span class="next-page"><i class="bi bi-caret-right"></i></span>
             </a>

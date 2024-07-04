@@ -10,10 +10,18 @@ users can override these options provided by the class recursively
 with command line arguments.
 Please check :doc:`quickstart` for concrete examples.
 
+.. note::
+
+    This page serves as a reference manual for the configuration objects,
+    i.e., you can check which attributes can be modified and their default values.
+    You don't need to read through this page before running experiments!
+
 .. currentmodule:: realhf
 
 Experiment Configurations
 --------------------------
+
+.. autoclass:: ExperimentSaveEvalControl
 
 .. autoclass:: CommonExperimentConfig
 
@@ -23,12 +31,16 @@ Experiment Configurations
 
 .. autoclass:: DPOConfig
 
+.. autoclass:: GenerationHyperparameters
+
 .. autoclass:: PPOHyperparameters
 
 .. autoclass:: PPOConfig
 
 Model Configurations
 ---------------------
+
+.. autoclass:: ModelFamily
 
 .. autoclass:: ModelTrainEvalConfig
 
@@ -38,12 +50,7 @@ Model Configurations
 
 .. autoclass:: AllocationConfig
 
-.. autoclass:: realhf.ReaLModelConfig
-
-.. autoclass:: realhf.impl.model.nn.real_llm_api.ReaLModel
-    :members:
-    :undoc-members:
-    :exclude-members: forward, state_dict, load_state_dict, build_reparallelization_plan, build_reparallelized_layers_async, patch_reparallelization, pre_process, post_process, shared_embedding_or_output_weight
+.. autoclass:: ReaLModelConfig
 
 Dataset Configurations
 -----------------------

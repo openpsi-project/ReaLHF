@@ -174,8 +174,8 @@
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
-<li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 
@@ -194,6 +194,23 @@
         <article id="content" class="nftt-content" role="main">
     <section id="welcome-to-real-s-documentation">
 <h1>Welcome to ReaL’s documentation!<a class="headerlink" href="#welcome-to-real-s-documentation" title="Link to this heading">¶</a></h1>
+<section id="get-started">
+<h2>Get Started<a class="headerlink" href="#get-started" title="Link to this heading">¶</a></h2>
+<p>For users new to ReaL, we recommend starting with the <a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a> section
+to learn how to run simple experiments on a local node.
+If you have multiple nodes available, please read the <a class="reference internal" href="distributed.html"><span class="doc">Setting Up Distributed Experiments</span></a> section
+to learn how to run experiments on a cluster.
+These tutorials cover the basic usage of the implemented algorithms in ReaL,
+including SFT, Reward Modeling, DPO, and PPO,
+and do not require understanding the code structure.</p>
+<p>For advanced users, we recommend proceeding to the <a class="reference internal" href="customization.html"><span class="doc">Customization</span></a> section
+to learn how to customize the algorithms and models in ReaL.
+This requires an understanding of how an algorithm and its experiment configuration
+are defined in ReaL (i.e., as a dataflow graph),
+but understanding the system-wide implementation (e.g., model workers) is not mandatory.</p>
+<p>Besides these tutorials, we present the reference manual of various configuration objects
+in the <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a> section, and a brief overview of the system architecture in the <a class="reference internal" href="intro.html"><span class="doc">Introduction</span></a> section.</p>
+</section>
 <section id="contents">
 <h2>Contents<a class="headerlink" href="#contents" title="Link to this heading">¶</a></h2>
 <div class="toctree-wrapper compound">
@@ -206,21 +223,23 @@
 </li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="expconfig.html#experiment-configurations">Experiment Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ExperimentSaveEvalControl"><code class="docutils literal notranslate"><span class="pre">ExperimentSaveEvalControl</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.CommonExperimentConfig"><code class="docutils literal notranslate"><span class="pre">CommonExperimentConfig</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.SFTConfig"><code class="docutils literal notranslate"><span class="pre">SFTConfig</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.RWConfig"><code class="docutils literal notranslate"><span class="pre">RWConfig</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.DPOConfig"><code class="docutils literal notranslate"><span class="pre">DPOConfig</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.GenerationHyperparameters"><code class="docutils literal notranslate"><span class="pre">GenerationHyperparameters</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.PPOHyperparameters"><code class="docutils literal notranslate"><span class="pre">PPOHyperparameters</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.PPOConfig"><code class="docutils literal notranslate"><span class="pre">PPOConfig</span></code></a></li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="expconfig.html#model-configurations">Model Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ModelFamily"><code class="docutils literal notranslate"><span class="pre">ModelFamily</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ModelTrainEvalConfig"><code class="docutils literal notranslate"><span class="pre">ModelTrainEvalConfig</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.OptimizerConfig"><code class="docutils literal notranslate"><span class="pre">OptimizerConfig</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ParallelismConfig"><code class="docutils literal notranslate"><span class="pre">ParallelismConfig</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.AllocationConfig"><code class="docutils literal notranslate"><span class="pre">AllocationConfig</span></code></a></li>
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ReaLModelConfig"><code class="docutils literal notranslate"><span class="pre">ReaLModelConfig</span></code></a></li>
-<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.impl.model.nn.real_llm_api.ReaLModel"><code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code></a></li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="expconfig.html#dataset-configurations">Dataset Configurations</a><ul>
@@ -250,6 +269,16 @@
 </li>
 </ul>
 </li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="distributed.html#cluster-spec">Cluster Spec</a></li>
+<li class="toctree-l2"><a class="reference internal" href="distributed.html#distributed-experiments-with-ray">Distributed Experiments with Ray</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="distributed.html#ray-resources">Ray Resources</a></li>
+<li class="toctree-l3"><a class="reference internal" href="distributed.html#graceful-shutdown">Graceful Shutdown</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="distributed.html#distributed-experiments-with-slurm-pyxis">Distributed Experiments with SLURM + Pyxis</a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="customization.html#customizing-datasets">Customizing Datasets</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="customization.html#overview">Overview</a></li>
@@ -269,7 +298,6 @@
 </li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="distributed.html">Set Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 </div>
@@ -289,6 +317,7 @@
               <nav id="TableOfContents">
                 <ul>
 <li><a class="reference internal" href="#">Welcome to ReaL’s documentation!</a><ul>
+<li><a class="reference internal" href="#get-started">Get Started</a></li>
 <li><a class="reference internal" href="#contents">Contents</a></li>
 </ul>
 </li>
