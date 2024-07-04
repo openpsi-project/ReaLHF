@@ -119,7 +119,7 @@ class ModelTrainEvalConfig:
     Our customized model has the following highlights:
 
     1. Support 3D parallelism and sequence parallelism.
-    
+
     2. Support flash attention for both training and generation.
 
     3. Input sequences are packed into a single 1D tensor to save GPU memory and improve efficiency.

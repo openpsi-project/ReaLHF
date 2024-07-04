@@ -12,10 +12,12 @@ To pull the images, run:
 
 .. code-block:: console
 
-   $ docker pull docker.io/garrett4wade/real-cpu:22.04-0.1.0
-   $ docker pull docker.io/garrett4wade/real-gpu:23.10-py3-0.1.0
+   $ export REAL_VERSION="0.1.0"
+   $ docker pull docker.io/garrett4wade/real-cpu:22.04-${REAL_VERSION}
+   $ docker pull docker.io/garrett4wade/real-gpu:23.10-py3-${REAL_VERSION}
 
-The CPU image is built from "ubuntu:22.04" and the GPU image is built from "nvcr.io/nvidia/pytorch:23.10-py3". The current package version is "0.1.0".
+The CPU image is built from "ubuntu:22.04" and the GPU image is built from "nvcr.io/nvidia/pytorch:23.10-py3".
+The current package version is "0.1.0".
 
 After pulling the Docker images, run your Docker container locally on a GPU node with the following command:
 
@@ -23,15 +25,22 @@ After pulling the Docker images, run your Docker container locally on a GPU node
 
    $ docker run -it --gpus all garrett4wade/real-gpu:23.10-py3-0.1.0 bash
 
-The source code is available at /realhf inside the container. This is an editable installation, so you can modify the code or run experiments directly.
+The source code is available at /realhf inside the container.
+This is an editable installation, so you can modify the code or run experiments directly.
 
 If you want to develop the code outside a Docker container,
+you should mount the code directory to the container, e.g.,
+
+.. code-block:: console
+
+   $ docker run -it --gpus all --mount type=bind,src=/path/outside/container,dst=/realhf garrett4wade/real-gpu:23.10-py3-0.1.0 bash
+
+If your destination path is not /realhf,
 remember to rerun the editable installation command after mounting:
 
 .. code-block:: console
 
    $ REAL_CUDA=1 pip install -e /your/mounted/code/path --no-build-isolation
-
 
 .. note::
 
@@ -41,7 +50,9 @@ remember to rerun the editable installation command after mounting:
 Install From PyPI or Source
 ----------------------------
 
-If you prefer not to use Docker, you can also install ReaL from PyPI or from the source.
+If you prefer not to use the provided Docker image,
+you can also start with an image provided by NVIDA (e.g., nvcr.io/nvidia/pytorch:23.10-py3)
+and install ReaL from PyPI or from the source.
 
 .. note::
 
@@ -64,22 +75,31 @@ On a GPU machine, also install the required runtime packages:
 
 .. code-block:: console
 
-   $ MAX_JOBS=8 pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.4 --no-deps --no-build-isolation
-   $ MAX_JOBS=8 pip install flash_attn==2.4.2 --no-build-isolation
+   $ export MAX_JOBS=8  # Set the number of parallel jobs for compilation.
+   $ pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.4 --no-deps --no-build-isolation
+   $ pip install flash_attn==2.4.2 --no-build-isolation
 
-Install ReaLHF from PyPI:
+.. note::
 
-.. code-block:: console
+   ``MAX_JOBS`` sets the number of parallel jobs for compilation.
+   A larger value will consume more memory (and potentially lead to OOM stuck) and CPU resources.
+   Adjust the value according to your machine's specifications.
 
-   $ MAX_JOBS=8 REAL_CUDA=1 pip install realhf --no-build-isolation
-
-The PyPI package allows you to launch existing experiments with the quickstart command.
-If you want to modify the code, you should clone the source code and install it from the source:
+Install ReaLHF from source (recommended, for the latest build):
 
 .. code-block:: console
 
    $ git clone https://github.com/openpsi-project/ReaLHF
    $ cd ReaLHF
-   $ MAX_JOBS=8 REAL_CUDA=1 pip install -e . --no-build-isolation
+   $ REAL_CUDA=1 pip install -e . --no-build-isolation
 
-Next, check :doc:`quickstart`` for instructions on running experiments.
+Or install from PyPI (for stable build):
+
+.. code-block:: console
+
+   $ REAL_CUDA=1 pip install realhf --no-build-isolation
+
+The PyPI package allows you to launch existing experiments with the quickstart command.
+If you want to modify the code, you must clone the source code and install it from the source.
+
+Next, check :doc:`quickstart` for instructions on running experiments.

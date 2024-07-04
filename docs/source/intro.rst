@@ -31,6 +31,7 @@ of the dependencies between tasks.
 The key idea of ReaL is to enable dynamic **reallocation of
 model parameters** between GPUs to improve the efficiency of
 the entire RLHF training process.
+
 By first choosing a parallelization strategy tailored for
 each computation workload
 (e.g., pipelining for Generation and tensor parallelism for Training)
@@ -48,19 +49,22 @@ in the following figure.
 
 .. image:: images/vws.svg
 
-.. "Scale Actor" maintains the sizes
-.. of Critic and Reward at 7B while increasing the sizes of Actor and Reference with the number of GPUs.
-.. "Scale Critic" follows the opposite approach, and
-.. "Scale Both" increases sizes of all models proportionately.
+
+
+
+.. _est_time_table:
+
++--------------+---------------+---------------+---------------+
+|   System     | DeepSpeedChat |   OpenRLHF    |   ReaL        |
++==============+===============+===============+===============+
+| Time (hours) |     141.5     |    152.8      |  **17.0**     |
++--------------+---------------+---------------+---------------+
 
 We also show the estimated time for
 completing the entire full-scale 4*70B RLHF training process,
 composed of 4 iterations with 400 steps for each iteration as for LLaMA-2.
 
-.. _est_time_table:
-
-+--------------+---------------+---------------+---------------+
-|   System     | DeepSpeedChat |   OpenRLHF    |   ReaL    |
-+==============+===============+===============+===============+
-| Time (hours) |     141.5     |    152.8      |  **17.0**     |
-+--------------+---------------+---------------+---------------+
+.. "Scale Actor" maintains the sizes
+.. of Critic and Reward at 7B while increasing the sizes of Actor and Reference with the number of GPUs.
+.. "Scale Critic" follows the opposite approach, and
+.. "Scale Both" increases sizes of all models proportionately.

@@ -68,6 +68,7 @@ class ModelFamily:
         instead of a normal LLM.
     :type is_critic: bool
     """
+
     _class: str
     size: int = 0
     is_critic: bool = False

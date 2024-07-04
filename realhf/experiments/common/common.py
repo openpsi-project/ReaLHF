@@ -34,9 +34,10 @@ class CommonExperimentConfig(Experiment):
 
     .. code-block:: shell
 
-        $ python3 -m realhf.apps.quickstart sft trial_name=my_trial seed=42 ...
+        $ python3 -m realhf.apps.quickstart sft trial_name=my_trial seed=42 exp_ctrl.save_freq_steps=10 ...
 
-    The above command changes the ``trial_name`` and the ``seed`` attribute
+    The above command changes the ``trial_name``, the ``seed`` attribute,
+    and the ``save_freq_steps`` attribute of the ``exp_ctrl`` attribute
     of this class.
 
     ``recover_mode`` is one of the followings\:
@@ -138,7 +139,9 @@ class CommonExperimentConfig(Experiment):
     n_gpus_per_node: int = 8
     nodelist: Optional[str] = None
     seed: int = 1
-    exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(default_factory=ExperimentSaveEvalControl)
+    exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
+        default_factory=ExperimentSaveEvalControl
+    )
 
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
