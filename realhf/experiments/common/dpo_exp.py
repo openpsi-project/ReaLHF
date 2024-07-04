@@ -22,15 +22,6 @@ class DPOConfig(CommonExperimentConfig):
 
     We don't implement runtime evaluation for DPO.
 
-    :param total_train_epochs: Total number of training epochs
-        (i.e., the number of times the training dataset is iterated).
-    :type total_train_epochs: int
-    :param save_freq_steps: Save the model every this number of steps.
-        "step" is an optimizer step or a single update of model parameters.
-        If None, the model will not be saved during training.
-        The directory to save the model will be automatically resolved
-        and prompted in the terminal when the experiment starts.
-    :type save_freq_steps: Optional[int]
     :param is_sft_lora: Whether LoRA was used for SFT.
         If so, the saved SFT model should only contain LoRA parameters.
         Since LoRA is currently not supported for SFT,
@@ -61,8 +52,6 @@ class DPOConfig(CommonExperimentConfig):
     :type beta: float
     """
 
-    total_train_epochs: int = 1
-    save_freq_steps: Optional[int] = 20
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
 
@@ -156,13 +145,6 @@ class DPOConfig(CommonExperimentConfig):
     @property
     def tokenizer_name_or_path(self):
         return self.actor.path
-
-    @property
-    def exp_ctrl(self):
-        return ExperimentSaveEvalControl(
-            total_train_epochs=self.total_train_epochs,
-            save_frequency_steps=self.save_freq_steps,
-        )
 
 
 register_quickstart_exp("dpo", DPOConfig)

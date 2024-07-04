@@ -26,8 +26,9 @@ python3 -m realhf.apps.quickstart sft \
     mode=$MODE \
     experiment_name=$EXP_NAME \
     trial_name=$TRIAL_NAME \
-    total_train_epochs=8 \
-    save_freq_steps=50 eval_freq_epochs=1 \
+    exp_ctrl.total_train_epochs=8 \
+    exp_ctrl.save_freq_steps=50 \
+    exp_ctrl.eval_freq_epochs=1 \
     model.optimizer.type=adam \
     model.optimizer.lr_scheduler_type=cosine \
     model.optimizer.lr=1e-5 \

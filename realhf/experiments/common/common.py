@@ -34,9 +34,13 @@ class CommonExperimentConfig(Experiment):
 
     .. code-block:: shell
 
-        $ python3 -m realhf.apps.quickstart sft trial_name=my_trial seed=42 ...
+        $ python3 -m realhf.apps.quickstart sft trial_name=my_trial seed=42 exp_ctrl.save_freq_steps=10 ...
 
-    Recover mode is one of the followings\:
+    The above command changes the ``trial_name``, the ``seed`` attribute,
+    and the ``save_freq_steps`` attribute of the ``exp_ctrl`` attribute
+    of this class.
+
+    ``recover_mode`` is one of the followings\:
 
     - ``auto``\: automatically recover the last failed run.
 
@@ -46,28 +50,32 @@ class CommonExperimentConfig(Experiment):
 
     - ``disabled``\: do nothing but raise error when error occurs.
 
-    Allocation mode is one of the followings\:
+    If you don't know how ReaL's recovery works, set it to be ``disabled``.
+    Normal checkpointing is usually sufficient for most cases.
 
-    - ``manual``\: manually allocate resources with experiment configs.
+    ``allocation_mode`` is one of the followings\:
 
-    - ``search``\: allocate resources and configure parallel strategies with search.
+    - ``manual``\: manually allocate resources with given commandline options.
 
-    - ``heuristic``\: allocate resources and configure parallel strategies with heuristic strategy.
+    - ``search``\: allocate resources and configure parallel strategies with the search engine.
 
-    - ``pipe_data``\: allocate all models on all cluster nodes available and configure parallel strategies with pipe+data parallelism.
+    - ``heuristic``\: allocate resources and configure parallel strategies with heuristic strategies previously obtained by search.
 
-    - ``pipe_model``: allocate all models on all cluster nodes available and configure parallel strategies with pipe+model parallelism.
+    - ``pipe_data``\: identical parallelization (like DSChat) with pipe+data parallelism. A world size under 8 will use data parallelism only.
 
-    :param experiment_name: Name of the experiment.
+    - ``pipe_model``\: identical parallelization (like DSChat) with pipe+model parallelism. A world size under 8 will use tensor-model parallelism only.
+
+    :param experiment_name: Name of the experiment. Arbitrary string without "-" and "/", e.g., ``ultra-chat-llama``.
     :type experiment_name: str
-    :param trial_name: Name of the trial.
+    :param trial_name: Name of the trial. Arbitrary string without "-" and "/", e.g., ``lr1e-3wd0.05``.
     :type trial_name: str
-    :param mode: Experiment launching mode.
-        Currently only "local" and "slurm" are supported.
+    :param mode: Experiment launching mode. "local", "ray", or "slurm" are supported.
+        "ray" mode requires launching the ray cluster with CLI.
+        "slurm" mode requires the pyxis plugin with enroot container enabled.
         The "local" mode implies ``n_nodes=1``.
     :type mode: str
     :param debug: Whether to run in the debug mode.
-        The non-debug mode will disable all assertions.
+        Setting to `False` will disable all assertions, which will be unsafe but faster.
     :type debug: bool
     :param partition: The slurm partition to run the experiment.
     :type partition: str
@@ -76,7 +84,7 @@ class CommonExperimentConfig(Experiment):
     :param image_name: The name of the docker image used by the controller.
         Only used in the slurm mode.
     :type image_name: str or None
-    :param recover_mode: The recover mode.
+    :param recover_mode: The recover mode. See above.
     :type recover_mode: str
     :param recover_retries: The number of retries for recovery.
         Only effective when recover_mode is "auto".
@@ -86,7 +94,7 @@ class CommonExperimentConfig(Experiment):
         the user is sure that some error is ignorable.
         Only effective when recover_mode is "disabled".
     :type ignore_worker_error: bool
-    :param allocation_mode: Mode of GPU parallel strategy allocation.
+    :param allocation_mode: Mode of GPU parallel strategy allocation. See above.
     :type allocation_mode: str
     :param allocation_use_cache: Whether to use cache in allocation search.
         Only effective when allocation_mode=="search"
@@ -94,16 +102,23 @@ class CommonExperimentConfig(Experiment):
         name and trial.
     :type allocation_use_cache: bool
     :param n_nodes: Number of nodes to run the experiment.
-        Only effective when mode=="slurm".
     :type n_nodes: int
     :param n_gpus_per_node: Number of GPUs per node.
-        Only effective when mode=="slurm".
+        Thus, the total number of GPUs will be ``n_nodes * n_gpus_per_node``.
+        ReaL supports a world size of 1, 2, 4, 8, ... within a single node,
+        or multiple nodes with the same number of GPUs.
     :type n_gpus_per_node: int
-    :param nodelist: Slurm nodelist.
-        Only effective when mode=="slurm".
+    :param nodelist: Nodelist for the distributed setting in SLURM nodelist format.
+        Required for the ``manual`` allocation mode.
+        For several GPUs on a single node, it should be like "NODE01:0,1,2,3",
+        meaning that using the first 4 GPUs on the ``NODE01`` node.
+        For several complete nodes, it should be like "NODE[01-02,03,07],COM08",
+        meaning that using all GPUs for these nodes: [NODE01, NODE02, NODE03, NODE07, COM08].
     :type nodelist: str or None
     :param seed: Random seed.
     :type seed: int
+    :param exp_ctrl: The save and evaluation control of the experiment.
+    :type exp_ctrl: ExperimentSaveEvalControl
     """
 
     experiment_name: str = MISSING
@@ -124,6 +139,9 @@ class CommonExperimentConfig(Experiment):
     n_gpus_per_node: int = 8
     nodelist: Optional[str] = None
     seed: int = 1
+    exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
+        default_factory=ExperimentSaveEvalControl
+    )
 
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
@@ -150,10 +168,6 @@ class CommonExperimentConfig(Experiment):
         raise NotImplementedError(
             f"tokenizer_name_or_path is not implemented in {self.__class__}"
         )
-
-    @property
-    def exp_ctrl(self) -> ExperimentSaveEvalControl:
-        raise NotImplementedError(f"expr_ctrl is not implemented in {self.__class__}")
 
     @property
     def max_prompt_len(self) -> int:

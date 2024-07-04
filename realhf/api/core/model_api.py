@@ -22,6 +22,15 @@ logger = logging.getLogger("model")
 class GenerationHyperparameters:
     """Generation hyperparameters.
 
+    We implement a customized generation function instead of
+    using HuggingFace's to support pipelined generation.
+    As a result, advanced generation techniques like
+    diversity-promoting sampling or repeatition penalty
+    are not supported during PPO training.
+    However, we don't find it to be a problem in practice.
+    Increasing the sampling temperature and enabling
+    top-k/top-p sampling can produce good models.
+
     :param max_new_tokens: The maximum number of new tokens to generate.
     :type max_new_tokens: int
     :param min_new_tokens: The minimum number of new tokens to generate.
@@ -35,6 +44,8 @@ class GenerationHyperparameters:
     :param temperature: The temperature of the sampling process.
     :type temperature: float
     :param num_samples: The number of samples to generate.
+        Should only be enabled for pure generation.
+        Must be 1 for PPO generation.
     :type num_samples: int
     :param use_cuda_graph: Whether to use CUDA graph to reduce kernel launch overhead
         during generation. Recommended for pure generation.

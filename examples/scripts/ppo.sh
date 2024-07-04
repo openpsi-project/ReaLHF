@@ -45,8 +45,8 @@ python3 -m realhf.apps.quickstart ppo \
     mode=$MODE \
     experiment_name=$EXP_NAME \
     trial_name=$TRIAL_NAME \
-    total_train_epochs=1 \
-    save_freq_steps=null \
+    exp_ctrl.total_train_epochs=1 \
+    exp_ctrl.save_freq_steps=null \
     n_nodes=1 \
     allocation_mode=heuristic \
     actor.type._class=$MODEL_FAMILY \
