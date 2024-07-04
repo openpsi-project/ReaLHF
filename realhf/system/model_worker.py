@@ -119,7 +119,7 @@ class ModelWorker(worker_base.Worker):
         self.__total_time = 0.01
 
         # recover info
-        self.__recover_run = os.environ.get("RECOVER_RUN", "0") == "1"
+        self.__recover_run = os.environ.get("REAL_RECOVER_RUN", "0") == "1"
         self.__recover_info = (
             recover.load_recover_info() if self.__recover_run else None
         )
@@ -309,6 +309,9 @@ class ModelWorker(worker_base.Worker):
                     )
                     s.model.args["model_path"] = model_path
                     s.model.args["init_critic_from_actor"] = False
+
+                if constants.parallelism_rank() == 0:
+                    self.logger.info(f"Making model {s.id.model_name}...")
 
                 self.__models[s.id.model_name] = model = model_api.make_model(
                     s.model, name=s.id.model_name, device=self.__device
@@ -999,7 +1002,7 @@ class ModelWorker(worker_base.Worker):
         logger.info(
             f"Model worker {self.__worker_index} exit with status {exit_status}."
         )
-        if os.environ.get("SAVE_RECOVER_STATES", "0") == "0":
+        if os.environ.get("REAL_SAVE_RECOVER_STATES", "0") == "0":
             return
         if exit_status == worker_base.WorkerServerStatus.ERROR:
             try:

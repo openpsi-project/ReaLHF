@@ -139,13 +139,6 @@ def control_cmd(expr_name, trial_name, debug, ignore_worker_error, controller_ty
     return bash_cmd
 
 
-def ray_cluster_cmd(expr_name, trial_name, worker_type):
-    flags = [f"-e {expr_name}", f"-f {trial_name}", f"-w {worker_type}"]
-    return (
-        f"python3 -m realhf.apps.remote ray -i {{index}} -g {{count}} {' '.join(flags)}"
-    )
-
-
 def make(mode, expr_name, trial_name, **kwargs) -> SchedulerClient:
     if mode == "slurm":
         from realhf.scheduler.slurm.client import SlurmSchedulerClient

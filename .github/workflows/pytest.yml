@@ -1,8 +1,6 @@
 name: Run Pytest
 
-on:
-  release:
-    types: [pull_request]
+on: [pull_request]
 
 jobs:
   build:
@@ -26,4 +24,4 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest "not slow"
+          pytest -m "not slow"

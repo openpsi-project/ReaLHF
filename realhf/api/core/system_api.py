@@ -13,47 +13,7 @@ import realhf.api.core.dfg as dfg
 import realhf.base.topology as topology
 from realhf.api.core.config import *
 from realhf.base.cluster import spec as cluster_spec
-from realhf.base.constants import (
-    DATASET_CACHE_PATH,
-    PYTORCH_KERNEL_CACHE_PATH,
-    TORCH_EXTENSIONS_DIR,
-    TRITON_CACHE_PATH,
-)
-
-_LLM_ENVVARS = {
-    # "NCCL_P2P_DISABLE": "1",
-    # "NCCL_IB_DISABLE": "1",
-    "TRANSFORMERS_OFFLINE": "1",
-    "PYTORCH_KERNEL_CACHE_PATH": PYTORCH_KERNEL_CACHE_PATH,
-    "TRITON_CACHE_DIR": TRITON_CACHE_PATH,
-    "TOKENIZERS_PARALLELISM": "true",
-    "TORCH_EXTENSIONS_DIR": TORCH_EXTENSIONS_DIR,
-    # "NCCL_DEBUG": "INFO",
-    # "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
-    # "NCCL_SOCKET_IFNAME": "ibp71s0",
-    # "GLOO_SOCKET_IFNAME": "ibp71s0",
-    # "TORCH_USE_CUDA_DSA": "1",
-    # "NCCL_IGNORE_DISABLED_P2P": "1",
-    # "CUDA_LAUNCH_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if CUDA_LAUNCH_BLOCKING is set to 1.
-    # "NCCL_COMM_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_COMM_BLOCKING is set to 1.
-    # "NCCL_BLOCKING_WAIT": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_BLOCKING_WAIT is set to 1.
-    # "TORCH_SHOW_CPP_STACKTRACES": "1",
-    "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
-    "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-    "PYTHONUSERBASE": "/nonsense",
-    "OMP_NUM_THREADS": str(min(os.cpu_count(), 32)),
-    # torch.distributed.all_reduce does not free the input tensor until
-    # the synchronization point. This causes the memory usage to grow
-    # as the number of all_reduce calls increases. This env var disables
-    # this behavior.
-    # Related issue:
-    # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
-    "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
-    # Whether to enable time mark to plot timelines.
-    "REAL_CUDA_TMARK": "1",
-}
-for k, v in _LLM_ENVVARS.items():
-    os.environ[k] = v
+from realhf.base.constants import DATASET_CACHE_PATH
 
 _LLM_GPU_IMAGE = cluster_spec.gpu_image
 _LLM_CPU_IMAGE = cluster_spec.cpu_image
@@ -69,7 +29,7 @@ class Scheduling:
     nodelist: str = None
     exclude: str = None
     container_image: str = _LLM_CPU_IMAGE
-    env_vars: Dict[str, str] = dataclasses.field(default_factory=lambda: _LLM_ENVVARS)
+    env_vars: Dict[str, str] = dataclasses.field(default_factory=dict)
     # time utils from "https://slurm.schedmd.com/sbatch.html"
     time_limit: Optional[str] = None  # see  "--time" option for format
     begin: Optional[str] = None  # see "--begin" option for format
@@ -181,6 +141,39 @@ class ModelWorker:
 
 @dataclasses.dataclass
 class ExperimentSaveEvalControl:
+    """Utility object for controlling the frequency of saving and evaluation.
+
+    ``Epoch`` means the number of times the training loop goes through the entire dataset.
+    ``Step`` means the number of iterations running the algorithm dataflow.
+
+    This object has independent counters for epochs, steps, and seconds.
+    Models will be saved or evaluated when any of the following conditions are met.
+
+    :param total_train_epochs: The total number of epochs to train the model.
+    :type total_train_epochs: int
+    :param save_frequency_epochs: Save the model every this number of epochs.
+        If None, the model will not be saved if the epoch number changes during training.
+    :type save_frequency_epochs: Optional[int]
+    :param save_frequency_steps: Save the model every this number of steps.
+        If None, the model will not be saved if the step number changes during training.
+    :type save_frequency_steps: Optional[int]
+    :param save_frequency_seconds: Save the model every this number of seconds.
+        If None, the model will not be saved if the time changes during training.
+    :type save_frequency_seconds: Optional[int]
+    :param eval_frequency_epochs: Evaluate the model every this number of epochs.
+        If None, the model will not be evaluated if the epoch number changes during training.
+    :type eval_frequency_epochs: Optional[int]
+    :param eval_frequency_steps: Evaluate the model every this number of steps.
+        If None, the model will not be evaluated if the step number changes during training.
+    :type eval_frequency_steps: Optional[int]
+    :param eval_frequency_seconds: Evaluate the model every this number of seconds.
+        If None, the model will not be evaluated if the time changes during training.
+    :type eval_frequency_seconds: Optional[int]
+    :param benchmark_steps: Terminate the training after this number of steps.
+        Used by system benchmark only. Please leave it to None for normal training.
+    :type benchmark_steps: Optional[int]
+    """
+
     total_train_epochs: int = 1
     # save control
     save_frequency_epochs: Optional[int] = None

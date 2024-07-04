@@ -27,12 +27,17 @@ def make_intervals(maxsize, n_intervals):
     return np.array(intervals, dtype=np.int64), interval_size
 
 
+def maybe_synchronize_cuda():
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+
 @pytest.mark.parametrize("device", [torch.device("cuda"), torch.device("cpu")])
 @pytest.mark.parametrize("n_intervals", list(reversed([1, 100, 10000, 100000])))
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32, torch.float16])
 def test_get(n_intervals: int, dtype: torch.dtype, device: torch.device):
     if device == torch.device("cuda") and not torch.cuda.is_available():
-        pytest.skip("This test requires a GPU.")
+        return
 
     input_tensor = torch.randn(int(1e8), device=device, dtype=dtype)
     intervals, _ = make_intervals(input_tensor.size(0), n_intervals)
@@ -41,24 +46,24 @@ def test_get(n_intervals: int, dtype: torch.dtype, device: torch.device):
     slice_intervals(input_tensor, intervals)
     _slice_intervals_py(input_tensor, intervals)
 
-    torch.cuda.synchronize()
+    maybe_synchronize_cuda()
     tik = time.perf_counter()
     for _ in range(10):
         output_tensor = slice_intervals(input_tensor, intervals)
-    torch.cuda.synchronize()
+    maybe_synchronize_cuda()
     t1 = time.perf_counter() - tik
 
-    torch.cuda.synchronize()
+    maybe_synchronize_cuda()
     tik = time.perf_counter()
     for _ in range(10):
         o2 = _slice_intervals_py(input_tensor, intervals)
-    torch.cuda.synchronize()
+    maybe_synchronize_cuda()
     t2 = time.perf_counter() - tik
     assert torch.allclose(output_tensor, o2)
     print(f"Success! C++ ext time: {t1:.4f}, PyTorch time: {t2:.4f}")
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), "This test requires a GPU.")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="This test requires a GPU.")
 @pytest.mark.parametrize(
     "n_intervals", list(reversed([1, 10, 100, 1000, 2048, 4096, 10000, 100000]))
 )
@@ -78,19 +83,19 @@ def test_set(n_intervals: int, dtype: torch.dtype):
     _set_intervals_py(src, input_tensor2, intervals)
 
     input_tensor1 = x.clone()
-    torch.cuda.synchronize()
+    maybe_synchronize_cuda()
     tik = time.perf_counter()
     for _ in range(10):
         set_intervals(src, input_tensor1, intervals)
-    torch.cuda.synchronize()
+    maybe_synchronize_cuda()
     t1 = time.perf_counter() - tik
 
     input_tensor2 = x.clone()
-    torch.cuda.synchronize()
+    maybe_synchronize_cuda()
     tik = time.perf_counter()
     for _ in range(10):
         _set_intervals_py(src, input_tensor2, intervals)
-    torch.cuda.synchronize()
+    maybe_synchronize_cuda()
     t2 = time.perf_counter() - tik
 
     assert torch.allclose(input_tensor1, input_tensor2)

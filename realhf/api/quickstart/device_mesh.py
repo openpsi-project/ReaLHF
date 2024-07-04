@@ -299,7 +299,7 @@ class AllocationConfig:
         If it is a slice on a single node,
         we restrict it occupies 1, 2, 4, or 8 contiguous GPUs in the node.
         In this case, the string representation is similar to the MPI hostfile, e.g.,
-        "node01:0-3" for the first 4 GPUs on node01.
+        "node01:0,1,2,3" for the first 4 GPUs on node01.
     :type device_mesh: str
     """
 

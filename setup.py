@@ -14,7 +14,7 @@ import torch.utils.cpp_extension as torch_cpp_ext
 from packaging.version import Version, parse
 from torch.utils.cpp_extension import CUDA_HOME, BuildExtension, CUDAExtension
 
-ROOT_DIR = os.path.dirname(__file__)
+ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {"7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
@@ -257,7 +257,7 @@ search_extension = setuptools.Extension(
         "-std=c++17",
     ],
     include_dirs=[
-        os.path.join(os.path.dirname(__file__), "csrc", "search"),
+        os.path.join(os.path.abspath(os.path.dirname(__file__)), "csrc", "search"),
         get_pybind11_include_path(),
     ],
 )

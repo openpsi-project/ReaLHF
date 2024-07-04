@@ -24,6 +24,13 @@ including SFT, reward modeling, and PPO.
     The sample dataset is used for controlled sentiment generation,
     where the LLM learns to generate positive movie comments given a context.
 
+    All example scripts with detailed explanations can be found in the
+    ``examples/scripts/`` directory.
+
+    If you want to find more details about the configuration options,
+    please check :doc:`expconfig`.
+
+
 Stage 1: Supervised Fine-Tuning
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -51,24 +58,20 @@ Run the following command to fine-tune the model on your dataset:
         allocation_mode=manual \
         mode=local \
         n_nodes=1 \
-        total_train_epochs=8 \
-        save_freq_steps=50 \
-        eval_freq_epochs=1 \
+        exp_ctrl.total_train_epochs=8 \
+        exp_ctrl.save_freq_steps=50 \
+        exp_ctrl.eval_freq_epochs=1 \
         model.type._class=llama \
-        model.type.size=7 \
-        model.type.is_critic=False \
-        model.path=/path/or/HF-identifier/of/llama-7b \
-        model.gradient_checkpointing=True \
-        model.optimizer.type=adam \
+        model.path=/path/of/llama-7b \
         dataset.train_path=/path/to/train/dataset.jsonl \
         dataset.valid_path=/path/to/valid/dataset.jsonl \
         dataset.max_seqlen=1024 \
         allocation.parallel.pipeline_parallel_size=1 \
         allocation.parallel.model_parallel_size=2 \
         allocation.parallel.data_parallel_size=4 \
-        allocation.parallel.use_sequence_parallel=True \
         dataset.train_bs_n_seqs=512 \
         dataset.valid_bs_n_seqs=512
+
 
 .. note::
 
@@ -80,13 +83,12 @@ Run the following command to fine-tune the model on your dataset:
     can be recursively overwritten via command line options.
     Please check :doc:`expconfig` for more details.
 
-.. note::
-
     As a reminder, the value `null` should represent `None` in Python.
 
 The user can specify the number of nodes and the parallel strategy to use with
 the above command, in addition to paths and hyperparameters.
-In the given example, the experiment will use 1 node (assuming each node has 8 GPUs),
+In the given example, the experiment will use 1 node
+(assuming each node has 8 GPUs, implicitly set by the ``n_gpus_per_node`` attribute),
 with a parallel strategy (pipe=1, tensor=2, data=4) and a batch size of 512.
 
 After the experiment has been successfully launched,
@@ -101,6 +103,38 @@ you will see the training logs in the console like this:
 
 The above output shows the log and checkpoint paths of this experiment,
 according to the given ``experiment_name`` and ``trial_name``.
+You can check the logs:
+
+.. code-block:: console
+
+    $ ls /lustre/aigc/llm/logs/fw/quickstart-sft/release/
+    ctl-0            master_worker-0  time_marks0.pkl  time_marks2.pkl  time_marks4.pkl  time_marks6.pkl  
+    hydra-outputs/   model_worker-0   time_marks1.pkl  time_marks3.pkl  time_marks5.pkl  time_marks7.pkl
+    $ # Check the training statistics like loss and running time in the master worker.
+    $ cat /lustre/aigc/llm/logs/fw/quickstart-sft/release/master_worker-0
+    $ # Check the runtime system metrics in the model worker.
+    $ cat /lustre/aigc/llm/logs/fw/quickstart-sft/release/model_worker-0
+
+You can also check the checkpoints:
+
+.. code-block:: console
+
+    $ ls /lustre/aigc/llm/checkpoints/fw/quickstart-sft/release/default/epoch7epochstep5globalstep50/
+    config.json                       pytorch_model-00007-of-00014.bin  pytorch_model-00014-of-00014.bin
+    pytorch_model-00001-of-00014.bin  pytorch_model-00008-of-00014.bin  pytorch_model.bin.index.json
+    pytorch_model-00002-of-00014.bin  pytorch_model-00009-of-00014.bin  special_tokens_map.json
+    pytorch_model-00003-of-00014.bin  pytorch_model-00010-of-00014.bin  tokenizer.json
+    pytorch_model-00004-of-00014.bin  pytorch_model-00011-of-00014.bin  tokenizer.model
+    pytorch_model-00005-of-00014.bin  pytorch_model-00012-of-00014.bin  tokenizer_config.json
+    pytorch_model-00006-of-00014.bin  pytorch_model-00013-of-00014.bin
+
+Here, ``default`` is the model name. Since we would save multiple models for algorithms like PPO,
+the model name is used to distinguish different models.
+SFT has a single model named ``default``.
+
+The directory suffix indicates the step of this checkpoint.
+It's the checkpoint after 50 training steps at step 5 of epoch 7 (we have set ``save_freq_steps=50``).
+You can change the save frequency by modifying the ``exp_ctrl`` attribute in :class:`realhf.SFTConfig`.
 
 .. note::
 
@@ -108,11 +142,16 @@ according to the given ``experiment_name`` and ``trial_name``.
     as HuggingFace models, making it convenient to use pre-trained checkpoints
     and to deploy trained models with inference frameworks like vLLM.
 
+    You can directly pass the path of the above checkpoint to
+    ``transformers.AutoModelForCausalLM.from_pretrained`` or vLLM to load the model.
+
 .. image:: images/sft_loss.svg
     :align: center
 
 .. code-block:: console
 
+    $ cat /lustre/aigc/llm/logs/fw/quickstart-sft/release/master_worker-0
+    ...
     0: 20240618-13:32:19.081 master worker INFO: Execution finished!
     0: 20240618-13:32:19.083 master worker INFO: Epoch 8/8 step 7/7 ... Total time consumption: 628.051s. ...
     ...
@@ -148,18 +187,15 @@ Run the following command to train the reward model:
         trial_name=release \
         mode=local \
         allocation_mode=manual \
-        total_train_epochs=1 \
-        save_freq_steps=5 \
-        eval_freq_epochs=1 \
+        exp_ctrl.total_train_epochs=1 \
+        exp_ctrl.save_freq_steps=5 \
+        exp_ctrl.eval_freq_epochs=1 \
         model.type._class=llama \
-        model.type.size=7 \
         model.type.is_critic=True \
         model.path=/saved/sft/model/path \
         allocation.parallel.pipeline_parallel_size=2 \
         allocation.parallel.model_parallel_size=2 \
         allocation.parallel.data_parallel_size=2 \
-        allocation.parallel.use_sequence_parallel=True \
-        model.gradient_checkpointing=True \
         dataset.train_path=/path/to/train/dataset.jsonl \
         dataset.valid_path=/path/to/valid/dataset.jsonl \
         dataset.max_pairs_per_prompt=2 \
@@ -168,11 +204,25 @@ Run the following command to train the reward model:
         dataset.valid_bs_n_seqs=512
 
 It's a common practice to use the SFT model to initialize the reward model.
-Therefore, we can pass the path of the saved SFT model as the ``model.path`` option.
-Using the pre-trained LLaMA checkpoint is also feasible, but it may not perform as well.
+Therefore, we can pass the path of the saved SFT model as ``model.path``.
+Using the pre-trained LLaMA checkpoint is also feasible, but it may not
+perform as well as the SFT checkpoint.
 
 In reward modeling, the batch size is the number of paired comparisons.
 With a batch size of 512, there will be 512 positive samples and 512 negative samples in each batch.
+
+.. code-block:: console
+
+    $ bash examples/scripts/rw.sh
+    0: 20240618-13:52:00.094 master worker INFO: Running rw experiment.
+    0: 20240618-13:52:00.094 master worker INFO: Logs will be dumped to /lustre/aigc/llm/logs/fw/quickstart-rw/release
+    0: 20240618-13:52:00.094 master worker INFO: Model checkpoints will be saved to /lustre/aigc/llm/checkpoints/fw/quickstart-rw/release
+    ...
+
+The log and checkpoint paths are similar to that of SFT,
+except that the experiment name and trial name can be changed.
+Note that the saved RW checkpoint is not loadable by HuggingFace or vLLM,
+because the projection head has been replaced by a linear layer that outputs a scalar.
 
 .. image:: images/rw_loss.svg
     :align: center
@@ -203,26 +253,21 @@ Run the following command to train using DPO:
         trial_name=release \
         allocation_mode=manual \
         mode=local \
-        total_train_epochs=2 \
-        save_freq_steps=5 \
+        exp_ctrl.total_train_epochs=2 \
+        exp_ctrl.save_freq_steps=5 \
         actor.type._class=llama \
-        actor.type.size=7 \
-        actor.type.is_critic=False \
         actor.path=/saved/sft/model/path \
         actor_train.parallel.pipeline_parallel_size=1 \
         actor_train.parallel.model_parallel_size=4 \
         actor_train.parallel.data_parallel_size=2 \
         actor_train.parallel.use_sequence_parallel=True \
         ref.type._class=llama \
-        ref.type.size=7 \
-        ref.type.is_critic=False \
         ref.path=/saved/sft/model/path \
         ref_inf.parallel.pipeline_parallel_size=1 \
         ref_inf.parallel.model_parallel_size=2 \
         ref_inf.parallel.data_parallel_size=4 \
         ref_inf.parallel.use_sequence_parallel=True \
         dataset.train_path=/path/to/train/dataset.jsonl \
-        dataset.max_pairs_per_prompt=2 \
         dataset.max_seqlen=1024 \
         dataset.train_bs_n_seqs=512 \
         dataset.valid_bs_n_seqs=512
@@ -266,35 +311,27 @@ Run the following command to train using PPO:
     $ python3 -m realhf.apps.quickstart ppo \
         experiment_name=quickstart-ppo \
         trial_name=release \
-        total_train_epochs=1 \
+        exp_ctrl.total_train_epochs=1 \
+        exp_ctrl.save_freq_steps=null \
         allocation_mode=heuristic \
-        save_freq_steps=null \
         actor.type._class=llama \
-        actor.type.size=7 \
-        actor.type.is_critic=False \
         actor.path=/saved/sft/model/path \
-        actor.gradient_checkpointing=True \
         critic.type._class=llama \
-        critic.type.size=7 \
         critic.type.is_critic=True \
         critic.path=/saved/rw/model/path \
         critic.gradient_checkpointing=True \
         ref.type._class=llama \
-        ref.type.size=7 \
-        ref.type.is_critic=False \
         ref.path=/saved/sft/model/path \
         rew.type._class=llama \
-        rew.type.size=7 \
         rew.type.is_critic=True \
         rew.path=/saved/rw/model/path \
         dataset.path=/path/to/prompt/dataset.jsonl \
         dataset.max_prompt_len=256 \
         dataset.train_bs_n_seqs=128 \
-        ppo.max_new_tokens=256 \
-        ppo.min_new_tokens=256 \
+        ppo.gen.max_new_tokens=256 \
+        ppo.gen.min_new_tokens=256 \
         ppo.ppo_n_minibatches=4 \
         ppo.kl_ctl=0.1 \
-        ppo.force_no_logits_mask=False \
         ppo.value_eps_clip=0.2 \
         ppo.reward_output_scaling=10.0 \
         ppo.adv_norm=True ppo.value_norm=True \

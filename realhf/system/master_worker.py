@@ -891,7 +891,7 @@ class MasterWorker(worker_base.Worker):
         os.makedirs(self.MODEL_SAVE_ROOT, exist_ok=True)
 
         self.__initialized = False
-        self.__recover_run = os.environ.get("RECOVER_RUN", "0") == "1"
+        self.__recover_run = os.environ.get("REAL_RECOVER_RUN", "0") == "1"
         self.__recover_info = (
             recover.load_recover_info() if self.__recover_run else None
         )
@@ -1501,7 +1501,7 @@ class MasterWorker(worker_base.Worker):
 
     def _exit_hook(self, exit_status: worker_base.WorkerServerStatus):
         logger.info(f"Master worker exits with {exit_status}.")
-        if os.environ["SAVE_RECOVER_STATES"] == "0":
+        if os.environ["REAL_SAVE_RECOVER_STATES"] == "0":
             return
         if exit_status == worker_base.WorkerServerStatus.ERROR:
             try:

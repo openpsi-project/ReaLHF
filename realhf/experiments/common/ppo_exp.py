@@ -29,15 +29,6 @@ logger = logging.getLogger("PPO exp", "colored")
 class PPOHyperparameters:
     """Configuration of PPO hyperparameters.
 
-    We implement a customized generation function instead of
-    using HuggingFace's to support pipelined generation.
-    As a result, advanced generation techniques like
-    diversity-promoting sampling or repeatition penalty
-    are not supported during PPO training.
-    However, we don't find it to be a problem in practice.
-    Increasing the sampling temperature and enabling
-    top-k/top-p sampling can produce good models.
-
     :param gen: Generation hyperparameters.
     :type gen: GenerationHyperparameters
     :param force_no_logits_mask: Whether to omit logits mask.
@@ -150,16 +141,6 @@ class PPOConfig(CommonExperimentConfig):
     What the users should specify are the runtime configurations
     of models and allocations of *each model function call*.
 
-    :param total_train_epochs: Total number of training epochs
-        (i.e., the number of times the training dataset is iterated).
-    :type total_train_epochs: int
-    :param save_freq_steps: Save the model every this number of steps.
-        "step" is a PPO training step, probabily composed of multiple
-        model updates if ppo_n_minibatch > 1.
-        If None, the model will not be saved during training.
-        The directory to save the model will be automatically resolved
-        and prompted in the terminal when the experiment starts.
-    :type save_freq_steps: Optional[int]
     :param is_sft_lora: Whether LoRA was used for SFT.
         If so, the saved SFT model should only contain LoRA parameters.
         Since LoRA is currently not supported for SFT,
@@ -207,9 +188,6 @@ class PPOConfig(CommonExperimentConfig):
     :param ppo: Configuration for the PPO algorithm.
     :type ppo: PPOHyperparameters
     """
-
-    total_train_epochs: int = 1
-    save_freq_steps: Optional[int] = 20
 
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
@@ -459,16 +437,9 @@ class PPOConfig(CommonExperimentConfig):
         return self.actor.path
 
     @property
-    def exp_ctrl(self) -> ExperimentSaveEvalControl:
-        return ExperimentSaveEvalControl(
-            total_train_epochs=self.total_train_epochs,
-            save_frequency_steps=self.save_freq_steps,
-        )
-
-    @property
     def search_kwargs(self):
         return {
-            "num_gen_tokens": self.ppo.max_new_tokens,
+            "num_gen_tokens": self.ppo.gen.max_new_tokens,
             "n_ppo_minibatches": self.ppo.ppo_n_minibatches,
             "seq_len": self.dataset.max_prompt_len,
         }
