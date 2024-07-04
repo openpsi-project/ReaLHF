@@ -420,7 +420,7 @@ def clear_global_memory_buffer():
 
 
 def get_repo_path() -> pathlib.Path:
-    return pathlib.Path(__file__).resolve().parent.parent
+    return pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 def get_env_vars(**kwargs):
