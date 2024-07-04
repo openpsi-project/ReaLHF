@@ -26,4 +26,4 @@ from .experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 from .experiments.common.rw_exp import RWConfig
 from .experiments.common.sft_exp import SFTConfig
 
-__version__ = "0.1.0.post2"
+__version__ = "0.2.0"
