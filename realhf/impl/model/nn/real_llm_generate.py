@@ -161,6 +161,7 @@ def prepare_generate_inputs(
         block_ys = ys[1:]
     if constants.is_last_pipe_stage():
         layer_indices = layer_indices[:-1]
+        ys[-1].cache_seqlens = cache_seqlens
         block_ys = block_ys[:-1]
 
     for y, layer_idx in zip(block_ys, layer_indices):

@@ -1,4 +1,6 @@
+import os
 import re
+import subprocess
 from typing import List
 
 import numpy as np
@@ -9,6 +11,10 @@ def parse_node_id(node_name: str, prefix: str) -> int:
 
 
 def parse_nodelist(nodelist: str, prefix: str) -> List[str]:
+    if not nodelist.startswith(prefix):
+        raise ValueError(
+            f"Node list `{nodelist}` does not start with hostname prefix `{prefix}`."
+        )
     nodelist = nodelist.replace(prefix, "")
     if "[" not in nodelist:
         return [prefix + nodelist]
@@ -69,8 +75,6 @@ def slurm_hostname_key(hostname):
 
 
 def check_slurm_availability():
-    import os
-    import subprocess
 
     slurm_available = (
         int(

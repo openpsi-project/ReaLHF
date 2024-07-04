@@ -12,16 +12,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import ray
 import ray.util.queue as rq
+import torch
 
 import realhf.api.core.system_api as system_api
-from realhf.base import logging, name_resolve, names
+from realhf.base import gpu_utils, logging, name_resolve, names
 from realhf.base.cluster import spec as cluster_spec
 from realhf.system import WORKER_TYPES, load_worker, worker_base, worker_control
 from realhf.system.worker_base import WorkerServerStatus as Wss
 
 CONNECTION_RETRY_AFTER_SECONDS = 360
 
-logger = logging.getLogger("controller")
+logger = logging.getLogger("controller", "colored")
 
 
 @dataclasses.dataclass
@@ -98,10 +99,20 @@ class Controller:
                 json.dump(asdict(setup.config), f, indent=4)
 
         # Scheduling and connecting to workers.
-        # TODO for heterogeneous workers of the same type k, list scheduling[k] and setup[k] should match.
         workers_configs = [
             (k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES
         ]
+
+        # Sanity check for scheduling and configuration.
+        for _, worker_setups, schedules in workers_configs:
+            if not isinstance(schedules, List):
+                schedules = [schedules]
+            if len(worker_setups) != sum(s.count for s in schedules):
+                raise ValueError(
+                    f"Configuration and scheduling mismatch. "
+                    f"Number of worker configurations: {len(worker_setups)}, "
+                    f"Scheduling configs: {schedules}."
+                )
 
         for name, config, schedule in workers_configs:
             count = (
@@ -273,10 +284,36 @@ class Controller:
 def run_ray_worker(
     worker_type,
     idx,
+    world_size,
     experiment_name,
     trial_name,
     comm: Tuple[rq.Queue, rq.Queue],
 ):
+    import realhf.base.constants as constants
+
+    constants.set_experiment_trial_names(experiment_name, trial_name)
+
+    # Isolate within the same slurm job, among different jobsteps.
+    if torch.cuda.is_initialized():
+        raise RuntimeError(
+            "CUDA already initialized before isolating CUDA devices. This should not happen."
+        )
+    gpu_utils.isolate_cuda_device(
+        worker_type,
+        idx,
+        world_size,
+        experiment_name,
+        trial_name,
+    )
+    if os.environ.get("CUDA_VISIBLE_DEVICES", None):
+        logger.debug("CUDA_VISIBLE_DEVICES: %s", os.environ["CUDA_VISIBLE_DEVICES"])
+
+    # NOTE: Importing these will initialize DeepSpeed/CUDA devices.
+    # profiler.import_profiler_registers()
+    import realhf.impl.dataset
+    import realhf.impl.model
+    import realhf.system
+
     worker_name = f"{worker_type}/{idx}"
     server = worker_control.make_server(
         "ray",
@@ -302,7 +339,7 @@ class RayController:
     instead of submitting them to the scheduelr.
     """
 
-    def __init__(self, experiment_name, trial_name, local_mode: bool):
+    def __init__(self, experiment_name, trial_name):
         # base controller will be lazier initialized when launching workers.
         self.__experiment_name = experiment_name
         self.__trial_name = trial_name
@@ -312,8 +349,6 @@ class RayController:
         self.__workers_request_comm = None
         self.__workers_ref = None
 
-        self.__local_mode = local_mode
-
     def _launch_workers(
         self, workers_configs: List[Tuple[str, List, system_api.TasksGroup]]
     ):
@@ -322,6 +357,29 @@ class RayController:
         self.__workers_ref: Dict[str, ray.ObjectRef] = {}
         self.__workers_request_comm: Dict[str, rq.Queue] = dict()
         self.__workers_reply_comm: Dict[str, rq.Queue] = dict()
+
+        # Count the total required resources and check whether Ray currently has enough of them.
+        cpu = gpu = mem = 0.0
+        for worker_type, config, schedule in workers_configs:
+            if not isinstance(schedule, List):
+                schedule = [schedule]
+            for s in schedule:
+                cpu += s.scheduling.cpu * s.count
+                gpu += s.scheduling.gpu * s.count
+                mem += s.scheduling.mem * s.count / 1024  # in GB
+        available_resources = ray.available_resources()
+        acpu = available_resources.get("CPU", 0)
+        agpu = available_resources.get("GPU", 0)
+        amem = available_resources.get("memory", 0) / 1024**3
+        if acpu < cpu or agpu < gpu or amem < mem:
+            logger.critical(
+                f"Ray does not have enough resources to launch workers. "
+                f"Required: {cpu} CPU, {gpu} GPU, {mem:.2f} GB memory. "
+                f"Available: {acpu} CPU, {agpu} GPU, {amem:.2f} GB memory. "
+                f"Please launch more Ray nodes otherwise the experiment will get stuck."
+            )
+
+        # Launch ray jobs.
         for worker_type, config, schedule in workers_configs:
             count = len(config)
             all_schedules: List[system_api.TasksGroup] = []
@@ -338,15 +396,17 @@ class RayController:
                     all_schedules.append(s_)
             assert len(all_schedules) == len(config)
             comms = [(rq.Queue(maxsize=8), rq.Queue(maxsize=8)) for _ in all_schedules]
+            world_size = len(all_schedules)
             jobs = [
                 ray.remote(
                     num_cpus=sch.scheduling.cpu,
                     num_gpus=sch.scheduling.gpu,
-                    memory=sch.scheduling.mem,
+                    memory=sch.scheduling.mem * 1024**2,
                     name=f"{worker_type}/{idx}",
                 )(run_ray_worker).remote(
                     worker_type,
                     idx,
+                    world_size,
                     self.__experiment_name,
                     self.__trial_name,
                     comm,
@@ -383,48 +443,7 @@ class RayController:
         ]
         workers_configs: List[Tuple[str, List, system_api.TasksGroup]]
 
-        if self.__local_mode:
-            ray.init()
-        else:
-            for name, config, schedule in workers_configs:
-                count = (
-                    sum([s.count for s in schedule])
-                    if isinstance(schedule, list)
-                    else schedule.count
-                )
-                if len(config) != count:
-                    logger.error(
-                        "Scheduling and config mismatch, interrupting all workers."
-                    )
-                    raise IndexError(
-                        f"Configuration has {len(config)} {name}, {count} scheduled."
-                    )
-                for idx in range(count):
-                    try:
-                        name_resolve.wait(
-                            names.ray_cluster(
-                                self.__experiment_name,
-                                self.__trial_name,
-                                f"{name}/{idx}",
-                            ),
-                            timeout=300,
-                        )
-                    except TimeoutError:
-                        raise RuntimeError(
-                            f"Timeout waiting for Ray cluster node {name}/{idx} to start."
-                        )
-            logger.info("Ray cluster started.")
-
-            try:
-                ray_head_addr = name_resolve.wait(
-                    names.ray_cluster(
-                        self.__experiment_name, self.__trial_name, "address"
-                    ),
-                    timeout=300,
-                )
-            except TimeoutError:
-                raise RuntimeError("Timeout waiting for ray cluster head address.")
-            ray.init(address=ray_head_addr)
+        ray.init()
 
         logger.info("Ray initialized! Ready to run workers.")
 
@@ -432,14 +451,5 @@ class RayController:
             self._launch_workers(workers_configs)
             self.__base_controller.start(experiment, ignore_worker_error)
         except Exception as e:
-            self.shutdown()
-
-    def shutdown(self):
-        ray_exiting_name = names.ray_cluster(
-            self.__experiment_name, self.__trial_name, "exiting"
-        )
-        name_resolve.add(ray_exiting_name, value="1", delete_on_exit=True)
-        del self.__workers_reply_comm
-        del self.__workers_request_comm
-        del self.__workers_ref
-        ray.shutdown()
+            ray.shutdown()
+            raise e

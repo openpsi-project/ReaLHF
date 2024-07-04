@@ -15,6 +15,7 @@ from omegaconf import MISSING, OmegaConf
 
 import realhf.api.core.system_api as system_api
 from realhf.base.constants import LOG_ROOT, MODEL_SAVE_ROOT, QUICKSTART_EXPR_CACHE_PATH
+from realhf.base.ray_utils import check_ray_availability
 from realhf.base.slurm_utils import check_slurm_availability
 
 
@@ -27,16 +28,24 @@ def kind_reminder(config_name, logger, args):
         f"Model checkpoints will be saved to {os.path.join(MODEL_SAVE_ROOT, args.experiment_name, args.trial_name)}"
     )
 
-    slurm_available = check_slurm_availability()
-    if slurm_available:
-        logger.warning(
-            "Slurm is available. You probably run the system on ctrl nodes. "
-            "Using slurm to launch remote workers."
-        )
+    if args.mode == "slurm":
+        slurm_available = check_slurm_availability()
+        if slurm_available:
+            logger.info("Launching experiments with SLURM...")
+        else:
+            logger.warning("Slurm is not available. Using local mode.")
+            args.mode = "local"
+    elif args.mode == "ray":
+        ray_available = check_ray_availability()
+        if ray_available:
+            logger.info("Launching experiments with RAY...")
+        else:
+            logger.warning("Ray is not available. Using local mode.")
+            args.mode = "local"
+    elif args.mode == "local":
+        logger.info("Launching experiments locally.")
     else:
-        logger.warning("Slurm is not available. Using local mode.")
-    mode = "slurm" if slurm_available else "local"
-    return mode
+        raise ValueError(f"Invalid mode {args.mode}")
 
 
 cs = ConfigStore.instance()
@@ -64,7 +73,7 @@ def register_quickstart_exp(config_name: str, exp_cls: Callable):
             trial_name = args.trial_name
         from realhf.apps.main import main_start, main_stop
 
-        args.mode = kind_reminder(config_name, logger, args)
+        kind_reminder(config_name, logger, args)
 
         exp_fn = functools.partial(exp_cls, **args)
 

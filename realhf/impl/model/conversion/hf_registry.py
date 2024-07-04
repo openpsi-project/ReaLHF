@@ -2,6 +2,7 @@ import dataclasses
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import *
 
 import torch
@@ -64,9 +65,6 @@ class HFModelRegistry:
         load_dir: str,
         init_critic_from_actor: bool = False,
     ):
-        # TODO: expand odd vocab size to support tensor parallel
-        # NOTE: moving this upwards will result in circular import
-
         tik = time.perf_counter()
         with open(os.path.join(load_dir, "config.json"), "r") as f:
             hf_config = json.load(f)
@@ -120,9 +118,7 @@ class HFModelRegistry:
             )
         setup_time = time.perf_counter() - tik
 
-        load_times, partition_times = [], []
-        state_dict = {}
-        for fn in files_to_load:
+        def _load_ckpt(fn):
             load_tik = time.perf_counter()
             if fn.endswith(".safetensors"):
                 sd = load_safetensor(os.path.join(load_dir, fn))
@@ -138,13 +134,26 @@ class HFModelRegistry:
                 constants.model_parallel_world_size(),
                 constants.model_parallel_rank(),
             )
-            state_dict.update(psd)
-            load_times.append(partition_tik - load_tik)
-            partition_times.append(time.perf_counter() - partition_tik)
+            return psd, partition_tik - load_tik, time.perf_counter() - partition_tik
 
-        for k, v in state_dict.items():
-            if v.isnan().any() or v.isinf().any():
-                raise ValueError(f"Loaded checkpoint {k} has NaN or Inf. Aborted.")
+        load_times, partition_times = [], []
+        state_dict = {}
+        with ThreadPoolExecutor(
+            max_workers=min(4, max(1, os.cpu_count() // 8))
+        ) as executor:
+            future_to_checkpoint = {
+                executor.submit(_load_ckpt, path): path for path in files_to_load
+            }
+
+            for future in as_completed(future_to_checkpoint):
+                path = future_to_checkpoint[future]
+                try:
+                    psd, loat_t, part_t = future.result()
+                    state_dict.update(psd)
+                    load_times.append(loat_t)
+                    partition_times.append(part_t)
+                except Exception as e:
+                    raise RuntimeError(f"Error loading checkpoint from {path}: {e}")
 
         # Remap embedding weights to the last layer if tied_embedding is True.
         if (
@@ -267,10 +276,6 @@ class HFModelRegistry:
         hf_sd = self.sd_to_hf_converter(cpu_sd, model.config)
         hf_config = self.config_to_hf_converter(model.config)
 
-        for k, v in hf_sd.items():
-            if v.isnan().any() or v.isinf().any():
-                raise ValueError(f"Saving checkpoint {k} with NaN or Inf. Aborted.")
-
         param_size = sum(
             [value.numel() * value.element_size() for value in hf_sd.values()]
         )
@@ -318,6 +323,8 @@ class HFModelRegistry:
             else:
                 s = n_shards
 
+            # Since torch.save requires pickling, which is CPU-bound,
+            # parallelizing the saving process is not beneficial.
             for i, shard in enumerate(shards[s : s + n_shards_per_gpu]):
                 shard_idx = shard_offset + i + s
                 torch.save(

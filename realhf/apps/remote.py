@@ -19,7 +19,6 @@ from realhf.api.quickstart.entrypoint import (
 )
 from realhf.base import cluster, gpu_utils, importing, logging, name_resolve, names
 
-RAY_HEAD_WAIT_TIME = 500
 logger = logging.getLogger("Main-Workers")
 
 
@@ -152,34 +151,6 @@ def main_controller(args):
 
     logger.debug("Running controller with args: %s", args)
     assert not args.experiment_name.startswith("/"), args.experiment_name
-    if args.type == "ray":
-        # launch ray cluster head
-        ray_flags = [
-            f"--num-cpus=0",
-            f"--num-gpus=0",
-            f"--port={args.ray_port}",
-            "--head",
-        ]
-        cmd = f"ray start {' '.join(ray_flags)}"
-        output = subprocess.check_output(cmd, shell=True).decode("ascii")
-        logger.info("Successfully launched ray cluster head.")
-
-        pattern = r"ray start --address='(\d+\.\d+\.\d+\.\d+:\d+)'"
-        match = re.search(pattern, output)
-        if match:
-            addr = match.group(1)
-            logger.info("Found ray address: '%s'", addr)
-        else:
-            raise RuntimeError(f"Address not found in ray start output: {output}.")
-        ray_addr_name = names.ray_cluster(
-            args.experiment_name, args.trial_name, "address"
-        )
-        name_resolve.add(
-            ray_addr_name,
-            addr,
-            delete_on_exit=True,
-            keepalive_ttl=RAY_HEAD_WAIT_TIME,
-        )
 
     controller = system.make_controller(
         type_=args.type,
@@ -191,49 +162,6 @@ def main_controller(args):
         experiment=experiment,
         ignore_worker_error=args.ignore_worker_error,
     )
-
-    if args.type == "ray":
-        subprocess.check_output(f"ray stop", shell=True)
-
-
-def main_ray(args):
-    ray_addr_name = names.ray_cluster(args.experiment_name, args.trial_name, "address")
-    try:
-        address = name_resolve.wait(ray_addr_name, timeout=RAY_HEAD_WAIT_TIME)
-    except TimeoutError:
-        raise TimeoutError("Timeout waiting for ray cluster head address.")
-    ray_flags = [f"--address={address}"]
-
-    cmd = f"ray start {' '.join(ray_flags)}"
-    _ = subprocess.check_output(cmd, shell=True).decode("ascii")
-    logger.info(f"Successfully launched nodes for {args.worker_type} in Ray cluster.")
-
-    host_ip = socket.gethostbyname(socket.gethostname())
-    name_resolve.add(
-        names.ray_cluster(
-            args.experiment_name,
-            args.trial_name,
-            f"{args.worker_type}/{args.jobstep_id}",
-        ),
-        host_ip,
-        delete_on_exit=True,
-        keepalive_ttl=300,
-    )
-
-    while True:
-        try:
-            ray_exiting_name = names.ray_cluster(
-                args.experiment_name, args.trial_name, "exiting"
-            )
-            try:
-                name_resolve.wait(ray_exiting_name, timeout=10)
-                break
-            except TimeoutError:
-                pass
-        except KeyboardInterrupt:
-            break
-
-    subprocess.check_output(f"ray stop", shell=True)
 
 
 def main():
@@ -251,7 +179,6 @@ def main():
         "--raise_worker_error", dest="ignore_worker_error", action="store_false"
     )
     subparser.add_argument("--type", type=str, default="zmq")
-    subparser.add_argument("--ray_port", type=int, default=8777)
     subparser.set_defaults(feature=False)
     subparser.set_defaults(func=main_controller)
 
@@ -305,16 +232,6 @@ def main():
         "The offset is 0 for the 1st job and 4 for the 2nd job.",
     )
     subparser.set_defaults(func=main_worker)
-
-    subparser = subparsers.add_parser(
-        "ray", help="launch ray cluster write ray address to name_resolve"
-    )
-    subparser.add_argument("--experiment_name", "-e", type=str, required=True)
-    subparser.add_argument("--trial_name", "-f", type=str, required=True)
-    subparser.add_argument("--worker_type", "-w", type=str, required=True)
-    subparser.add_argument("--jobstep_id", "-i", type=int, required=True)
-    subparser.add_argument("--n_jobsteps", "-g", type=int, required=True)
-    subparser.set_defaults(func=main_ray)
 
     args = parser.parse_args()
 

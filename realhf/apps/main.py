@@ -20,10 +20,7 @@ TRACE_TIMEOUT = 360  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS define
 
 
 def scheduler_mode(mode: str) -> str:
-    if mode == "ray" or mode == "slurm":
-        return "slurm"
-    elif "local" in mode:
-        return "local"
+    return mode if mode == "slurm" else "local"
 
 
 def _submit_workers(
@@ -35,7 +32,6 @@ def _submit_workers(
     scheduling_configs: List[config_package.TasksGroup],
     environs: Dict[str, str],
     image_name: Optional[str] = None,
-    use_ray_cluster: bool = False,
 ) -> List[str]:
     if len(scheduling_configs) == 0:
         return []
@@ -43,16 +39,7 @@ def _submit_workers(
     scheduled_jobs = []
     for sch_cfg in scheduling_configs:
         job_environs = {**environs, **sch_cfg.scheduling.env_vars}
-        if use_ray_cluster:
-            cmd = sched_client.ray_cluster_cmd(
-                expr_name,
-                trial_name,
-                worker_type=worker_type,
-            )
-        else:
-            cmd = sched_client.remote_worker_cmd(
-                expr_name, trial_name, debug, worker_type
-            )
+        cmd = sched_client.remote_worker_cmd(expr_name, trial_name, debug, worker_type)
 
         logger.debug(f"Scheduling worker {worker_type}, {scheduling_configs}")
 
@@ -60,8 +47,6 @@ def _submit_workers(
         exclude = sch_cfg.scheduling.exclude
         node_type = sch_cfg.scheduling.node_type
         container_image = image_name or sch_cfg.scheduling.container_image
-        if use_ray_cluster:
-            worker_type = f"rc_{worker_type}"
 
         scheduled_jobs.append(
             sched.submit_array(
@@ -92,12 +77,6 @@ def main_start(args, recover_count: int = 0):
         constants.set_experiment_trial_names(args.experiment_name, args.trial_name)
     experiment = config_package.make_experiment(args.experiment_name)
 
-    if args.mode == "ray" and args.image_name is None:
-        raise ValueError(
-            "--image_name must be specified when using ray cluster. "
-            "This is becuase ray cluster requires all workers to have "
-            "the same version of Python and ray."
-        )
     if args.mode == "local":
         assert (
             args.recover_mode == "disabled"
@@ -173,11 +152,9 @@ def main_start(args, recover_count: int = 0):
     # Schedule controller
     if args.mode == "ray":
         controller_type = "ray"
-    elif args.mode == "local_ray":
-        controller_type = "local_ray"
     else:
         controller_type = "zmq"
-    # For local_ray mode, the controller will start all remote workers.
+    # For ray mode, the controller will start all remote workers.
     sched.submit_array(
         worker_type="ctl",
         cmd=sched_client.control_cmd(
@@ -196,14 +173,15 @@ def main_start(args, recover_count: int = 0):
         time_limit=CONTROLLER_TIME_LIMIT,
     )
 
-    if args.mode != "local_ray":
+    if args.mode != "ray":
         workers_configs = ((k, getattr(setup, k)) for k in system.WORKER_TYPES)
 
         for name, scheduling_setup in workers_configs:
             if not isinstance(scheduling_setup, list):
                 scheduling_setup = [scheduling_setup]
             # For local or slurm mode, launch all workers.
-            # For ray mode, launch the ray cluster for all workers via slurm.
+            # For ray mode, nothing to do because workers will be
+            # started by the controller, rather than the scheduler.
             _submit_workers(
                 sched,
                 expr_name,
@@ -213,7 +191,6 @@ def main_start(args, recover_count: int = 0):
                 scheduling_setup,
                 BASE_ENVIRONS,
                 args.image_name,
-                use_ray_cluster=(args.mode == "ray"),
             )
 
     timeout = (
@@ -379,7 +356,7 @@ def main():
     subparser.add_argument(
         "--mode",
         default="slurm",
-        choices=["local", "slurm", "ray", "local_ray"],
+        choices=["local", "slurm", "ray"],
     )
     subparser.add_argument(
         "--partition",
@@ -450,7 +427,7 @@ def main():
     subparser.add_argument(
         "--mode",
         default="slurm",
-        choices=["local", "slurm", "ray", "local_ray"],
+        choices=["local", "slurm", "ray"],
     )
     subparser.set_defaults(func=main_stop)
 

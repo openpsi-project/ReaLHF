@@ -200,6 +200,8 @@ class PairedRewardInterface(model_api.ModelInterface):
         return res
 
     def save(self, model: model_api.Model, save_dir: str):
+        if not self.enable_save:
+            return
         module = model.module
         if not isinstance(module, ReaLModel):
             module = module.module
