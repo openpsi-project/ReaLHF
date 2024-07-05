@@ -1,6 +1,8 @@
 import contextlib
 import dataclasses
 import functools
+import itertools
+import pprint
 from collections import defaultdict
 from typing import *
 
@@ -8,9 +10,24 @@ import numpy as np
 from omegaconf import MISSING
 
 import realhf.base.logging as logging
-from realhf.api.core.config import Dataset
-from realhf.api.core.dfg import MFCDef, ModelInterfaceType, OffloadHook, SyncParamHook
-from realhf.api.core.system_api import *
+from realhf.api.core.config import (
+    Dataset,
+    ModelName,
+    ModelShardID,
+    StandaloneModelShard,
+)
+from realhf.api.core.dfg import MFCDef, ModelInterfaceType
+from realhf.api.core.system_api import (
+    DataLoader,
+    Dataset,
+    Experiment,
+    ExperimentConfig,
+    ExperimentSaveEvalControl,
+    ExperimentScheduling,
+    ModelWorker,
+    Scheduling,
+    TasksGroup,
+)
 from realhf.api.quickstart.device_mesh import (
     AllocationConfig,
     DeviceMesh,
@@ -18,8 +35,16 @@ from realhf.api.quickstart.device_mesh import (
     make_device_mesh_from_name,
 )
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
-from realhf.experiments.common.check import *
-from realhf.experiments.common.utils import *
+from realhf.experiments.common.check import (
+    check_is_realhf_native_model_interface,
+)
+from realhf.experiments.common.utils import (
+    get_topo,
+    make_inf_backend_config,
+    make_model_config,
+    make_train_backend_config,
+    resolve_rpc_hooks,
+)
 from realhf.search_engine.search import search_rpc_allocations
 
 logger = logging.getLogger("CommonExperimentConfig", "colored")
@@ -308,7 +333,6 @@ class CommonExperimentConfig(Experiment):
 
         shard_counter = defaultdict(lambda: 0)
         resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
-        import pprint
 
         pprint.pprint(rpc_allocs)
 

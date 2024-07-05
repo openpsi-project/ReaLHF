@@ -30,7 +30,7 @@ def enumerate_rpc_executions(
             num_dp = parallel.data_parallel_size
             num_pp = parallel.pipeline_parallel_size
             num_mp = parallel.model_parallel_size
-            bs = rpc.min_n_seqs
+            bs = rpc.n_seqs
             # seq_len = seq_len
             min_bs = (
                 2 * num_dp * num_pp * n_ppo_minibatches

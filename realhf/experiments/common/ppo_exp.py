@@ -1,11 +1,14 @@
-import os
+import copy
+import dataclasses
+from typing import *
 
 import torch
 
 import realhf.base.logging as logging
-from realhf.api.core.dfg import MFCDef, ModelFamily, ModelInterface, ModelInterfaceType
+from realhf.api.core.config import ModelName
+from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
 from realhf.api.core.model_api import GenerationHyperparameters
-from realhf.api.core.system_api import *
+from realhf.api.core.system_api import Dataset
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import (
     AllocationConfig,
@@ -13,14 +16,9 @@ from realhf.api.quickstart.device_mesh import (
     RPCAllocation,
 )
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
-from realhf.api.quickstart.model import (
-    ModelTrainEvalConfig,
-    ParallelismConfig,
-    get_real_model_config,
-)
+from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.base.topology import PipeModelDataParallelTopology
 from realhf.experiments.common.common import CommonExperimentConfig
-from realhf.experiments.common.utils import *
 
 logger = logging.getLogger("PPO exp", "colored")
 
@@ -302,8 +300,7 @@ class PPOConfig(CommonExperimentConfig):
                 "packed_logits_mask",
             ],
             balanced_dp=True,
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_reward = MFCDef(
@@ -316,8 +313,7 @@ class PPOConfig(CommonExperimentConfig):
             input_key_remap={"packed_seq": "packed_input_ids"},
             output_data=["scores"],
             output_key_remap={"scores": "rewards"},
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_ref_inputs = ["packed_seq"]
@@ -334,8 +330,7 @@ class PPOConfig(CommonExperimentConfig):
             input_data=inf_ref_inputs,
             output_data=["logprobs"],
             output_key_remap={"logprobs": "packed_ref_logprobs"},
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_values = MFCDef(
@@ -347,8 +342,7 @@ class PPOConfig(CommonExperimentConfig):
             input_data=["packed_seq", "seq_no_eos_mask"],
             output_data=["scores"],
             output_key_remap={"scores": "values"},
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_actor_inputs = [
@@ -373,8 +367,7 @@ class PPOConfig(CommonExperimentConfig):
             log_return_value=True,
             # pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
             # post_hooks=[SyncParamHook(target=ModelName("actor", 0))],
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_critic = MFCDef(
@@ -395,8 +388,7 @@ class PPOConfig(CommonExperimentConfig):
             log_return_value=True,
             # pre_hooks=[SyncParamHook(source=ModelName("critic", 0))],
             # post_hooks=[SyncParamHook(target=ModelName("critic", 0))],
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
         # rpcs = [rollout, inf_reward, inf_ref_logits, inf_values, train_actor, train_critic]
         return {

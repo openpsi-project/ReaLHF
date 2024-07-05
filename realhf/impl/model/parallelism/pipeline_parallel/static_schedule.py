@@ -1,6 +1,17 @@
 from abc import ABC, abstractmethod
 
-from realhf.impl.model.parallelism.pipeline_parallel.instruction import *
+from realhf.impl.model.parallelism.pipeline_parallel.instruction import (
+    BackwardPass,
+    ForwardPass,
+    OptimizerStep,
+    RecvActivation,
+    RecvGrad,
+    RecvNextTokens,
+    ReduceGrads,
+    SendActivation,
+    SendGrad,
+    SendNextTokens,
+)
 
 
 class PipeSchedule(ABC):

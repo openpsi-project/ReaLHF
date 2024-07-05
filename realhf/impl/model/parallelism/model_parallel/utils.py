@@ -6,7 +6,11 @@ from typing import List, Sequence
 import numpy as np
 import torch
 
-from realhf.base.constants import *
+from realhf.base.constants import (
+    model_parallel_group,
+    model_parallel_rank,
+    model_parallel_world_size,
+)
 
 _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {
     "tensor_model_parallel": False,

@@ -11,7 +11,14 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import realhf.api.core.dfg as dfg
 import realhf.base.topology as topology
-from realhf.api.core.config import *
+from realhf.api.core.config import (
+    DataLoader,
+    Dataset,
+    Model,
+    ModelName,
+    ModelShardID,
+    StandaloneModelShard,
+)
 from realhf.base.cluster import spec as cluster_spec
 from realhf.base.constants import DATASET_CACHE_PATH
 

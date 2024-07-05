@@ -1,8 +1,10 @@
 import dataclasses
+from typing import *
 
 import realhf.base.logging as logging
+from realhf.api.core.config import ModelName
 from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType, OffloadHook
-from realhf.api.core.system_api import *
+from realhf.api.core.system_api import Dataset
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
@@ -98,8 +100,7 @@ class DPOConfig(CommonExperimentConfig):
                 "prompt_lens",
             ],
             output_data=["seqlogp"],
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
         dpo = MFCDef(
             model_name=ModelName("actor", 0),
@@ -114,8 +115,7 @@ class DPOConfig(CommonExperimentConfig):
                 "prompt_lens",
             ],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
         return {
             "dpo": dpo,

@@ -1,16 +1,13 @@
 import dataclasses
-from typing import List
+from typing import List, Optional
 
+from realhf.api.core.config import ModelName
 from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
-from realhf.api.core.system_api import *
+from realhf.api.core.system_api import DataLoader, Dataset
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
-from realhf.api.quickstart.model import (
-    ModelTrainEvalConfig,
-    OptimizerConfig,
-    get_real_model_config,
-)
+from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
 
 
@@ -71,8 +68,7 @@ class RWConfig(CommonExperimentConfig):
             model_path=self.model.path,
             input_data=["packed_input_ids", "group_factor", "pos_input_lens"],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
         return {"default": rpc}
 

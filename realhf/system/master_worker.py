@@ -270,10 +270,9 @@ class RPCCorountineControl:
 
     ## Per-coroutine resources ##
     # Used for counting the number of concurrent calls.
-    can_do_rpc: Dict[str, asyncio.Semaphore]
     rpc_traversal: Dict[str, int]
     # for synchronizing req ids between req and reply coroutines
-    request_queues: Dict[str, List[asyncio.Queue]]
+    request_queues: Dict[str, asyncio.Queue]
 
     training_buffer_indices: Set[int] = dataclasses.field(default_factory=set)
     data_amount: InterfaceDataAmount = dataclasses.field(
@@ -488,18 +487,13 @@ async def model_rpc_request_func(
             for j in range(model_topos[producer_name].world_size())
         ]
 
-    can_do_rpc = ctrl.can_do_rpc[rpc.name]
-    request_queues = ctrl.request_queues[rpc.name]
-
-    response_coroutine_idx = 0
+    request_queue = ctrl.request_queues[rpc.name]
 
     this_rpc_consumed_seqs = 0
     while not ctrl.stop.is_set():
-        await can_do_rpc.acquire()
-
         # Ensure that parent RPCs will not be over-consumed.
         while any(
-            this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.max_n_seqs
+            this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.n_seqs
             for c in rpc.children_rpcs
         ):
             await asyncio.sleep(0.1)
@@ -585,15 +579,11 @@ async def model_rpc_request_func(
             seqlens=sample.seqlens,
             handlers=handlers,
         )
-        await request_queues[response_coroutine_idx].put(
-            (req_ids, other_req_ids, time.perf_counter())
-        )
-        response_coroutine_idx = (response_coroutine_idx + 1) % len(request_queues)
+        await request_queue.put((req_ids, other_req_ids, time.perf_counter()))
         logger.info(f"Model rpc {rpc.name} requested.")
 
 
 async def model_rpc_reply_func(
-    corountine_idx: int,
     rpc: dfg.MFCDef,
     stream: request_reply_stream.NameResolvingRequstClient,
     buffer: AsyncIOSequenceBuffer,
@@ -611,8 +601,7 @@ async def model_rpc_reply_func(
         for i in dp_head_indices
     ]
 
-    request_queue = ctrl.request_queues[rpc.name][corountine_idx]
-    can_do_rpc = ctrl.can_do_rpc[rpc.name]
+    request_queue = ctrl.request_queues[rpc.name]
 
     while not ctrl.stop.is_set():
         req_ids, other_req_ids, tik = await request_queue.get()
@@ -657,8 +646,6 @@ async def model_rpc_reply_func(
 
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
-
-        can_do_rpc.release()
 
         ctrl.rpc_traversal[rpc.name] += 1
 
@@ -717,7 +704,7 @@ async def load_data_func(
         for x in loaded_data_batches:
             all_data += data_api.unpack_data_batch(x)
 
-        steps_per_epoch = len(all_data) // src_rpc.max_n_seqs
+        steps_per_epoch = len(all_data) // src_rpc.n_seqs
         avg_tokens_per_batch = sum(x.seqlens[0] for x in all_data) / steps_per_epoch
         logger.info(
             f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
@@ -734,7 +721,7 @@ async def load_data_func(
 
         # NOTE: The reordered indices prioritize longer sequences for detecting OOM errors early.
         reorder_indices, _ = datapack.reorder_to_balanced_batches(
-            seqlens, src_rpc.max_n_seqs
+            seqlens, src_rpc.n_seqs
         )
         recover_indices = np.argsort(reorder_indices)
         all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
@@ -852,14 +839,13 @@ class MasterWorker(worker_base.Worker):
         for rpc in self.__model_rpcs:
             _dp_size = self.__model_topos[rpc.model_name].get_dim("data")
             _pp_size = self.__model_topos[rpc.model_name].get_dim("pipe")
-            if rpc.min_n_seqs < _dp_size * _pp_size:
+            if rpc.n_seqs < _dp_size * _pp_size:
                 logger.warning(
                     f"The batch size of RPC `{rpc.name}` in terms of #seqs is smaller than "
                     f"dp_size * pp_size ({_dp_size}*{_pp_size}). Forcely enlarge the batch size "
-                    f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.min_n_seqs})"
+                    f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.n_seqs})"
                 )
-                rpc.min_n_seqs_per_dp = 1
-                rpc.min_n_seqs = _dp_size * _pp_size
+                rpc.n_seqs = _dp_size * _pp_size
 
         self.__mwid2msids = defaultdict(list)
         for msid, mwid in self.config.msid2mwid.items():
@@ -1089,9 +1075,9 @@ class MasterWorker(worker_base.Worker):
                 assert len(train_rpcs) == 1
                 steps_per_epoch = (
                     total_n_seqs * self.config.exp_ctrl.total_train_epochs
-                    + train_rpcs[0].max_n_seqs
+                    + train_rpcs[0].n_seqs
                     - 1
-                ) // train_rpcs[0].max_n_seqs
+                ) // train_rpcs[0].n_seqs
                 ft_spec = model_api.FinetuneSpec(
                     total_train_epochs=self.config.exp_ctrl.total_train_epochs,
                     total_train_steps=steps_per_epoch
@@ -1156,14 +1142,7 @@ class MasterWorker(worker_base.Worker):
             eval_queue=asyncio.Queue(1),
             save_queue=asyncio.Queue(1),
             rpc_traversal={rpc.name: 0 for rpc in self.__model_rpcs},
-            can_do_rpc={
-                rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls)
-                for rpc in self.__model_rpcs
-            },
-            request_queues={
-                rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
-                for rpc in self.__model_rpcs
-            },
+            request_queues={rpc.name: asyncio.Queue(1) for rpc in self.__model_rpcs},
             is_recover_epoch=self.__recover_run,
             used_hash_vals_this_epoch=(
                 self.__recover_info.hash_vals_to_ignore if self.__recover_run else set()
@@ -1204,20 +1183,16 @@ class MasterWorker(worker_base.Worker):
                     ctrl=self.__rpc_ctrl,
                 )
             )
-            reply_tasks = []
-            for j in range(rpc.max_concurrent_calls):
-                _reply_task = event_loop.create_task(
-                    model_rpc_reply_func(
-                        corountine_idx=j,
-                        rpc=rpc,
-                        stream=self.__stream,
-                        buffer=self.__seqbuffer,
-                        model_topos=self.__model_topos,
-                        ctrl=self.__rpc_ctrl,
-                    )
+            reply_task = event_loop.create_task(
+                model_rpc_reply_func(
+                    rpc=rpc,
+                    stream=self.__stream,
+                    buffer=self.__seqbuffer,
+                    model_topos=self.__model_topos,
+                    ctrl=self.__rpc_ctrl,
                 )
-                reply_tasks.append(_reply_task)
-            coroutine_tasks += [request_task] + reply_tasks
+            )
+            coroutine_tasks += [request_task, reply_task]
 
         # Append some utilization coroutines to handle data loading, saving, and evaluation.
         load_data_task = event_loop.create_task(
