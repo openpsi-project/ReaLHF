@@ -1,13 +1,20 @@
+# Importing dataclasses is intended. 
+# Hydra does not recognize pydantic.Field, 
+# but it does recognize dataclasses.field.
 import dataclasses
 from typing import *
 
+from pydantic import dataclasses as pdclasses
+from pydantic import model_validator,field_validator
+from typing_extensions import Self
+
 import realhf.base.logging as logging
-from realhf.api.core.config import Model, ModelFamily, ModelWrapper
+from realhf.api.core.config import ModelAbstraction, ModelFamily, ModelWrapperAbstraction
 
 logger = logging.getLogger("Quickstart Model Config")
 
 
-@dataclasses.dataclass(unsafe_hash=True)
+@pdclasses.dataclass(frozen=True)
 class ParallelismConfig:
     """Model 3D parallelism configuration.
 
@@ -27,16 +34,22 @@ class ParallelismConfig:
     data_parallel_size: int = 1
     use_sequence_parallel: bool = False
 
-    def __post_init__(self):
+    @model_validator(mode="after")
+    def _validate_parallelism(self) -> Self:
         if (
             self.pipeline_parallel_size < 1
             or self.data_parallel_size < 1
             or self.model_parallel_size < 1
         ):
             raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
+        return self
+
+    @model_validator(mode="after")
+    def _validata_sequence_parallel(self) -> Self:
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
+        return self
 
     def __str__(self):
         return (
@@ -46,13 +59,13 @@ class ParallelismConfig:
         )
 
 
-@dataclasses.dataclass
+@pdclasses.dataclass
 class LoRAConfig:
     dim: int = 32
     scaling: float = 32.0
 
 
-@dataclasses.dataclass
+@pdclasses.dataclass
 class OptimizerConfig:
     """Optimizer configuration.
 
@@ -101,16 +114,22 @@ class OptimizerConfig:
     warmup_steps_proportion: float = 0.02
     offload: bool = False
 
-    def __post_init__(self):
-        if self.min_lr_ratio < 0.0 or self.min_lr_ratio > 1.0:
-            raise ValueError(f"Invalid min_lr_ratio: {self.min_lr_ratio}")
-        if self.warmup_steps_proportion < 0.0 or self.warmup_steps_proportion > 1.0:
-            raise ValueError(
-                f"Invalid warmup_steps_proportion: {self.warmup_steps_proportion}"
-            )
+    @field_validator("min_lr_ratio")
+    @classmethod
+    def _validate_min_lr_ratio(cls, value: float) -> float:
+        if value < 0.0 or value > 1.0:
+            raise ValueError(f"Invalid min_lr_ratio: {value}")
+        return value
+
+    @field_validator("warmup_steps_proportion")
+    @classmethod
+    def _validate_warmup_steps_proportion(cls, value: float) -> float:
+        if value < 0.0 or value > 1.0:
+            raise ValueError(f"Invalid warmup_steps_proportion: {value}")
+        return value
 
 
-@dataclasses.dataclass
+@pdclasses.dataclass
 class ModelTrainEvalConfig:
     """
     Model (or LLM) runtime configuration in ReaL.
@@ -179,13 +198,23 @@ class ModelTrainEvalConfig:
     )
     init_critic_from_actor: bool = False
 
-    def __post_init__(self):
+    @model_validator(mode="after")
+    def _validate_fp16_bf16(self) -> Self:
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_offload(self) -> Self:
         if (self.offload or self.optimizer.offload) and self.backend != "deepspeed":
             raise ValueError("offload is only valid for the deepspeed backend.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_megatron_zero_stage(self) -> Self:
         if self.backend == "megatron" and self.zero_stage in [1, 3]:
             raise ValueError("The Megatron backend only supports zero stage 0 or 2.")
+        return self
 
 
 def get_real_model_config(
@@ -200,9 +229,9 @@ def get_real_model_config(
     sft_lora_path: Optional[str] = None,
     is_rew_lora: bool = False,
     rew_lora_path: Optional[str] = None,
-) -> Model:
+) -> ModelAbstraction:
     """Make a configuration to build model."""
-    model = Model(
+    model = ModelAbstraction(
         "real_model",
         args=dict(
             model_path=model_path,
@@ -214,7 +243,7 @@ def get_real_model_config(
     )
     if is_sft_lora:
         model.wrappers += [
-            ModelWrapper(
+            ModelWrapperAbstraction(
                 "lora",
                 args=dict(
                     lora_module_kwargs=dict(
@@ -229,7 +258,7 @@ def get_real_model_config(
         ]
     if is_rew_lora:
         model.wrappers += [
-            ModelWrapper(
+            ModelWrapperAbstraction(
                 "lora",
                 args=dict(
                     lora_module_kwargs=dict(
@@ -244,7 +273,7 @@ def get_real_model_config(
         ]
     if lora is not None:
         model.wrappers += [
-            ModelWrapper(
+            ModelWrapperAbstraction(
                 "lora",
                 args=dict(
                     lora_module_kwargs=dict(

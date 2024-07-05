@@ -1,10 +1,13 @@
 import dataclasses
 
-from omegaconf import MISSING
-
-from realhf.api.core.config import ModelName
-from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
-from realhf.api.core.system_api import DataLoader, Dataset
+from realhf.api.core.config import (
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+    ModelName,
+    DataLoaderAbstraction,
+    DatasetAbstraction,
+)
+from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PromptAnswerDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
@@ -43,7 +46,7 @@ class SFTConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterface("sft")
+        interface = ModelInterfaceAbstraction("sft")
         rpc = MFCDef(
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
@@ -63,7 +66,7 @@ class SFTConfig(CommonExperimentConfig):
     @property
     def datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "prompt_answer",
                 args=dict(
                     max_length=self.dataset.max_seqlen,
@@ -79,7 +82,7 @@ class SFTConfig(CommonExperimentConfig):
     @property
     def eval_datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "prompt_answer",
                 args=dict(
                     max_length=self.dataset.max_seqlen,
@@ -90,7 +93,7 @@ class SFTConfig(CommonExperimentConfig):
 
     @property
     def eval_dataloader(self):
-        return DataLoader(
+        return DataLoaderAbstraction(
             "packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs)
         )
 

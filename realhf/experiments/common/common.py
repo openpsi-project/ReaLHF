@@ -11,15 +11,14 @@ from omegaconf import MISSING
 
 import realhf.base.logging as logging
 from realhf.api.core.config import (
-    Dataset,
+    DatasetAbstraction,
+    DataLoaderAbstraction,
     ModelName,
     ModelShardID,
-    StandaloneModelShard,
+    StandaloneModelShardAbstraction,
 )
 from realhf.api.core.dfg import MFCDef, ModelInterfaceType
 from realhf.api.core.system_api import (
-    DataLoader,
-    Dataset,
     Experiment,
     ExperimentConfig,
     ExperimentSaveEvalControl,
@@ -35,9 +34,7 @@ from realhf.api.quickstart.device_mesh import (
     make_device_mesh_from_name,
 )
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
-from realhf.experiments.common.check import (
-    check_is_realhf_native_model_interface,
-)
+from realhf.experiments.common.check import check_is_realhf_native_model_interface
 from realhf.experiments.common.utils import (
     get_topo,
     make_inf_backend_config,
@@ -177,16 +174,16 @@ class CommonExperimentConfig(Experiment):
         raise NotImplementedError(f"rpcs is not implemented in {self.__class__}")
 
     @property
-    def datasets(self) -> List[Dataset]:
+    def datasets(self) -> List[DatasetAbstraction]:
         return []
 
     @property
-    def eval_datasets(self) -> List[Dataset]:
+    def eval_datasets(self) -> List[DatasetAbstraction]:
         return None
 
     @property
-    def eval_dataloader(self) -> DataLoader:
-        return DataLoader("packed_eval", args=dict(batch_size=128))
+    def eval_dataloader(self) -> DataLoaderAbstraction:
+        return DataLoaderAbstraction("packed_eval", args=dict(batch_size=128))
 
     @property
     def tokenizer_name_or_path(self) -> str:
@@ -394,7 +391,7 @@ class CommonExperimentConfig(Experiment):
                     #       f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
                     #       f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
                     mw.shards.append(
-                        StandaloneModelShard(
+                        StandaloneModelShardAbstraction(
                             id=ModelShardID(
                                 model_name=model_name,
                                 topo=topo,

@@ -1,9 +1,13 @@
 import dataclasses
 
-from omegaconf import MISSING
 
-from realhf.api.core.config import Dataset, ModelName
-from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
+from realhf.api.core.config import (
+    DatasetAbstraction,
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+    ModelName,
+)
+from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
@@ -48,7 +52,9 @@ class GenerationConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterface("generation", args={"generation_config": self.gen})
+        interface = ModelInterfaceAbstraction(
+            "generation", args={"generation_config": self.gen}
+        )
         gen = MFCDef(
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.GENERATE,
@@ -73,7 +79,7 @@ class GenerationConfig(CommonExperimentConfig):
     @property
     def datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "prompt",
                 args=dict(
                     dataset_path=self.dataset.path,

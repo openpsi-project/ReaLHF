@@ -494,7 +494,7 @@ async def model_rpc_request_func(
         # Ensure that parent RPCs will not be over-consumed.
         while any(
             this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.n_seqs
-            for c in rpc.children_rpcs
+            for c in rpc.children
         ):
             await asyncio.sleep(0.1)
 

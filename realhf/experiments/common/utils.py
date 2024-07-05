@@ -1,10 +1,9 @@
 import collections
 from typing import *
 
-from realhf.api.core.config import ModelBackend
-from realhf.api.core.dfg import MFCDef, ModelInterfaceType, OffloadHook, SyncParamHook
-from realhf.api.core.system_api import ModelName
-from realhf.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
+from realhf.api.core.config import ModelBackendAbstraction, ModelInterfaceType, ModelName
+from realhf.api.core.dfg import OffloadHook, SyncParamHook
+from realhf.api.quickstart.device_mesh import RPCAllocation
 from realhf.api.quickstart.model import (
     ModelTrainEvalConfig,
     ParallelismConfig,
@@ -40,7 +39,7 @@ def make_train_backend_config(
     model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig
 ):
     if model_cfg.backend == "deepspeed":
-        return ModelBackend(
+        return ModelBackendAbstraction(
             "deepspeed",
             args=dict(
                 optimizer_name="adam",
@@ -72,7 +71,7 @@ def make_train_backend_config(
             raise ValueError("Offload is not supported in Megatron backend.")
         if model_cfg.zero_stage == 3:
             raise ValueError("Zero stage 3 is not supported in Megatron backend.")
-        return ModelBackend(
+        return ModelBackendAbstraction(
             "megatron",
             args=dict(
                 optimizer_name="adam",
@@ -92,7 +91,7 @@ def make_train_backend_config(
                 enable_fp16=model_cfg.enable_fp16,
                 use_zero_optimization=model_cfg.zero_stage > 0,
                 overlap_grad_reduce=model_cfg.zero_stage > 0,
-                overlap_param_gather=model_cfg.zero_stage > 2,
+                overlap_param_gather=model_cfg.zero_stage > 0,
             ),
         )
     else:
@@ -102,7 +101,7 @@ def make_train_backend_config(
 def make_inf_backend_config(
     model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig
 ):
-    return ModelBackend("inference")
+    return ModelBackendAbstraction("inference")
 
 
 def make_model_config(cfg: ModelTrainEvalConfig):

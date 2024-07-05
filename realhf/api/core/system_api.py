@@ -11,14 +11,8 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import realhf.api.core.dfg as dfg
 import realhf.base.topology as topology
-from realhf.api.core.config import (
-    DataLoader,
-    Dataset,
-    Model,
-    ModelName,
-    ModelShardID,
-    StandaloneModelShard,
-)
+import realhf.api.core.config as config_api
+
 from realhf.base.cluster import spec as cluster_spec
 from realhf.base.constants import DATASET_CACHE_PATH
 
@@ -118,11 +112,11 @@ class WorkerInformation:
 @dataclasses.dataclass
 class ModelWorker:
     seed: int
-    shards: List[StandaloneModelShard]
+    shards: List[config_api.StandaloneModelShardAbstraction]
     # dataset, for source model workers
     tokenizer_name_or_path: Optional[str] = None
-    datasets: Optional[List[Union[str, Dataset]]] = None
-    dataloader: Union[str, DataLoader] = "packed"
+    datasets: Optional[List[Union[str, config_api.DatasetAbstraction]]] = None
+    dataloader: Union[str, config_api.DataLoaderAbstraction] = "packed"
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
     # cuda & cudnn config
@@ -132,8 +126,8 @@ class ModelWorker:
     cuda_cache_clear_freq: int = 10
     # model_topos and worker_info will be configured automatically
     model_rpcs: List[dfg.MFCDef] = None
-    model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = None
-    msid2mwid: Dict[ModelShardID, int] = None
+    model_topos: Dict[config_api.ModelName, topology.PipeModelDataParallelTopology] = None
+    msid2mwid: Dict[config_api.ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
     worker_info: Optional[WorkerInformation] = None
@@ -200,8 +194,8 @@ class MasterWorker:
     # main components
     model_rpcs: List[dfg.MFCDef]
     n_model_workers: int
-    model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology]
-    msid2mwid: Dict[ModelShardID, int] = None
+    model_topos: Dict[config_api.ModelName, topology.PipeModelDataParallelTopology]
+    msid2mwid: Dict[config_api.ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
     worker_info: Optional[WorkerInformation] = None
@@ -254,8 +248,8 @@ class ExperimentConfig:
                 )
         ############### Sanity check of model names ###############
 
-        model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = {}
-        model_configs: Dict[ModelName, Model] = {}
+        model_topos: Dict[config_api.ModelName, topology.PipeModelDataParallelTopology] = {}
+        model_configs: Dict[config_api.ModelName, config_api.ModelAbstraction] = {}
         for model_name in model_names:
             _this_mws = list(
                 filter(
@@ -263,7 +257,7 @@ class ExperimentConfig:
                     self.model_worker,
                 )
             )
-            all_shards: List[StandaloneModelShard] = [
+            all_shards: List[config_api.StandaloneModelShardAbstraction] = [
                 next(filter(lambda x: x.id.model_name == model_name, mw.shards))
                 for mw in _this_mws
             ]
@@ -287,7 +281,7 @@ class ExperimentConfig:
                 )
             ##### Sanity check of parallelism ranks. #####
 
-        data_transfer_pairs: List[Tuple[ModelName, ModelName]] = []
+        data_transfer_pairs: List[Tuple[config_api.ModelName, config_api.ModelName]] = []
         _rpc_nodes, edges = dfg.build_graph(self.model_rpcs, verbose=True)
         for i in range(len(self.model_rpcs)):
             for j in range(len(self.model_rpcs)):
@@ -311,7 +305,7 @@ class ExperimentConfig:
                 data_transfer_pairs.append((data_src_rpc.model_name, r.model_name))
         data_transfer_pairs += [(mn, mn) for mn in model_names]
 
-        sync_param_pairs: List[Tuple[ModelName, ModelName]] = []
+        sync_param_pairs: List[Tuple[config_api.ModelName, config_api.ModelName]] = []
         ######### sanity check of sync param hooks #########
         for rpc in self.model_rpcs:
             for hook in rpc.pre_hooks + rpc.post_hooks:
@@ -405,15 +399,15 @@ class ExperimentConfig:
         model_names_to_instantiate = []
         for role in _roles:
             _trainable_this_role = [
-                _model_is_trainable[ModelName(role, i)] for i in range(_role_cnt[role])
+                _model_is_trainable[config_api.ModelName(role, i)] for i in range(_role_cnt[role])
             ]
             if _role_cnt[role] == 1 or not any(_trainable_this_role):
-                model_names_to_instantiate.append(ModelName(role, 0))
+                model_names_to_instantiate.append(config_api.ModelName(role, 0))
                 continue
             if any(_trainable_this_role):
                 assert sum(_trainable_this_role) == 1
                 _trainable_idx = _trainable_this_role.index(True)
-                model_names_to_instantiate.append(ModelName(role, _trainable_idx))
+                model_names_to_instantiate.append(config_api.ModelName(role, _trainable_idx))
         for mw in self.model_worker:
             for s in mw.shards:
                 s.should_instantiate = s.id.model_name in model_names_to_instantiate

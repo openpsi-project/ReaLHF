@@ -14,8 +14,8 @@ except ModuleNotFoundError:
     mdm_search = None
 
 import realhf.base.constants as constants
-from realhf.api.core.dfg import MFCDef, ModelInterfaceType
-from realhf.api.core.model_api import ModelFamily
+from realhf.api.core.dfg import MFCDef
+from realhf.api.core.config import ModelInterfaceType
 from realhf.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.api.quickstart.search import RPCExecution

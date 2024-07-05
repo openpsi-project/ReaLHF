@@ -4,6 +4,8 @@ import dataclasses
 import keyword
 import os
 from collections import defaultdict
+from pydantic import dataclasses as pdclasses, model_validator, field_validator
+from typing_extensions import Self
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import torch
@@ -11,14 +13,13 @@ import torch.utils.data
 import transformers
 
 import realhf.base.logging as logging
-from realhf.api.core import dfg, system_api
-from realhf.api.core.config import ModelFamily, ModelName
+from realhf.api.core.config import ModelAbstraction, ModelName, ModelWrapperAbstraction, ModelBackendAbstraction, ModelInterfaceAbstraction
 from realhf.base.namedarray import NamedArray
 
-logger = logging.getLogger("model")
+logger = logging.getLogger("model_api")
 
 
-@dataclasses.dataclass
+@pdclasses.dataclass
 class GenerationHyperparameters:
     """Generation hyperparameters.
 
@@ -62,7 +63,7 @@ class GenerationHyperparameters:
     use_cuda_graph: bool = False
 
 
-@dataclasses.dataclass
+@pdclasses.dataclass
 class ReaLModelConfig:
     """Configuration for ReaLModel.
 
@@ -180,11 +181,25 @@ class ReaLModelConfig:
     ### Running configurations. ###
     gradient_accumulation_fusion: bool = False
 
-    def __post_init__(self):
+    @model_validator(mode="after")
+    def _validate_critic_tied_embedding(self) -> Self:
         if self.is_critic and self.tied_embedding:
             raise ValueError("Critic model cannot share embeddings and output weights.")
+        return self
+    
+    @model_validator(mode="after")
+    def _validate_q_head_dim(self) -> Self:
         if self.head_dim is None:
             self.head_dim = self.hidden_dim // self.n_q_heads
+        elif self.head_dim != self.hidden_dim // self.n_q_heads:
+            raise ValueError("Head dimension must be hidden_dim // n_q_heads.")
+        return self
+
+    @field_validator("gradient_accumulation_fusion")
+    @classmethod
+    def _validate_grad_acc_fusion(cls, x) -> bool:
+        # TODO: gradient_accumulation_fusion is not supported currently.
+        return False
 
 
 def load_hf_tokenizer(
@@ -321,16 +336,15 @@ def register_wrapper(name, cls_):
 
 
 def make_model_wrapper(
-    cfg: system_api.ModelWrapper,
+    cfg: ModelWrapperAbstraction,
 ) -> Callable[[Model], Model]:
     cls_ = ALL_WRAPPER_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 
 
 def make_model(
-    cfg: system_api.Model, name: ModelName, device: Union[str, torch.device]
+    cfg: ModelAbstraction, name: ModelName, device: Union[str, torch.device]
 ) -> Model:
-    logger.debug(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
     assert isinstance(model, Model)
@@ -340,12 +354,12 @@ def make_model(
     return model
 
 
-def make_interface(cfg: dfg.ModelInterface) -> ModelInterface:
+def make_interface(cfg: ModelInterfaceAbstraction) -> ModelInterface:
     cls_ = ALL_INTERFACE_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 
 
-def make_backend(cfg: system_api.ModelBackend) -> ModelBackend:
+def make_backend(cfg: ModelBackendAbstraction) -> ModelBackend:
     cls_ = ALL_BACKEND_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 

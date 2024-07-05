@@ -2,14 +2,17 @@ import dataclasses
 from typing import *
 
 import realhf.base.logging as logging
-from realhf.api.core.config import ModelName
-from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType, OffloadHook
-from realhf.api.core.system_api import Dataset
+from realhf.api.core.config import (
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+    ModelName,
+    DatasetAbstraction,
+)
+from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
-from realhf.api.quickstart.model import ModelTrainEvalConfig, get_real_model_config
-from realhf.base.topology import PipeModelDataParallelTopology
+from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
 
 logger = logging.getLogger("DPO Experiment")
@@ -84,8 +87,10 @@ class DPOConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterface("dpo", args=dict(beta=self.beta, enable_save=True))
-        ref_interface = ModelInterface(
+        interface = ModelInterfaceAbstraction(
+            "dpo", args=dict(beta=self.beta, enable_save=True)
+        )
+        ref_interface = ModelInterfaceAbstraction(
             "dpo", args=dict(beta=self.beta, enable_save=False)
         )
         ref_inf = MFCDef(
@@ -132,7 +137,7 @@ class DPOConfig(CommonExperimentConfig):
     @property
     def datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "rw_pair",
                 args=dict(
                     max_length=self.dataset.max_seqlen,

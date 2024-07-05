@@ -2,13 +2,16 @@ import copy
 import dataclasses
 from typing import *
 
-import torch
 
 import realhf.base.logging as logging
-from realhf.api.core.config import ModelName
-from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
+from realhf.api.core.config import (
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+    ModelName,
+    DatasetAbstraction,
+)
+from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
-from realhf.api.core.system_api import Dataset
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import (
     AllocationConfig,
@@ -260,7 +263,7 @@ class PPOConfig(CommonExperimentConfig):
     @property
     def rpcs(self):
         # interfaces
-        actor_interface = ModelInterface(
+        actor_interface = ModelInterfaceAbstraction(
             "ppo_actor",
             args={
                 **copy.deepcopy(self.ppo_kwargs),
@@ -273,11 +276,11 @@ class PPOConfig(CommonExperimentConfig):
         ref_interface = copy.deepcopy(actor_interface)
         ref_interface.args["enable_save"] = False
 
-        critic_interface = ModelInterface(
+        critic_interface = ModelInterfaceAbstraction(
             "ppo_critic",
             args=copy.deepcopy(self.ppo_kwargs),
         )
-        rw_interface = ModelInterface(
+        rw_interface = ModelInterfaceAbstraction(
             "paired_rw",
             args=dict(
                 enable_save=False,
@@ -414,7 +417,7 @@ class PPOConfig(CommonExperimentConfig):
     @property
     def datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "prompt",
                 args=dict(
                     dataset_path=self.dataset.path,

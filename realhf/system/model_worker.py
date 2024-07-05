@@ -93,7 +93,7 @@ class ModelWorker(worker_base.Worker):
         self.__trial_name = self.config.worker_info.trial_name
 
         self.config.model_rpcs, _ = dfg.build_graph(self.config.model_rpcs)
-        self.data2required_rpc_names = self.config.model_rpcs[0].data2required_rpc_names
+        self.data_consumers = self.config.model_rpcs[0].data_consumers
 
         # NOTE: here worker_index is different from peer/ddp rank
         self.__worker_index = cfg.worker_info.worker_index
