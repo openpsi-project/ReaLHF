@@ -1,14 +1,16 @@
 import copy
 import dataclasses
+import math
 from typing import *
 
+import numpy as np
 
 import realhf.base.logging as logging
 from realhf.api.core.config import (
+    DatasetAbstraction,
     ModelInterfaceAbstraction,
     ModelInterfaceType,
     ModelName,
-    DatasetAbstraction,
 )
 from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
@@ -313,9 +315,7 @@ class PPOConfig(CommonExperimentConfig):
             model_type=self.rew.type,
             model_path=self.rew.path,
             input_data=["packed_seq"],
-            input_key_remap={"packed_seq": "packed_input_ids"},
-            output_data=["scores"],
-            output_key_remap={"scores": "rewards"},
+            output_data=["rewards"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
@@ -331,8 +331,7 @@ class PPOConfig(CommonExperimentConfig):
             model_path=self.ref.path,
             interface_impl=ref_interface,
             input_data=inf_ref_inputs,
-            output_data=["logprobs"],
-            output_key_remap={"logprobs": "packed_ref_logprobs"},
+            output_data=["packed_ref_logprobs"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
@@ -343,8 +342,7 @@ class PPOConfig(CommonExperimentConfig):
             model_type=self.critic.type,
             model_path=self.critic.path,
             input_data=["packed_seq", "seq_no_eos_mask"],
-            output_data=["scores"],
-            output_key_remap={"scores": "values"},
+            output_data=["values"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
@@ -445,9 +443,6 @@ class PPOConfig(CommonExperimentConfig):
 
     def _heuristic_rpc_allocation(self):
         """Heurisitc RPC allocation for PPO experiments."""
-        import math
-
-        import numpy as np
 
         assert self.n_gpus_per_node == 8
 

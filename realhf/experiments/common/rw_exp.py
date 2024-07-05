@@ -2,11 +2,11 @@ import dataclasses
 from typing import List, Optional
 
 from realhf.api.core.config import (
+    DataLoaderAbstraction,
+    DatasetAbstraction,
     ModelInterfaceAbstraction,
     ModelInterfaceType,
     ModelName,
-    DataLoaderAbstraction,
-    DatasetAbstraction,
 )
 from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig

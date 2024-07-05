@@ -379,8 +379,6 @@ async def scatter_tensor_to_mws(
         "producer_mappings": producer_mappings,
         "target_mapping": target_mapping,
         "handle_name": rpc.interface_type.value,
-        "input_key_remap": rpc.input_key_remap,
-        "output_key_remap": rpc.output_key_remap,
         "rpc_name": rpc.name,
         "buffer_indices": buffer_indices,
         "seqlens": seqlens,
@@ -545,8 +543,6 @@ async def model_rpc_request_func(
         for dp_idx, (st, ed) in enumerate(partitions):
             for i in range(st, ed):
                 for k in rpc.output_data:
-                    if k in rpc.output_key_remap:
-                        k = rpc.output_key_remap[k]
                     data_owner[sample.indices[i], k] = (rpc.model_name, dp_idx)
 
         # Get the data owner of this RPC's input data.
@@ -637,10 +633,7 @@ async def model_rpc_reply_func(
         ):
             res = []
             for k in responses[0].data["keys"]:
-                if k in rpc.output_key_remap:
-                    res.append(rpc.output_key_remap[k])
-                else:
-                    res.append(k)
+                res.append(k)
         else:
             res = _gather_stat([response.data for response in responses])
 

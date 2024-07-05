@@ -1,7 +1,11 @@
 import collections
 from typing import *
 
-from realhf.api.core.config import ModelBackendAbstraction, ModelInterfaceType, ModelName
+from realhf.api.core.config import (
+    ModelBackendAbstraction,
+    ModelInterfaceType,
+    ModelName,
+)
 from realhf.api.core.dfg import OffloadHook, SyncParamHook
 from realhf.api.quickstart.device_mesh import RPCAllocation
 from realhf.api.quickstart.model import (

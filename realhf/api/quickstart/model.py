@@ -1,15 +1,19 @@
-# Importing dataclasses is intended. 
-# Hydra does not recognize pydantic.Field, 
+# Importing dataclasses is intended.
+# Hydra does not recognize pydantic.Field,
 # but it does recognize dataclasses.field.
 import dataclasses
 from typing import *
 
 from pydantic import dataclasses as pdclasses
-from pydantic import model_validator,field_validator
+from pydantic import field_validator, model_validator
 from typing_extensions import Self
 
 import realhf.base.logging as logging
-from realhf.api.core.config import ModelAbstraction, ModelFamily, ModelWrapperAbstraction
+from realhf.api.core.config import (
+    ModelAbstraction,
+    ModelFamily,
+    ModelWrapperAbstraction,
+)
 
 logger = logging.getLogger("Quickstart Model Config")
 

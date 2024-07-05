@@ -3,10 +3,10 @@ from typing import *
 
 import realhf.base.logging as logging
 from realhf.api.core.config import (
+    DatasetAbstraction,
     ModelInterfaceAbstraction,
     ModelInterfaceType,
     ModelName,
-    DatasetAbstraction,
 )
 from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig

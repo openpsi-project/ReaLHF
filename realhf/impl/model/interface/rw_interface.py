@@ -99,7 +99,7 @@ class PairedRewardInterface(model_api.ModelInterface):
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
         data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data["packed_input_ids"]
+        packed_input_ids: torch.Tensor = data["packed_seq"]
         seqlens_cpu = data.metadata["seqlens"]
         max_seqlen = max(seqlens_cpu)
         cu_seqlens = torch.nn.functional.pad(
@@ -135,7 +135,7 @@ class PairedRewardInterface(model_api.ModelInterface):
         #     )
         #####################################################
 
-        res = from_dict(dict(scores=scores))
+        res = from_dict(dict(rewards=scores))
         res.register_metadata(**data.metadata)
         return res
 

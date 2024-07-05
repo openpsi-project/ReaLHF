@@ -9,10 +9,9 @@ import os
 import sys
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
+import realhf.api.core.config as config_api
 import realhf.api.core.dfg as dfg
 import realhf.base.topology as topology
-import realhf.api.core.config as config_api
-
 from realhf.base.cluster import spec as cluster_spec
 from realhf.base.constants import DATASET_CACHE_PATH
 
@@ -126,7 +125,9 @@ class ModelWorker:
     cuda_cache_clear_freq: int = 10
     # model_topos and worker_info will be configured automatically
     model_rpcs: List[dfg.MFCDef] = None
-    model_topos: Dict[config_api.ModelName, topology.PipeModelDataParallelTopology] = None
+    model_topos: Dict[config_api.ModelName, topology.PipeModelDataParallelTopology] = (
+        None
+    )
     msid2mwid: Dict[config_api.ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
@@ -248,7 +249,9 @@ class ExperimentConfig:
                 )
         ############### Sanity check of model names ###############
 
-        model_topos: Dict[config_api.ModelName, topology.PipeModelDataParallelTopology] = {}
+        model_topos: Dict[
+            config_api.ModelName, topology.PipeModelDataParallelTopology
+        ] = {}
         model_configs: Dict[config_api.ModelName, config_api.ModelAbstraction] = {}
         for model_name in model_names:
             _this_mws = list(
@@ -281,7 +284,9 @@ class ExperimentConfig:
                 )
             ##### Sanity check of parallelism ranks. #####
 
-        data_transfer_pairs: List[Tuple[config_api.ModelName, config_api.ModelName]] = []
+        data_transfer_pairs: List[Tuple[config_api.ModelName, config_api.ModelName]] = (
+            []
+        )
         _rpc_nodes, edges = dfg.build_graph(self.model_rpcs, verbose=True)
         for i in range(len(self.model_rpcs)):
             for j in range(len(self.model_rpcs)):
@@ -399,7 +404,8 @@ class ExperimentConfig:
         model_names_to_instantiate = []
         for role in _roles:
             _trainable_this_role = [
-                _model_is_trainable[config_api.ModelName(role, i)] for i in range(_role_cnt[role])
+                _model_is_trainable[config_api.ModelName(role, i)]
+                for i in range(_role_cnt[role])
             ]
             if _role_cnt[role] == 1 or not any(_trainable_this_role):
                 model_names_to_instantiate.append(config_api.ModelName(role, 0))
@@ -407,7 +413,9 @@ class ExperimentConfig:
             if any(_trainable_this_role):
                 assert sum(_trainable_this_role) == 1
                 _trainable_idx = _trainable_this_role.index(True)
-                model_names_to_instantiate.append(config_api.ModelName(role, _trainable_idx))
+                model_names_to_instantiate.append(
+                    config_api.ModelName(role, _trainable_idx)
+                )
         for mw in self.model_worker:
             for s in mw.shards:
                 s.should_instantiate = s.id.model_name in model_names_to_instantiate

@@ -11,8 +11,8 @@ from omegaconf import MISSING
 
 import realhf.base.logging as logging
 from realhf.api.core.config import (
-    DatasetAbstraction,
     DataLoaderAbstraction,
+    DatasetAbstraction,
     ModelName,
     ModelShardID,
     StandaloneModelShardAbstraction,

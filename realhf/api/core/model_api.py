@@ -4,16 +4,23 @@ import dataclasses
 import keyword
 import os
 from collections import defaultdict
-from pydantic import dataclasses as pdclasses, model_validator, field_validator
-from typing_extensions import Self
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import torch
 import torch.utils.data
 import transformers
+from pydantic import dataclasses as pdclasses
+from pydantic import field_validator, model_validator
+from typing_extensions import Self
 
 import realhf.base.logging as logging
-from realhf.api.core.config import ModelAbstraction, ModelName, ModelWrapperAbstraction, ModelBackendAbstraction, ModelInterfaceAbstraction
+from realhf.api.core.config import (
+    ModelAbstraction,
+    ModelBackendAbstraction,
+    ModelInterfaceAbstraction,
+    ModelName,
+    ModelWrapperAbstraction,
+)
 from realhf.base.namedarray import NamedArray
 
 logger = logging.getLogger("model_api")
@@ -186,7 +193,7 @@ class ReaLModelConfig:
         if self.is_critic and self.tied_embedding:
             raise ValueError("Critic model cannot share embeddings and output weights.")
         return self
-    
+
     @model_validator(mode="after")
     def _validate_q_head_dim(self) -> Self:
         if self.head_dim is None:

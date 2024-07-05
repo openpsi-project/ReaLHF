@@ -1,6 +1,5 @@
 import dataclasses
 
-
 from realhf.api.core.config import (
     DatasetAbstraction,
     ModelInterfaceAbstraction,

@@ -8,11 +8,7 @@ from pydantic import dataclasses as pdclasses
 
 import realhf.base.logging as logging
 import realhf.base.namedarray as namedarray
-from realhf.api.core.config import (
-    ModelFamily,
-    ModelInterfaceType,
-    ModelName,
-)
+from realhf.api.core.config import ModelFamily, ModelInterfaceType, ModelName
 
 logger = logging.getLogger("DataFlowGraph", "benchmark")
 
@@ -59,15 +55,6 @@ class MFCNode:
     :type model_name: str or ModelName
     :param input_keys: Input data keys, used to resolve dependencies.
     :type input_keys: Tuple
-    :param input_key_remap: Remap input keys to let the interface implementation
-        recognize them. Keys are ``input_keys`` and values are the identifiers known to the
-        interface.
-    :type input_key_remap: Dict[str, str]
-    :param output_keys: Output data keys, used to resolve dependencies.
-    :type output_keys: Tuple
-    :param output_key_remap: Remap output keys to let MFC recognize them.
-        Keys are identifiers known to the interface and values are ``output_keys``.
-    :type output_key_remap: Dict[str, str]
     :param balanced_dp: Whether to balance the data parallelism such that
         each DP rank will get exactly n_seqs // dp_size sequences.
         If set to False, ReaL will do partition according to the number of tokens.

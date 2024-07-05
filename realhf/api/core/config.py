@@ -39,6 +39,7 @@ class ModelBackendAbstraction:
     type_: str
     args: Dict[str, Any] = Field(default_factory=dict)
 
+
 @pdclasses.dataclass
 class ModelInterfaceAbstraction:
     type_: str  # This type is the
@@ -50,6 +51,7 @@ class ModelInterfaceType(enum.Enum):
     TRAIN_STEP = "train_step"
     EVALUATE = "evaluate"
     INFERENCE = "inference"
+
 
 @pdclasses.dataclass(order=True, frozen=True)
 class ModelName:
@@ -156,6 +158,3 @@ class StandaloneModelShardAbstraction:
         "packed_eval", args=dict(batch_size=128)
     )
     should_instantiate: bool = True
-
-
-
