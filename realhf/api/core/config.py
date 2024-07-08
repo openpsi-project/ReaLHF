@@ -51,7 +51,7 @@ class ModelInterfaceType(enum.Enum):
     INFERENCE = "inference"
 
 
-@dataclasses.dataclass(order=True, frozen=True)
+@dataclasses.dataclass(unsafe_hash=True, order=True, frozen=True)
 class ModelName:
     """A unique identifier for a model.
 
@@ -71,7 +71,7 @@ class ModelName:
         return str(self)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(unsafe_hash=True)
 class ModelFamily:
     """An identifier for the HF model type, e.g., llama, gpt2, etc.
 
@@ -98,7 +98,7 @@ class ModelFamily:
         return s
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class ModelShardID:
     model_name: ModelName
     dp_rank: int
@@ -109,12 +109,12 @@ class ModelShardID:
     )
 
     def __post_init__(self):
-        cond = self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
-        cond &= self.dp_rank < self.topo.get_dim("data")
-        cond &= self.mp_rank < self.topo.get_dim("model")
-        cond &= self.pp_rank < self.topo.get_dim("pipe")
-        if not cond:
-            raise ValueError(f"Invalid ranks and topo: {self}, {self.topo}.")
+        assert self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
+        if "@" in self.model_name.role:
+            raise ValueError("model_name cannot contain @")
+        assert self.dp_rank < self.topo.get_dim("data")
+        assert self.mp_rank < self.topo.get_dim("model")
+        assert self.pp_rank < self.topo.get_dim("pipe")
 
     @property
     def parallelism_rank(self):

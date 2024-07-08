@@ -13,7 +13,7 @@ from realhf.api.core.config import (
 logger = logging.getLogger("Quickstart Model Config")
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(unsafe_hash=True)
 class ParallelismConfig:
     """Model 3D parallelism configuration.
 
@@ -40,7 +40,6 @@ class ParallelismConfig:
             or self.model_parallel_size < 1
         ):
             raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
-
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
@@ -107,6 +106,14 @@ class OptimizerConfig:
     )
     warmup_steps_proportion: float = 0.02
     offload: bool = False
+
+    def __post_init__(self):
+        if self.min_lr_ratio < 0.0 or self.min_lr_ratio > 1.0:
+            raise ValueError(f"Invalid min_lr_ratio: {self.min_lr_ratio}")
+        if self.warmup_steps_proportion < 0.0 or self.warmup_steps_proportion > 1.0:
+            raise ValueError(
+                f"Invalid warmup_steps_proportion: {self.warmup_steps_proportion}"
+            )
 
 
 @dataclasses.dataclass
@@ -181,10 +188,8 @@ class ModelTrainEvalConfig:
     def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-
         if (self.offload or self.optimizer.offload) and self.backend != "deepspeed":
             raise ValueError("offload is only valid for the deepspeed backend.")
-
         if self.backend == "megatron" and self.zero_stage in [1, 3]:
             raise ValueError("The Megatron backend only supports zero stage 0 or 2.")
 
