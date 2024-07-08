@@ -66,20 +66,21 @@ class RWConfig(CommonExperimentConfig):
     def rpcs(self):
         interface = ModelInterfaceAbstraction("paired_rw")
         rpc = MFCDef(
+            name="rwTrain",
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
             model_type=self.model.type,
             model_path=self.model.path,
-            input_data=["packed_input_ids", "group_factor", "pos_input_lens"],
+            input_keys=["packed_input_ids", "group_factor", "pos_input_lens"],
             log_return_value=True,
             n_seqs=self.dataset.train_bs_n_seqs,
         )
-        return {"default": rpc}
+        return {"rwTrain": rpc}
 
     @property
     def allocations(self):
-        return {"default": self.allocation}
+        return {"rwTrain": self.allocation}
 
     @property
     def datasets(self):
