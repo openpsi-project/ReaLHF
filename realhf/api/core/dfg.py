@@ -1,10 +1,11 @@
 import collections
-from typing import *
 import dataclasses
+from typing import *
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+
 import realhf.base.logging as logging
 from realhf.api.core.config import (
     ModelFamily,
@@ -249,7 +250,9 @@ def build_graph(
 
     # Store useful metadata
     _G.graph["data_producers"] = {k: v.model_name for k, v in data_producers.items()}
-    _G.graph["data_consumers"] = {k: [v.model_name for v in vs] for k, vs in data_consumers.items()}
+    _G.graph["data_consumers"] = {
+        k: [v.model_name for v in vs] for k, vs in data_consumers.items()
+    }
 
     max_min_flow_seqs = {}
     for node in nodes:

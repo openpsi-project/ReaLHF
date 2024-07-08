@@ -1,6 +1,6 @@
+import dataclasses
 import enum
 from typing import *
-import dataclasses
 
 from typing_extensions import Self
 
@@ -149,6 +149,7 @@ class ModelShardID:
                 and self.pp_rank == other.pp_rank
             )
         return False
+
 
 @dataclasses.dataclass
 class StandaloneModelShardAbstraction:
