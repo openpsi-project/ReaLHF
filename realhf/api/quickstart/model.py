@@ -1,11 +1,6 @@
-# Importing dataclasses is intended.
-# Hydra does not recognize pydantic.Field,
-# but it does recognize dataclasses.field.
 import dataclasses
 from typing import *
 
-from pydantic import dataclasses as pdclasses
-from pydantic import field_validator, model_validator
 from typing_extensions import Self
 
 import realhf.base.logging as logging
@@ -18,7 +13,7 @@ from realhf.api.core.config import (
 logger = logging.getLogger("Quickstart Model Config")
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class ParallelismConfig:
     """Model 3D parallelism configuration.
 
@@ -38,22 +33,17 @@ class ParallelismConfig:
     data_parallel_size: int = 1
     use_sequence_parallel: bool = False
 
-    @model_validator(mode="after")
-    def _validate_parallelism(self) -> Self:
+    def __post_init__(self):
         if (
             self.pipeline_parallel_size < 1
             or self.data_parallel_size < 1
             or self.model_parallel_size < 1
         ):
             raise ValueError("pp_size, mp_size and dp_size must be positive integers.")
-        return self
 
-    @model_validator(mode="after")
-    def _validata_sequence_parallel(self) -> Self:
         if self.use_sequence_parallel and self.model_parallel_size <= 1:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
-        return self
 
     def __str__(self):
         return (
@@ -63,13 +53,13 @@ class ParallelismConfig:
         )
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class LoRAConfig:
     dim: int = 32
     scaling: float = 32.0
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class OptimizerConfig:
     """Optimizer configuration.
 
@@ -118,22 +108,8 @@ class OptimizerConfig:
     warmup_steps_proportion: float = 0.02
     offload: bool = False
 
-    @field_validator("min_lr_ratio")
-    @classmethod
-    def _validate_min_lr_ratio(cls, value: float) -> float:
-        if value < 0.0 or value > 1.0:
-            raise ValueError(f"Invalid min_lr_ratio: {value}")
-        return value
 
-    @field_validator("warmup_steps_proportion")
-    @classmethod
-    def _validate_warmup_steps_proportion(cls, value: float) -> float:
-        if value < 0.0 or value > 1.0:
-            raise ValueError(f"Invalid warmup_steps_proportion: {value}")
-        return value
-
-
-@pdclasses.dataclass
+@dataclasses.dataclass
 class ModelTrainEvalConfig:
     """
     Model (or LLM) runtime configuration in ReaL.
@@ -202,23 +178,15 @@ class ModelTrainEvalConfig:
     )
     init_critic_from_actor: bool = False
 
-    @model_validator(mode="after")
-    def _validate_fp16_bf16(self) -> Self:
+    def __post_init__(self):
         if self.enable_bf16 and self.enable_fp16:
             raise ValueError("enable_bf16 and enable_fp16 cannot be both True.")
-        return self
 
-    @model_validator(mode="after")
-    def _validate_offload(self) -> Self:
         if (self.offload or self.optimizer.offload) and self.backend != "deepspeed":
             raise ValueError("offload is only valid for the deepspeed backend.")
-        return self
 
-    @model_validator(mode="after")
-    def _validate_megatron_zero_stage(self) -> Self:
         if self.backend == "megatron" and self.zero_stage in [1, 3]:
             raise ValueError("The Megatron backend only supports zero stage 0 or 2.")
-        return self
 
 
 def get_real_model_config(

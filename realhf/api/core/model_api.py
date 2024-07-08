@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 import torch
 import torch.utils.data
 import transformers
-from pydantic import dataclasses as pdclasses
-from pydantic import field_validator, model_validator
 from typing_extensions import Self
 
 import realhf.base.logging as logging
@@ -26,7 +24,7 @@ from realhf.base.namedarray import NamedArray
 logger = logging.getLogger("model_api")
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class GenerationHyperparameters:
     """Generation hyperparameters.
 
@@ -70,7 +68,7 @@ class GenerationHyperparameters:
     use_cuda_graph: bool = False
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class ReaLModelConfig:
     """Configuration for ReaLModel.
 
@@ -188,25 +186,14 @@ class ReaLModelConfig:
     ### Running configurations. ###
     gradient_accumulation_fusion: bool = False
 
-    @model_validator(mode="after")
-    def _validate_critic_tied_embedding(self) -> Self:
+    def __post_init__(self):
         if self.is_critic and self.tied_embedding:
             raise ValueError("Critic model cannot share embeddings and output weights.")
-        return self
-
-    @model_validator(mode="after")
-    def _validate_q_head_dim(self) -> Self:
         if self.head_dim is None:
             self.head_dim = self.hidden_dim // self.n_q_heads
         elif self.head_dim != self.hidden_dim // self.n_q_heads:
             raise ValueError("Head dimension must be hidden_dim // n_q_heads.")
         return self
-
-    @field_validator("gradient_accumulation_fusion")
-    @classmethod
-    def _validate_grad_acc_fusion(cls, x) -> bool:
-        # TODO: gradient_accumulation_fusion is not supported currently.
-        return False
 
 
 def load_hf_tokenizer(

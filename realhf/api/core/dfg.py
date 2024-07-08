@@ -1,14 +1,10 @@
 import collections
 from typing import *
+import dataclasses
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-from omegaconf import DictConfig
-from pydantic import Field
-from pydantic import dataclasses as pdclasses
-from pydantic import field_validator, validate_call
-
 import realhf.base.logging as logging
 from realhf.api.core.config import (
     ModelFamily,
@@ -20,12 +16,12 @@ from realhf.api.core.config import (
 logger = logging.getLogger("DataFlowGraph", "benchmark")
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class OffloadHook:
     pass
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class SyncParamHook:
     source: Optional[ModelName] = None
     target: Optional[ModelName] = None
@@ -35,7 +31,7 @@ class SyncParamHook:
 RPCHook = Union[OffloadHook, SyncParamHook]
 
 
-@pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
+@dataclasses.dataclass
 class MFCDef:
     """A model function call (MFC) object used by the workers.
 
@@ -45,7 +41,7 @@ class MFCDef:
     This object will be inserted in a nx.DiGraph as nodes.
     Edges will be automatically resolved by input/output keys.
 
-    Fields starting with an underscore will be filled automatically.
+    dataclasses.fields starting with an underscore will be filled automatically.
 
     :param name: The unique identifier of this model function call.
     :type name: str
@@ -92,8 +88,8 @@ class MFCDef:
     model_name: str | ModelName
 
     # Input and output keys, used to resolve dependencies.
-    input_keys: Tuple = Field(default_factory=tuple)
-    output_keys: Tuple = Field(default_factory=tuple)
+    input_keys: Tuple = dataclasses.field(default_factory=tuple)
+    output_keys: Tuple = dataclasses.field(default_factory=tuple)
 
     balanced_dp: bool = False
     log_return_value: bool = False
@@ -102,28 +98,20 @@ class MFCDef:
     model_type: Optional[Any | ModelFamily] = None
     model_path: Optional[str] = None
 
-    # Reserved fields. Should not be set by the user.
+    # Reserved dataclasses.fields. Should not be set by the user.
     _G: nx.DiGraph = None
-    _pre_hooks: List[RPCHook] = Field(default_factory=lambda: [])
-    _post_hooks: List[RPCHook] = Field(default_factory=lambda: [])
+    _pre_hooks: List[RPCHook] = dataclasses.field(default_factory=lambda: [])
+    _post_hooks: List[RPCHook] = dataclasses.field(default_factory=lambda: [])
+
+    def __post_init__(self):
+        if isinstance(self.model_name, str):
+            self.model_name = ModelName(role=self.model_name, replica_id=0)
 
     def __repr__(self):
         return f"MFCDef[{self.name}]"
 
-    @field_validator("model_name")
-    @classmethod
-    def _validate_model_name(cls, v) -> ModelName:
-        if isinstance(v, ModelName):
-            return v
-        return ModelName(role=v, replica_id=0)
-
-    @field_validator("model_type")
-    @classmethod
-    def _validate_model_type(cls, v) -> ModelFamily:
-        if isinstance(v, ModelFamily):
-            return v
-        if isinstance(v, DictConfig):
-            return ModelFamily(**v)
+    def __hash__(self):
+        return hash(self.name)
 
     @property
     def role(self):
@@ -217,7 +205,6 @@ def _draw_topo_sorted_digraph(G: nx.DiGraph, graph_path: str):
     plt.savefig(graph_path, dpi=300)
 
 
-@validate_call
 def build_graph(
     nodes: List[MFCDef],
     verbose: bool = False,
@@ -261,8 +248,8 @@ def build_graph(
         raise ValueError("There are replicated nodes in the graph!")
 
     # Store useful metadata
-    _G.graph["data_producers"] = data_producers
-    _G.graph["data_consumers"] = data_consumers
+    _G.graph["data_producers"] = {k: v.model_name for k, v in data_producers.items()}
+    _G.graph["data_consumers"] = {k: [v.model_name for v in vs] for k, vs in data_consumers.items()}
 
     max_min_flow_seqs = {}
     for node in nodes:

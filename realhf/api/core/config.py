@@ -1,49 +1,47 @@
 import enum
 from typing import *
+import dataclasses
 
-from pydantic import Field
-from pydantic import dataclasses as pdclasses
-from pydantic import model_validator
 from typing_extensions import Self
 
 import realhf.base.topology as topology
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class DatasetAbstraction:
     type_: str
-    args: Dict[str, Any] = Field(default_factory=dict)
+    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class DataLoaderAbstraction:
     type_: str = "default"
-    args: Dict[str, Any] = Field(default_factory=dict)
+    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class ModelWrapperAbstraction:
     type_: str
-    args: Dict[str, Any] = Field(default_factory=dict)
+    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class ModelAbstraction:
     type_: str
-    args: Dict[str, Any] = Field(default_factory=dict)
-    wrappers: List[ModelWrapperAbstraction] = Field(default_factory=list)
+    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    wrappers: List[ModelWrapperAbstraction] = dataclasses.field(default_factory=list)
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class ModelBackendAbstraction:
     type_: str
-    args: Dict[str, Any] = Field(default_factory=dict)
+    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-@pdclasses.dataclass
+@dataclasses.dataclass
 class ModelInterfaceAbstraction:
     type_: str  # This type is the
-    args: Dict[str, Any] = Field(default_factory=dict)
+    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 class ModelInterfaceType(enum.Enum):
@@ -53,7 +51,7 @@ class ModelInterfaceType(enum.Enum):
     INFERENCE = "inference"
 
 
-@pdclasses.dataclass(order=True, frozen=True)
+@dataclasses.dataclass(order=True, frozen=True)
 class ModelName:
     """A unique identifier for a model.
 
@@ -72,14 +70,8 @@ class ModelName:
     def name(self):
         return str(self)
 
-    @model_validator(mode="after")
-    def _validate_role(self) -> Self:
-        if "@" in self.role:
-            raise ValueError("role cannot contain @")
-        return self
 
-
-@pdclasses.dataclass
+@dataclasses.dataclass
 class ModelFamily:
     """An identifier for the HF model type, e.g., llama, gpt2, etc.
 
@@ -106,37 +98,23 @@ class ModelFamily:
         return s
 
 
-@pdclasses.dataclass(frozen=True, config=dict(arbitrary_types_allowed=True))
+@dataclasses.dataclass(frozen=True)
 class ModelShardID:
     model_name: ModelName
     dp_rank: int
     mp_rank: int
     pp_rank: int
-    topo: topology.PipeModelDataParallelTopology = Field(
+    topo: topology.PipeModelDataParallelTopology = dataclasses.field(
         default_factory=lambda: topology.PipeModelDataParallelTopology(1, 1, 1)
     )
 
-    @model_validator(mode="after")
-    def _validate_topo_ranks(self) -> Self:
+    def __post_init__(self):
         cond = self.dp_rank >= 0 and self.mp_rank >= 0 and self.pp_rank >= 0
         cond &= self.dp_rank < self.topo.get_dim("data")
         cond &= self.mp_rank < self.topo.get_dim("model")
         cond &= self.pp_rank < self.topo.get_dim("pipe")
         if not cond:
             raise ValueError(f"Invalid ranks and topo: {self}, {self.topo}.")
-        return self
-
-    def __hash__(self):
-        return hash(
-            (
-                self.model_name,
-                self.dp_rank,
-                self.mp_rank,
-                self.pp_rank,
-                tuple(self.topo.axes),
-                tuple(self.topo.dims),
-            )
-        )
 
     @property
     def parallelism_rank(self):
@@ -158,8 +136,21 @@ class ModelShardID:
     def __repr__(self):
         return f"{self.model_name}@pp{self.pp_rank:02d}@mp{self.mp_rank:02d}@dp{self.dp_rank:02d}"
 
+    def __hash__(self):
+        return hash(str(self))
 
-@pdclasses.dataclass
+    def __eq__(self, other):
+        # Compare the key attribute for equality
+        if isinstance(other, ModelShardID):
+            return (
+                self.model_name == other.model_name
+                and self.dp_rank == other.dp_rank
+                and self.mp_rank == other.mp_rank
+                and self.pp_rank == other.pp_rank
+            )
+        return False
+
+@dataclasses.dataclass
 class StandaloneModelShardAbstraction:
     id: ModelShardID
     model: ModelAbstraction

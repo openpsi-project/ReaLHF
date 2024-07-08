@@ -94,26 +94,28 @@ class DPOConfig(CommonExperimentConfig):
             "dpo", args=dict(beta=self.beta, enable_save=False)
         )
         ref_inf = MFCDef(
+            name="ref_inf",
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
             model_type=self.ref.type,
             model_path=self.ref.path,
-            input_data=[
+            input_keys=[
                 "packed_input_ids",
                 "pos_input_lens",
                 "prompt_lens",
             ],
-            output_data=["seqlogp"],
+            output_keys=["seqlogp"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
         dpo = MFCDef(
+            name="actor_train",
             model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
             model_type=self.actor.type,
             model_path=self.actor.path,
-            input_data=[
+            input_keys=[
                 "packed_input_ids",
                 "pos_input_lens",
                 "seqlogp",
@@ -123,14 +125,14 @@ class DPOConfig(CommonExperimentConfig):
             n_seqs=self.dataset.train_bs_n_seqs,
         )
         return {
-            "dpo": dpo,
+            "actor_train": dpo,
             "ref_inf": ref_inf,
         }
 
     @property
     def allocations(self):
         return {
-            "dpo": self.actor_train,
+            "actor_train": self.actor_train,
             "ref_inf": self.ref_inf,
         }
 

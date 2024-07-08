@@ -391,8 +391,11 @@ class ExperimentConfig:
         self, model_names: List[ModelName]
     ) -> List[Tuple[ModelName, ModelName]]:
         data_transfer_pairs: List[Tuple[ModelName, ModelName]] = []
-        for edge in self.model_rpcs[0]._G.edges():
-            data_transfer_pairs.append(edge[0], edge[1])
+        G = self.model_rpcs[0]._G
+        for edge in G.edges():
+            mn1 = G.nodes[edge[0]]["object"].model_name
+            mn2 = G.nodes[edge[1]]["object"].model_name
+            data_transfer_pairs.append((mn1, mn2))
         src_rpcs = [rpc for rpc in self.model_rpcs if rpc.is_src]
         data_src_rpc = src_rpcs[0]
         for r in src_rpcs[1:]:
@@ -476,33 +479,24 @@ class ExperimentConfig:
         self, model_names: List[ModelName]
     ) -> List[ModelName]:
         # Mark which shard of the same role should be instantiated.
-        role_is_trainable = {}
-        role_trainable_idx = {}
         roles = [model_name.role for model_name in model_names]
+        role_is_trainable = {role: False for role in roles}
+        role_trainable_idx = {}
+        role_cnt = {}
         for role in roles:
-            train_rpcs = [
-                rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
-                for rpc in self.model_rpcs
-                if rpc.role == role
-            ]
-            if train_rpcs:
-                if len(train_rpcs) > 1:
-                    raise ValueError(
-                        f"Multiple train_step for the same role {role} is not allowed."
-                    )
-                role_is_trainable[role] = True
-                role_trainable_idx[role] = next(
-                    i
-                    for i, rpc in enumerate(self.model_rpcs)
-                    if rpc.role == role
-                    and rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
-                )
-            else:
-                role_is_trainable[role] = False
-
-        role_cnt = {
-            role: len([mn.role == role for mn in model_names]) for role in roles
-        }
+            cnt = 0
+            for rpc in self.model_rpcs:
+                if rpc.role != role:
+                    continue
+                if rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP:
+                    if role_is_trainable[role]:
+                        raise ValueError(
+                            f"Multiple train_step for the same role {role} is not allowed."
+                        )
+                    role_is_trainable[role] = True
+                    role_trainable_idx[role] = cnt
+                cnt += 1
+            role_cnt[role] = cnt
 
         model_names_to_instantiate = []
         for role in roles:
