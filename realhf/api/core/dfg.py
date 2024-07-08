@@ -4,7 +4,6 @@ from typing import *
 
 import matplotlib.pyplot as plt
 import networkx as nx
-import numpy as np
 
 import realhf.base.logging as logging
 from realhf.api.core.config import (
@@ -42,7 +41,7 @@ class MFCDef:
     This object will be inserted in a nx.DiGraph as nodes.
     Edges will be automatically resolved by input/output keys.
 
-    dataclasses.fields starting with an underscore will be filled automatically.
+    Fields starting with an underscore will be filled automatically.
 
     :param name: The unique identifier of this model function call.
     :type name: str
@@ -51,6 +50,9 @@ class MFCDef:
     :param interface_type: The interface type to be used
         by the node (e.g., generate, train_step).
     :type interface_type: ModelInterfaceType
+    :param interface_impl: The actual interface implementation
+        when running the this node.
+    :type interface_impl: ModelInterface
     :param model_name: The model identifier to be used by the node,
         corresponding to an unique LLM. The user-provided model name
         can just be a string. The replica ID will be resolved in ReaL.

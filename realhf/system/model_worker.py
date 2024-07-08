@@ -951,7 +951,6 @@ class ModelWorker(worker_base.Worker):
         # are handled in different but intersected sets of model workers.
         # E.g., If we have a request A and a request B, the execution order will be
         # A.pre_hook -> B.pre_hook -> A -> B -> A.post_hook -> B.post_hook.
-        # FIXME: two param sync hook for the same model will cause an error.
         self.__handle_all_pre_hooks()
         for _ in range(16):
             try:

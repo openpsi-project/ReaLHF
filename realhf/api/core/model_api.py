@@ -1,15 +1,11 @@
 import abc
-import copy
 import dataclasses
 import keyword
-import os
-from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import *
 
 import torch
 import torch.utils.data
 import transformers
-from typing_extensions import Self
 
 import realhf.base.logging as logging
 from realhf.api.core.config import (

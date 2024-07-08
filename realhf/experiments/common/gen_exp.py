@@ -55,21 +55,22 @@ class GenerationConfig(CommonExperimentConfig):
             "generation", args={"generation_config": self.gen}
         )
         gen = MFCDef(
+            name="gen",
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.model,
             model_path=self.model,
             interface_impl=interface,
-            input_data=["packed_prompts"],
+            input_keys=["packed_prompts"],
             balanced_dp=True,
             log_return_value=True,
             n_seqs=self.dataset.train_bs_n_seqs,
         )
-        return {"default": gen}
+        return {"gen": gen}
 
     @property
     def allocations(self):
-        return {"default": self.allocation}
+        return {"gen": self.allocation}
 
     @property
     def max_prompt_len(self):
@@ -87,10 +88,6 @@ class GenerationConfig(CommonExperimentConfig):
                 ),
             )
         ]
-
-    @property
-    def allocations(self):
-        return {"default": self.allocation}
 
     @property
     def tokenizer_name_or_path(self):

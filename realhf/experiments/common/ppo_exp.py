@@ -21,7 +21,6 @@ from realhf.api.quickstart.device_mesh import (
 )
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
-from realhf.base.topology import PipeModelDataParallelTopology
 from realhf.experiments.common.common import CommonExperimentConfig
 
 logger = logging.getLogger("PPO exp", "colored")

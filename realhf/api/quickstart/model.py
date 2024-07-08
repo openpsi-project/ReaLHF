@@ -1,8 +1,6 @@
 import dataclasses
 from typing import *
 
-from typing_extensions import Self
-
 import realhf.base.logging as logging
 from realhf.api.core.config import (
     ModelAbstraction,
