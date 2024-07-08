@@ -164,11 +164,11 @@ class MFCDef:
 
     @property
     def parents(self) -> List["MFCDef"]:
-        return [self._G.nodes[x]['object'] for x in self._G.predecessors(self.name)]
+        return [self._G.nodes[x]["object"] for x in self._G.predecessors(self.name)]
 
     @property
     def children(self) -> List["MFCDef"]:
-        return [self._G.nodes[x]['object'] for x in self._G.successors(self.name)]
+        return [self._G.nodes[x]["object"] for x in self._G.successors(self.name)]
 
     @property
     def is_dst_of_model_role(self):
@@ -266,7 +266,9 @@ def build_graph(
 
     max_min_flow_seqs = {}
     for node in nodes:
-        max_min_flow_seqs[node.name] = max([r.n_seqs for r in nodes if r.role == node.role])
+        max_min_flow_seqs[node.name] = max(
+            [r.n_seqs for r in nodes if r.role == node.role]
+        )
     _G.graph["max_min_flow_seqs"] = max_min_flow_seqs
 
     return _G

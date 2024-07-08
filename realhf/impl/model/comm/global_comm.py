@@ -28,16 +28,12 @@ def filter_match_mwids(
 ) -> List[int]:
     if len(conditions) == 0:
         mwids_this_model = [
-            msid2mwid[
-                ModelShardID.from_parallelism_rank(model_name, topo, j)
-            ]
+            msid2mwid[ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
-            msid2mwid[
-                ModelShardID.from_parallelism_rank(model_name, topo, j)
-            ]
+            msid2mwid[ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in topo.filter_match(**conditions)
         ]
     mwids_this_model = sorted(mwids_this_model)

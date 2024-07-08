@@ -9,16 +9,16 @@ import os
 import sys
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
+import realhf.api.core.dfg as dfg
+import realhf.base.topology as topology
 from realhf.api.core.config import (
+    DataLoaderAbstraction,
+    DatasetAbstraction,
+    ModelAbstraction,
     ModelName,
     ModelShardID,
     StandaloneModelShardAbstraction,
-    DatasetAbstraction,
-    DataLoaderAbstraction,
-    ModelAbstraction,
 )
-import realhf.api.core.dfg as dfg
-import realhf.base.topology as topology
 from realhf.base.cluster import spec as cluster_spec
 from realhf.base.constants import DATASET_CACHE_PATH
 

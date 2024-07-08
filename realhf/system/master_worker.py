@@ -5,6 +5,7 @@ import dataclasses
 import getpass
 import itertools
 import os
+import pprint
 import re
 import time
 import uuid
@@ -270,6 +271,7 @@ class RPCCorountineControl:
 
     ## Per-coroutine resources ##
     # Used for counting the number of concurrent calls.
+    can_do_rpc: Dict[str, asyncio.Semaphore]
     rpc_traversal: Dict[str, int]
     # for synchronizing req ids between req and reply coroutines
     request_queues: Dict[str, asyncio.Queue]
@@ -486,9 +488,13 @@ async def model_rpc_request_func(
         ]
 
     request_queue = ctrl.request_queues[rpc.name]
+    can_do_rpc = ctrl.can_do_rpc[rpc.name]
 
     this_rpc_consumed_seqs = 0
     while not ctrl.stop.is_set():
+
+        await can_do_rpc.acquire()
+
         # Ensure that parent RPCs will not be over-consumed.
         while any(
             this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.n_seqs
@@ -598,6 +604,7 @@ async def model_rpc_reply_func(
     ]
 
     request_queue = ctrl.request_queues[rpc.name]
+    can_do_rpc = ctrl.can_do_rpc[rpc.name]
 
     while not ctrl.stop.is_set():
         req_ids, other_req_ids, tik = await request_queue.get()
@@ -640,6 +647,7 @@ async def model_rpc_reply_func(
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
 
+        can_do_rpc.release()
         ctrl.rpc_traversal[rpc.name] += 1
 
         if rpc.is_dst:
@@ -1136,6 +1144,7 @@ class MasterWorker(worker_base.Worker):
             save_queue=asyncio.Queue(1),
             rpc_traversal={rpc.name: 0 for rpc in self.__model_rpcs},
             request_queues={rpc.name: asyncio.Queue(1) for rpc in self.__model_rpcs},
+            can_do_rpc={rpc.name: asyncio.Semaphore(1) for rpc in self.__model_rpcs},
             is_recover_epoch=self.__recover_run,
             used_hash_vals_this_epoch=(
                 self.__recover_info.hash_vals_to_ignore if self.__recover_run else set()
@@ -1459,7 +1468,6 @@ class MasterWorker(worker_base.Worker):
             last_step_info=self.__last_step_info,
             hash_vals_to_ignore=self.__rpc_ctrl.used_hash_vals_this_epoch,
         )
-        import pprint
 
         logger.info("dumped recover info to file")
         pprint.pprint(recover_info.recover_start)

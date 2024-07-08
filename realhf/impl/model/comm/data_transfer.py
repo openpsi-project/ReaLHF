@@ -5,7 +5,6 @@ from typing import *
 
 import torch.distributed
 
-
 from realhf.api.core.config import ModelName, ModelShardID
 from realhf.base import topology
 from realhf.impl.model.comm.global_comm import filter_match_mwids

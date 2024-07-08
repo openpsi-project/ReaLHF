@@ -12,7 +12,8 @@ import numpy as np
 import torch.utils.data
 import transformers
 
-from realhf.api.core import model_api, config as config_api
+from realhf.api.core import config as config_api
+from realhf.api.core import model_api
 from realhf.base import datapack, logging, namedarray
 from realhf.base.cluster import spec as cluster_spec
 
