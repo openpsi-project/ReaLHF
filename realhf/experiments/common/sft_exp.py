@@ -46,22 +46,22 @@ class SFTConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterfaceAbstraction("sft")
         rpc = MFCDef(
-            model_name=ModelName("default", 0),
+            n_seqs=self.dataset.train_bs_n_seqs,
+            name="trainDefault",
             interface_type=ModelInterfaceType.TRAIN_STEP,
-            interface_impl=interface,
+            interface_impl=ModelInterfaceAbstraction("sft"),
+            model_name="default",
+            input_keys=["packed_input_ids", "prompt_mask"],
+            log_return_value=True,
             model_type=self.model.type,
             model_path=self.model.path,
-            input_data=["packed_input_ids", "prompt_mask"],
-            log_return_value=True,
-            n_seqs=self.dataset.train_bs_n_seqs,
         )
-        return {"default": rpc}
+        return {"trainDefault": rpc}
 
     @property
     def allocations(self):
-        return {"default": self.allocation}
+        return {"trainDefault": self.allocation}
 
     @property
     def datasets(self):
@@ -74,10 +74,6 @@ class SFTConfig(CommonExperimentConfig):
                 ),
             )
         ]
-
-    @property
-    def allocations(self):
-        return {"default": self.allocation}
 
     @property
     def eval_datasets(self):

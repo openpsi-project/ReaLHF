@@ -179,12 +179,12 @@ class AsyncIOSequenceBuffer:
         self._completed_rpc = np.zeros((max_size, len(rpcs)), dtype=bool)
 
         self._rpc_data_keys = rpc_data_keys = list(
-            set().union(*[rpc.input_data for rpc in rpcs])
+            set().union(*[rpc.input_keys for rpc in rpcs])
         )
         # We can efficiently compute whether an RPC is ready using this mask
         self._rpc_key_mask = np.stack(
             [
-                np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool)
+                np.array([k in rpc.input_keys for k in rpc_data_keys], dtype=bool)
                 for rpc in rpcs
             ],
             axis=1,

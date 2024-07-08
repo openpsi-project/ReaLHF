@@ -9,7 +9,14 @@ import os
 import sys
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
-import realhf.api.core.config as config_api
+from realhf.api.core.config import (
+    ModelName,
+    ModelShardID,
+    StandaloneModelShardAbstraction,
+    DatasetAbstraction,
+    DataLoaderAbstraction,
+    ModelAbstraction,
+)
 import realhf.api.core.dfg as dfg
 import realhf.base.topology as topology
 from realhf.base.cluster import spec as cluster_spec
@@ -111,11 +118,11 @@ class WorkerInformation:
 @dataclasses.dataclass
 class ModelWorker:
     seed: int
-    shards: List[config_api.StandaloneModelShardAbstraction]
+    shards: List[StandaloneModelShardAbstraction]
     # dataset, for source model workers
     tokenizer_name_or_path: Optional[str] = None
-    datasets: Optional[List[Union[str, config_api.DatasetAbstraction]]] = None
-    dataloader: Union[str, config_api.DataLoaderAbstraction] = "packed"
+    datasets: Optional[List[Union[str, DatasetAbstraction]]] = None
+    dataloader: Union[str, DataLoaderAbstraction] = "packed"
     use_dataset_cache: bool = False
     dataset_cahce_root: str = DATASET_CACHE_PATH
     # cuda & cudnn config
@@ -125,10 +132,8 @@ class ModelWorker:
     cuda_cache_clear_freq: int = 10
     # model_topos and worker_info will be configured automatically
     model_rpcs: List[dfg.MFCDef] = None
-    model_topos: Dict[config_api.ModelName, topology.PipeModelDataParallelTopology] = (
-        None
-    )
-    msid2mwid: Dict[config_api.ModelShardID, int] = None
+    model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology] = None
+    msid2mwid: Dict[ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
     worker_info: Optional[WorkerInformation] = None
@@ -195,8 +200,8 @@ class MasterWorker:
     # main components
     model_rpcs: List[dfg.MFCDef]
     n_model_workers: int
-    model_topos: Dict[config_api.ModelName, topology.PipeModelDataParallelTopology]
-    msid2mwid: Dict[config_api.ModelShardID, int] = None
+    model_topos: Dict[ModelName, topology.PipeModelDataParallelTopology]
+    msid2mwid: Dict[ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
     worker_info: Optional[WorkerInformation] = None
@@ -236,41 +241,107 @@ class ExperimentConfig:
             model_names = model_names.union([s.id.model_name for s in w.shards])
         model_names = sorted(list(model_names))
 
-        ############### Sanity check of model names ###############
-        _roles = set(mn.role for mn in model_names)
-        _replica_ids = {
-            _role: sorted([mn.replica_id for mn in model_names if mn.role == _role])
-            for _role in _roles
-        }
-        for v in _replica_ids.values():
-            if list(sorted(v)) != list(range(len(v))):
-                raise ValueError(
-                    f"Model replica ids should be 0, 1, 2, ... for each role: {_replica_ids}."
-                )
-        ############### Sanity check of model names ###############
+        G = dfg.build_graph(self.model_rpcs, verbose=True, graph_path="./real-dfg.png")
+        for rpc in self.model_rpcs:
+            rpc._G = G
 
-        model_topos: Dict[
-            config_api.ModelName, topology.PipeModelDataParallelTopology
-        ] = {}
-        model_configs: Dict[config_api.ModelName, config_api.ModelAbstraction] = {}
+        self._validate_model_names(model_names)
+
+        model_topos = self._collect_topos(model_names)
+        model_configs = self._collect_model_configs(model_names)
+
+        data_transfer_pairs = self._resolve_data_transfer_pairs(model_names)
+
+        sync_param_pairs = self._resolve_param_realloc_pairs(model_configs, model_topos)
+
+        model_names_to_instantiate = self._resolve_model_names_to_instantiate(
+            model_names
+        )
+
+        for mw in self.model_worker:
+            for s in mw.shards:
+                s.should_instantiate = s.id.model_name in model_names_to_instantiate
+
+        msid2mwid = {}
+        for i, mw in enumerate(self.model_worker):
+            mw.model_topos = model_topos
+            for m in mw.shards:
+                msid2mwid[m.id] = i
+        for m in self.model_worker:
+            m.msid2mwid = msid2mwid
+            m.data_transfer_pairs = data_transfer_pairs
+            m.sync_param_pairs = sync_param_pairs
+
+        for m in self.model_worker:
+            m.model_rpcs = self.model_rpcs
+
+        self.master_worker = [
+            MasterWorker(
+                exp_ctrl=self.exp_ctrl,
+                model_topos=model_topos,
+                model_rpcs=self.model_rpcs,
+                n_model_workers=len(self.model_worker),
+                msid2mwid=msid2mwid,
+                sync_param_pairs=sync_param_pairs,
+                data_transfer_pairs=data_transfer_pairs,
+            )
+        ]
+
+    def set_worker_information(self, experiment_name, trial_name):
+        if len(self.model_worker) > 0:
+            assert len(self.master_worker) == 1
+
+        for worker_type, workers in [
+            ("model_worker", self.model_worker),
+            ("master_worker", self.master_worker),
+        ]:
+            if len(workers) == 0:
+                continue
+            for i, worker in enumerate(workers):
+                system_worker_info = dict(
+                    experiment_name=experiment_name,
+                    trial_name=trial_name,
+                    worker_type=worker_type,
+                    worker_index=i,
+                    worker_count=len(workers),
+                )
+                if worker.worker_info is not None:
+                    worker.worker_info.system_setup(**system_worker_info)
+                else:
+                    worker.worker_info = WorkerInformation(**system_worker_info)
+
+    def _collect_topos(
+        self, model_names: List[ModelName]
+    ) -> Dict[ModelName, topology.PipeModelDataParallelTopology]:
+        model_topos = {}
+        model_allocations = {}
         for model_name in model_names:
-            _this_mws = list(
+            _this_mws_with_indicies = list(
                 filter(
-                    lambda mw: any(x.id.model_name == model_name for x in mw.shards),
-                    self.model_worker,
+                    lambda i_mw: any(
+                        x.id.model_name == model_name for x in i_mw[1].shards
+                    ),
+                    enumerate(self.model_worker),
                 )
             )
-            all_shards: List[config_api.StandaloneModelShardAbstraction] = [
+            _this_mw_indices, _this_mws = zip(*_this_mws_with_indicies)
+            _this_mw_indices = tuple(sorted(_this_mw_indices))
+            all_shards: List[StandaloneModelShardAbstraction] = [
                 next(filter(lambda x: x.id.model_name == model_name, mw.shards))
                 for mw in _this_mws
             ]
-            # TODO: same topo, diff nodelist?
-            # for k, v in model_topos.items():
-            # if k.role == model_name.role and v == all_shards[0].id.topo:
-            #     raise ValueError(f"If different RPCs have the same topology, "
-            #                      f"they don't need to use multiple model names ({k}, {model_name}).")
+            for k, v in model_topos.items():
+                if (
+                    k.role == model_name.role
+                    and v == all_shards[0].id.topo
+                    and _this_mw_indices == model_allocations[k]
+                ):
+                    raise ValueError(
+                        f"If different RPCs have the same topology and allocation, "
+                        f"they don't need to use multiple model names ({k}, {model_name})."
+                    )
             model_topos[model_name] = all_shards[0].id.topo
-            model_configs[model_name] = all_shards[0].model
+            model_allocations[model_name] = tuple(sorted(_this_mw_indices))
 
             ##### Sanity check of parallelism ranks. #####
             ranks = [s.id.parallelism_rank for s in all_shards]
@@ -283,23 +354,45 @@ class ExperimentConfig:
                     f"model shard ids={[s.id for s in all_shards]}."
                 )
             ##### Sanity check of parallelism ranks. #####
+        return model_topos
 
-        data_transfer_pairs: List[Tuple[config_api.ModelName, config_api.ModelName]] = (
-            []
-        )
-        _rpc_nodes, edges = dfg.build_graph(self.model_rpcs, verbose=True)
-        for i in range(len(self.model_rpcs)):
-            for j in range(len(self.model_rpcs)):
-                if len(edges[i][j]) > 0:
-                    # NOTE: dependencies are reversed here
-                    data_transfer_pairs.append(
-                        (
-                            self.model_rpcs[j].model_name,
-                            self.model_rpcs[i].model_name,
-                        )
-                    )
-                    # print(f"model_rpc j name {self.model_rpcs[j].name} i name {self.model_rpcs[i].name} "
-                    #        "data transfer pair append {(self.model_rpcs[j].model_name, self.model_rpcs[i].model_name)} ")
+    def _collect_model_configs(
+        self, model_names: List[ModelName]
+    ) -> Dict[ModelName, ModelAbstraction]:
+        model_configs = {}
+        for model_name in model_names:
+            _this_mws = list(
+                filter(
+                    lambda mw: any(x.id.model_name == model_name for x in mw.shards),
+                    self.model_worker,
+                )
+            )
+            all_shards: List[StandaloneModelShardAbstraction] = [
+                next(filter(lambda x: x.id.model_name == model_name, mw.shards))
+                for mw in _this_mws
+            ]
+            model_configs[model_name] = all_shards[0].model
+        return model_configs
+
+    def _validate_model_names(self, model_names: List[ModelName]):
+        model_names = sorted(model_names)
+        _roles = set(mn.role for mn in model_names)
+        _replica_ids = {
+            _role: sorted([mn.replica_id for mn in model_names if mn.role == _role])
+            for _role in _roles
+        }
+        for v in _replica_ids.values():
+            if list(sorted(v)) != list(range(len(v))):
+                raise ValueError(
+                    f"Model replica ids should be 0, 1, 2, ... for each role: {_replica_ids}."
+                )
+
+    def _resolve_data_transfer_pairs(
+        self, model_names: List[ModelName]
+    ) -> List[Tuple[ModelName, ModelName]]:
+        data_transfer_pairs: List[Tuple[ModelName, ModelName]] = []
+        for edge in self.model_rpcs[0]._G.edges():
+            data_transfer_pairs.append(edge[0], edge[1])
         src_rpcs = [rpc for rpc in self.model_rpcs if rpc.is_src]
         data_src_rpc = src_rpcs[0]
         for r in src_rpcs[1:]:
@@ -309,11 +402,14 @@ class ExperimentConfig:
             ) not in data_transfer_pairs:
                 data_transfer_pairs.append((data_src_rpc.model_name, r.model_name))
         data_transfer_pairs += [(mn, mn) for mn in model_names]
+        return data_transfer_pairs
 
-        sync_param_pairs: List[Tuple[config_api.ModelName, config_api.ModelName]] = []
-        ######### sanity check of sync param hooks #########
+    def _resolve_param_realloc_pairs(
+        self, model_configs, model_topos
+    ) -> List[Tuple[ModelName, ModelName]]:
+        sync_param_pairs: List[Tuple[ModelName, ModelName]] = []
         for rpc in self.model_rpcs:
-            for hook in rpc.pre_hooks + rpc.post_hooks:
+            for hook in rpc._pre_hooks + rpc._post_hooks:
                 if not isinstance(hook, dfg.SyncParamHook):
                     continue
                 if (
@@ -374,99 +470,52 @@ class ExperimentConfig:
                     f"so it is necceary to do bidirectional synchronization. "
                     f"{(a,b)} found in sync param pairs but not {(b,a)}"
                 )
-        ######### sanity check of sync param hooks #########
+        return sync_param_pairs
 
+    def _resolve_model_names_to_instantiate(
+        self, model_names: List[ModelName]
+    ) -> List[ModelName]:
         # Mark which shard of the same role should be instantiated.
-        _model_is_trainable = collections.defaultdict(list)
-        for rpc in self.model_rpcs:
-            _model_is_trainable[rpc.model_name].append(
+        role_is_trainable = {}
+        role_trainable_idx = {}
+        roles = [model_name.role for model_name in model_names]
+        for role in roles:
+            train_rpcs = [
                 rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
-            )
-
-        _model_is_trainable = {
-            model_name: any(values)
-            for model_name, values in _model_is_trainable.items()
-        }
-
-        _roles = set([rpc.model_name.role for rpc in _rpc_nodes])
-        _role_cnt = {
-            role: len(
-                set(
-                    [
-                        rpc.model_name
-                        for rpc in _rpc_nodes
-                        if rpc.model_name.role == role
-                    ]
-                )
-            )
-            for role in _roles
-        }
-        model_names_to_instantiate = []
-        for role in _roles:
-            _trainable_this_role = [
-                _model_is_trainable[config_api.ModelName(role, i)]
-                for i in range(_role_cnt[role])
+                for rpc in self.model_rpcs
+                if rpc.role == role
             ]
-            if _role_cnt[role] == 1 or not any(_trainable_this_role):
-                model_names_to_instantiate.append(config_api.ModelName(role, 0))
-                continue
-            if any(_trainable_this_role):
-                assert sum(_trainable_this_role) == 1
-                _trainable_idx = _trainable_this_role.index(True)
+            if train_rpcs:
+                if len(train_rpcs) > 1:
+                    raise ValueError(
+                        f"Multiple train_step for the same role {role} is not allowed."
+                    )
+                role_is_trainable[role] = True
+                role_trainable_idx[role] = next(
+                    i
+                    for i, rpc in enumerate(self.model_rpcs)
+                    if rpc.role == role
+                    and rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
+                )
+            else:
+                role_is_trainable[role] = False
+
+        role_cnt = {
+            role: len([mn.role == role for mn in model_names]) for role in roles
+        }
+
+        model_names_to_instantiate = []
+        for role in roles:
+            if role_is_trainable[role]:
                 model_names_to_instantiate.append(
-                    config_api.ModelName(role, _trainable_idx)
+                    ModelName(role, role_trainable_idx[role])
                 )
-        for mw in self.model_worker:
-            for s in mw.shards:
-                s.should_instantiate = s.id.model_name in model_names_to_instantiate
+            else:
+                model_names_to_instantiate += [
+                    ModelName(role, i) for i in range(role_cnt[role])
+                ]
 
-        msid2mwid = {}
-        for i, mw in enumerate(self.model_worker):
-            mw.model_topos = model_topos
-            for m in mw.shards:
-                msid2mwid[m.id] = i
-        for m in self.model_worker:
-            m.msid2mwid = msid2mwid
-            m.data_transfer_pairs = data_transfer_pairs
-            m.sync_param_pairs = sync_param_pairs
-
-        for m in self.model_worker:
-            m.model_rpcs = self.model_rpcs
-
-        self.master_worker = [
-            MasterWorker(
-                exp_ctrl=self.exp_ctrl,
-                model_topos=model_topos,
-                model_rpcs=self.model_rpcs,
-                n_model_workers=len(self.model_worker),
-                msid2mwid=msid2mwid,
-                sync_param_pairs=sync_param_pairs,
-                data_transfer_pairs=data_transfer_pairs,
-            )
-        ]
-
-    def set_worker_information(self, experiment_name, trial_name):
-        if len(self.model_worker) > 0:
-            assert len(self.master_worker) == 1
-
-        for worker_type, workers in [
-            ("model_worker", self.model_worker),
-            ("master_worker", self.master_worker),
-        ]:
-            if len(workers) == 0:
-                continue
-            for i, worker in enumerate(workers):
-                system_worker_info = dict(
-                    experiment_name=experiment_name,
-                    trial_name=trial_name,
-                    worker_type=worker_type,
-                    worker_index=i,
-                    worker_count=len(workers),
-                )
-                if worker.worker_info is not None:
-                    worker.worker_info.system_setup(**system_worker_info)
-                else:
-                    worker.worker_info = WorkerInformation(**system_worker_info)
+        return model_names_to_instantiate
 
 
 class Experiment:

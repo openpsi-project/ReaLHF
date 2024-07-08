@@ -126,6 +126,18 @@ class ModelShardID:
             raise ValueError(f"Invalid ranks and topo: {self}, {self.topo}.")
         return self
 
+    def __hash__(self):
+        return hash(
+            (
+                self.model_name,
+                self.dp_rank,
+                self.mp_rank,
+                self.pp_rank,
+                tuple(self.topo.axes),
+                tuple(self.topo.dims),
+            )
+        )
+
     @property
     def parallelism_rank(self):
         return self.topo.get_rank(

@@ -298,7 +298,7 @@ def _attach_payloads_with_hooks(
     assert hook_type in ["pre", "post"], hook_type
 
     main_mwids = set([msid2mwid[h] for h in main_handlers])
-    for hook in getattr(rpc, f"{hook_type}_hooks"):
+    for hook in getattr(rpc, f"_{hook_type}_hooks"):
         if isinstance(hook, dfg.SyncParamHook):
             assert (hook.source is None) != (hook.target is None), hook
             if hook.source is None:
@@ -373,7 +373,7 @@ async def scatter_tensor_to_mws(
 ) -> List[uuid.UUID]:
 
     dt_data = {
-        "keys": rpc.input_data,
+        "keys": rpc.input_keys,
         "target": rpc.model_name,
         "producer_names": producer_names,
         "producer_mappings": producer_mappings,
@@ -466,7 +466,7 @@ async def model_rpc_request_func(
     ]
 
     producer_names = {}  # data key -> model name
-    for k in rpc.input_data:
+    for k in rpc.input_keys:
         if k in rpc.data_producers:
             producer_names[k] = rpc.data_producers[k]
         else:
@@ -542,12 +542,12 @@ async def model_rpc_request_func(
         # whether to fetch these data.
         for dp_idx, (st, ed) in enumerate(partitions):
             for i in range(st, ed):
-                for k in rpc.output_data:
+                for k in rpc.output_keys:
                     data_owner[sample.indices[i], k] = (rpc.model_name, dp_idx)
 
         # Get the data owner of this RPC's input data.
         producer_mappings: Dict[Tuple[str, str], List[Tuple[int, int]]] = {}
-        for k in rpc.input_data:
+        for k in rpc.input_keys:
             names, dp_indices = [], []
             for buf_idx in sample.indices:
                 owner_name, dp_idx = data_owner[(buf_idx, k)]
@@ -828,7 +828,7 @@ class MasterWorker(worker_base.Worker):
         )
 
         # Build execution graph and initialize concurrency utilities.
-        self.__model_rpcs, _ = dfg.build_graph(config.model_rpcs)
+        self.__model_rpcs = config.model_rpcs
         for rpc in self.__model_rpcs:
             _dp_size = self.__model_topos[rpc.model_name].get_dim("data")
             _pp_size = self.__model_topos[rpc.model_name].get_dim("pipe")

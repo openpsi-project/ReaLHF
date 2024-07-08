@@ -12,7 +12,7 @@ import numpy as np
 import torch.utils.data
 import transformers
 
-from realhf.api.core import model_api, system_api
+from realhf.api.core import model_api, config as config_api
 from realhf.base import datapack, logging, namedarray
 from realhf.base.cluster import spec as cluster_spec
 
@@ -106,7 +106,7 @@ def register_dataset(name, dataset_cls):
 
 
 def make_dataset(
-    cfg: Union[str, system_api.Dataset],
+    cfg: Union[str, config_api.DatasetAbstraction],
     seed: int,
     ddp_rank: int,
     world_size: int,
@@ -116,7 +116,7 @@ def make_dataset(
     cache_root: Optional[str] = None,
 ) -> torch.utils.data.Dataset:
     if isinstance(cfg, str):
-        cfg = system_api.Dataset(type_=cfg)
+        cfg = config_api.DatasetAbstraction(type_=cfg)
 
     if isinstance(tokenizer_or_tokenizer_name, str):
         tokenizer = model_api.load_hf_tokenizer(tokenizer_or_tokenizer_name)
@@ -181,10 +181,10 @@ def register_dataloader(name, dataloader_cls):
 
 
 def make_dataloader(
-    cfg: Union[str, system_api.DataLoader], dataset: torch.utils.data.Dataset
+    cfg: Union[str, config_api.DataLoaderAbstraction], dataset: torch.utils.data.Dataset
 ) -> torch.utils.data.DataLoader:
     if isinstance(cfg, str):
-        cfg = system_api.DataLoader(type_=cfg)
+        cfg = config_api.DataLoaderAbstraction(type_=cfg)
     dataloader_cls = ALL_DATALOADER_CLASSES[cfg.type_]
     return dataloader_cls(dataset, **cfg.args)
 

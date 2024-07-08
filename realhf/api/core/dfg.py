@@ -7,10 +7,9 @@ import numpy as np
 from omegaconf import DictConfig
 from pydantic import Field
 from pydantic import dataclasses as pdclasses
-from pydantic import field_validator
+from pydantic import field_validator, validate_call
 
 import realhf.base.logging as logging
-import realhf.base.namedarray as namedarray
 from realhf.api.core.config import (
     ModelFamily,
     ModelInterfaceAbstraction,
@@ -126,9 +125,6 @@ class MFCDef:
         if isinstance(v, DictConfig):
             return ModelFamily(**v)
 
-    def __hash__(self):
-        return hash(self.name)
-
     @property
     def role(self):
         return self.model_name.role
@@ -148,15 +144,15 @@ class MFCDef:
 
     @property
     def max_min_flow_seqs(self) -> int:
-        return self._G.graph["max_min_flow_seqs"][self.role]
+        return self._G.graph["max_min_flow_seqs"][self.name]
 
     @property
     def is_src(self):
-        return len(self._G.predecessors(self)) == 0
+        return len(list(self._G.predecessors(self.name))) == 0
 
     @property
     def is_dst(self):
-        return len(self._G.successors(self)) == 0
+        return len(list(self._G.successors(self.name))) == 0
 
     @property
     def data_producers(self) -> Dict[str, ModelName]:
@@ -168,11 +164,11 @@ class MFCDef:
 
     @property
     def parents(self) -> List["MFCDef"]:
-        return list(self._G.predecessors(self))
+        return [self._G.nodes[x]['object'] for x in self._G.predecessors(self.name)]
 
     @property
     def children(self) -> List["MFCDef"]:
-        return list(self._G.successors(self))
+        return [self._G.nodes[x]['object'] for x in self._G.successors(self.name)]
 
     @property
     def is_dst_of_model_role(self):
@@ -182,7 +178,7 @@ class MFCDef:
                 return False
             return any(
                 [
-                    r.node.model_name.role == model_name.role
+                    r.role == model_name.role
                     or _has_children_of_model_name(r, model_name)
                     for r in rpc.children
                 ]
@@ -216,11 +212,12 @@ def _draw_topo_sorted_digraph(G: nx.DiGraph, graph_path: str):
         arrowsize=20,
         width=1.5,
     )
-    labels = {node: node.name for node in G.nodes()}
+    labels = {node: node for node in G.nodes()}
     nx.draw_networkx_labels(G, pos, labels=labels, font_size=12, font_color="black")
     plt.savefig(graph_path, dpi=300)
 
 
+@validate_call
 def build_graph(
     nodes: List[MFCDef],
     verbose: bool = False,
@@ -233,7 +230,7 @@ def build_graph(
         )
 
     _G = nx.DiGraph()
-    _G.add_nodes_from(nodes)
+    _G.add_nodes_from([(node.name, dict(object=node)) for node in nodes])
 
     data_producers: Dict[str, MFCDef] = {}
     data_consumers: Dict[str, List[MFCDef]] = collections.defaultdict(list)
@@ -248,22 +245,20 @@ def build_graph(
             if k not in data_producers:
                 # This is a key from the dataset.
                 continue
-            src, dst = data_producers[k], node
+            src, dst = data_producers[k].name, node.name
             if _G.has_edge(src, dst):
                 _G[src][dst]["keys"].append(k)
             else:
                 _G.add_edge(src, dst, keys=[k])
     if verbose:
         for u, v, data in _G.edges(data=True):
-            logger.info(f"Edge: {u.name} -> {v.name} with keys {data['keys']}")
+            logger.info(f"Edge: {u} -> {v} with keys {data['keys']}")
         if graph_path is not None:
             _draw_topo_sorted_digraph(_G, graph_path)
             logger.info(f"Graph illustration saved to: {graph_path}.")
 
     if len(nodes) != len(_G.nodes):
         raise ValueError("There are replicated nodes in the graph!")
-    if len(set(s.name for s in nodes)) != len(nodes):
-        raise ValueError("There are replicated node names in the graph!")
 
     # Store useful metadata
     _G.graph["data_producers"] = data_producers
@@ -271,7 +266,7 @@ def build_graph(
 
     max_min_flow_seqs = {}
     for node in nodes:
-        max_min_flow_seqs[node] = max([r.n_seqs for r in nodes if r.role == node.role])
+        max_min_flow_seqs[node.name] = max([r.n_seqs for r in nodes if r.role == node.role])
     _G.graph["max_min_flow_seqs"] = max_min_flow_seqs
 
     return _G

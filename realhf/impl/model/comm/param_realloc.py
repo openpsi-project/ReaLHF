@@ -8,8 +8,8 @@ import scipy.optimize
 import torch.distributed
 import torch.nn as nn
 
-from realhf.api.core import model_api, system_api
-from realhf.api.core.config import ModelName
+from realhf.api.core import model_api
+from realhf.api.core.config import ModelName, ModelShardID
 from realhf.base import constants, topology
 from realhf.impl.model.comm.global_comm import filter_match_mwids
 from realhf.impl.model.nn.flatten_param import (
@@ -161,12 +161,12 @@ def _create_param_realloc_groups(
     to_topo: topology.PipeModelDataParallelTopology,
     src: ModelName,
     dst: ModelName,
-    msid2mwid: Dict[system_api.ModelShardID, int],
+    msid2mwid: Dict[ModelShardID, int],
     param_realloc_groups: Dict[ParamReallocPair, torch.distributed.ProcessGroup],
     param_realloc_src_ranks: Dict[ParamReallocPair, int],
     param_realloc_dst_ranks: Dict[ParamReallocPair, List[int]],
 ):
-    mwid2msid: Dict[int, Dict[ModelName, system_api.ModelShardID]] = defaultdict(dict)
+    mwid2msid: Dict[int, Dict[ModelName, ModelShardID]] = defaultdict(dict)
     for k, v in msid2mwid.items():
         mwid2msid[v][k.model_name] = k
     for pp_i, pp_j in itertools.product(
@@ -268,7 +268,7 @@ def _create_param_realloc_groups(
 
 def setup_param_realloc(
     model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
-    msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
+    msid2mwid: Optional[Dict[ModelShardID, int]] = None,
     param_realloc_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
 ) -> ParamReallocInfo:
     param_realloc_groups = {}
