@@ -121,14 +121,14 @@ class MFCDef:
     def add_pre_hook(self, h: RPCHook):
         assert isinstance(h, RPCHook), type(h)
         if isinstance(h, SyncParamHook):
-            assert h.target == self.model_name or h.source == self.model_name
+            assert h.target is None or h.source is None
         if isinstance(h, OffloadHook):
             raise ValueError("Offload can only be post hooks!")
         self._pre_hooks.append(h)
 
     def add_post_hook(self, h: RPCHook):
         if isinstance(h, SyncParamHook):
-            assert h.target == self.model_name or h.source == self.model_name
+            assert h.target is None or h.source is None
         self._post_hooks.append(h)
 
     @property

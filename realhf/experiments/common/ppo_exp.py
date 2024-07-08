@@ -10,7 +10,6 @@ from realhf.api.core.config import (
     DatasetAbstraction,
     ModelInterfaceAbstraction,
     ModelInterfaceType,
-    ModelName,
 )
 from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
@@ -291,13 +290,14 @@ class PPOConfig(CommonExperimentConfig):
             ),
         )
         rollout = MFCDef(
-            model_name=ModelName("actor", 0),
+            name="actor_gen",
+            model_name="actor",
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
             interface_impl=actor_interface,
-            input_data=["packed_prompts"],
-            output_data=[
+            input_keys=["packed_prompts"],
+            output_keys=[
                 "seq_no_eos_mask",
                 "packed_seq",
                 "packed_logprobs",
@@ -309,13 +309,14 @@ class PPOConfig(CommonExperimentConfig):
         )
 
         inf_reward = MFCDef(
-            model_name=ModelName("reward", 0),
+            name="rew_inf",
+            model_name="reward",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
             model_path=self.rew.path,
-            input_data=["packed_seq"],
-            output_data=["rewards"],
+            input_keys=["packed_seq"],
+            output_keys=["rewards"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
@@ -325,24 +326,26 @@ class PPOConfig(CommonExperimentConfig):
                 "packed_logits_mask",
             )
         inf_ref_logits = MFCDef(
-            model_name=ModelName("ref", 0),
+            name="ref_inf",
+            model_name="ref",
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
             model_path=self.ref.path,
             interface_impl=ref_interface,
-            input_data=inf_ref_inputs,
-            output_data=["packed_ref_logprobs"],
+            input_keys=inf_ref_inputs,
+            output_keys=["packed_ref_logprobs"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_values = MFCDef(
-            model_name=ModelName("critic", 0),
+            name="critic_inf",
+            model_name="critic",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
             model_type=self.critic.type,
             model_path=self.critic.path,
-            input_data=["packed_seq", "seq_no_eos_mask"],
-            output_data=["values"],
+            input_keys=["packed_seq", "seq_no_eos_mask"],
+            output_keys=["values"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
@@ -359,25 +362,25 @@ class PPOConfig(CommonExperimentConfig):
         if self.ppo.force_no_logits_mask:
             train_actor_inputs.remove("packed_logits_mask")
         train_actor = MFCDef(
-            model_name=ModelName("actor", 0),
+            name="actor_train",
+            model_name="actor",
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
             model_path=self.actor.path,
             interface_impl=actor_interface,
-            input_data=train_actor_inputs,
+            input_keys=train_actor_inputs,
             log_return_value=True,
-            # pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
-            # post_hooks=[SyncParamHook(target=ModelName("actor", 0))],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_critic = MFCDef(
-            model_name=ModelName("critic", 0),
+            name="critic_train",
+            model_name="critic",
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,
             model_type=self.critic.type,
             model_path=self.critic.path,
-            input_data=[
+            input_keys=[
                 "packed_seq",
                 "packed_logprobs",
                 "packed_ref_logprobs",
@@ -387,11 +390,8 @@ class PPOConfig(CommonExperimentConfig):
                 "seq_no_eos_mask",
             ],
             log_return_value=True,
-            # pre_hooks=[SyncParamHook(source=ModelName("critic", 0))],
-            # post_hooks=[SyncParamHook(target=ModelName("critic", 0))],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
-        # rpcs = [rollout, inf_reward, inf_ref_logits, inf_values, train_actor, train_critic]
         return {
             "actor_gen": rollout,
             "actor_train": train_actor,

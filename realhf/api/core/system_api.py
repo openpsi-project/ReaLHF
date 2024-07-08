@@ -479,12 +479,11 @@ class ExperimentConfig:
         self, model_names: List[ModelName]
     ) -> List[ModelName]:
         # Mark which shard of the same role should be instantiated.
-        roles = [model_name.role for model_name in model_names]
+        roles = set([model_name.role for model_name in model_names])
         role_is_trainable = {role: False for role in roles}
         role_trainable_idx = {}
-        role_cnt = {}
+        role_idx_collection = {role: set() for role in roles}
         for role in roles:
-            cnt = 0
             for rpc in self.model_rpcs:
                 if rpc.role != role:
                     continue
@@ -494,9 +493,9 @@ class ExperimentConfig:
                             f"Multiple train_step for the same role {role} is not allowed."
                         )
                     role_is_trainable[role] = True
-                    role_trainable_idx[role] = cnt
-                cnt += 1
-            role_cnt[role] = cnt
+                    role_trainable_idx[role] = rpc.model_name.replica_id
+                role_idx_collection[role].add(rpc.model_name.replica_id)
+        role_cnt = {role: len(v) for role, v in role_idx_collection.items()}
 
         model_names_to_instantiate = []
         for role in roles:
