@@ -20,7 +20,9 @@ from realhf.api.core.config import (
     StandaloneModelShardAbstraction,
 )
 from realhf.base.cluster import spec as cluster_spec
-from realhf.base.constants import DATASET_CACHE_PATH
+from realhf.base.constants import DATASET_CACHE_PATH, LOG_ROOT
+from realhf.base.constants import experiment_name as get_experiment_name
+from realhf.base.constants import trial_name as get_trial_name
 
 _LLM_GPU_IMAGE = cluster_spec.gpu_image
 _LLM_CPU_IMAGE = cluster_spec.cpu_image
@@ -241,7 +243,12 @@ class ExperimentConfig:
             model_names = model_names.union([s.id.model_name for s in w.shards])
         model_names = sorted(list(model_names))
 
-        G = dfg.build_graph(self.model_rpcs, verbose=True, graph_path="./real-dfg.png")
+        assert get_trial_name() is not None
+        assert get_experiment_name() is not None
+        graph_path = os.path.join(
+            LOG_ROOT, get_experiment_name(), get_trial_name(), "dataflow_graph.png"
+        )
+        G = dfg.build_graph(self.model_rpcs, verbose=True, graph_path=graph_path)
         for rpc in self.model_rpcs:
             rpc._G = G
 

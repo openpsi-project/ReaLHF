@@ -245,7 +245,10 @@ def build_graph(
             logger.info(f"Edge: {u} -> {v} with keys {data['keys']}")
         if graph_path is not None:
             _draw_topo_sorted_digraph(_G, graph_path)
-            logger.info(f"Graph illustration saved to: {graph_path}.")
+            logger.info(
+                f"> Visualization of the dataflow graph in "
+                f"this experiment is saved to: {graph_path}."
+            )
 
     if len(nodes) != len(_G.nodes):
         raise ValueError("There are replicated nodes in the graph!")
