@@ -2,6 +2,7 @@ import argparse
 import datetime
 import getpass
 import pathlib
+import re
 import sys
 
 import hydra
@@ -12,8 +13,8 @@ from realhf.base.importing import import_module
 
 # NOTE: Register all implemented experiments inside ReaL.
 import_module(
-    pathlib.Path(__file__).resolve().parent.parent / "experiments" / "common",
-    r".*_exp\.py$",
+    str(pathlib.Path(__file__).resolve().parent.parent / "experiments" / "common"),
+    re.compile(r".*_exp\.py$"),
 )
 
 

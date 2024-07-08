@@ -1,14 +1,22 @@
 import collections
 from typing import *
 
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+from omegaconf import DictConfig
 from pydantic import Field
 from pydantic import dataclasses as pdclasses
+from pydantic import field_validator
 
 import realhf.base.logging as logging
 import realhf.base.namedarray as namedarray
-from realhf.api.core.config import ModelFamily, ModelInterfaceType, ModelName
+from realhf.api.core.config import (
+    ModelFamily,
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+    ModelName,
+)
 
 logger = logging.getLogger("DataFlowGraph", "benchmark")
 
@@ -28,24 +36,22 @@ class SyncParamHook:
 RPCHook = Union[OffloadHook, SyncParamHook]
 
 
-@pdclasses.dataclass(unsafe_hash=True)
-class MFCNode:
-    """A node in the dataflow graph of the algorithm.
+@pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
+class MFCDef:
+    """A model function call (MFC) object used by the workers.
 
     MFC is the abbreviation of Model Function Call.
     This object serves as the user interface for developing
-    new algorithms, so only configurable attributes are stored.
+    new algorithms.
     This object will be inserted in a nx.DiGraph as nodes.
     Edges will be automatically resolved by input/output keys.
 
-    This object does not provide enough information, e.g.,
-    hooks and data transfer pairs. These additional information
-    will be stored in the MFCDef object after building the graph.
+    Fields starting with an underscore will be filled automatically.
 
+    :param name: The unique identifier of this model function call.
+    :type name: str
     :param n_seqs: The number of sequences to be processed in a batch.
     :type n_seqs: int
-    :param mfc_name: The unique identifier of this model function call.
-    :type mfc_name: str
     :param interface_type: The interface type to be used
         by the node (e.g., generate, train_step).
     :type interface_type: ModelInterfaceType
@@ -73,13 +79,15 @@ class MFCNode:
     :type model_path: Optional[str]
     """
 
-    n_seqs: int
-
     # The unique identifier of this model function call.
-    mfc_name: str
+    name: str
+
+    # batch size
+    n_seqs: int
 
     # The interface type to be used by the node (e.g., generate, train_step).
     interface_type: ModelInterfaceType
+    interface_impl: ModelInterfaceAbstraction
 
     # The model identifier to be used by the node.
     model_name: str | ModelName
@@ -92,77 +100,79 @@ class MFCNode:
     log_return_value: bool = False
 
     # Only used by search.
-    model_type: Optional[ModelFamily] = None
+    model_type: Optional[Any | ModelFamily] = None
     model_path: Optional[str] = None
 
-    @property
-    def role(self):
-        return (
-            self.model_name.role
-            if isinstance(self.model_name, ModelName)
-            else self.model_name
-        )
-
-
-@pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
-class MFCDef:
-    """A model function call (MFC) object used by the workers.
-
-    It holds to an MFCNode object and several helper attributes
-    for the worker when running the graph.
-    Attributes other than ``node`` are filled automatically
-    after building the graph.
-    """
-
-    node: MFCNode
-
-    G: nx.DiGraph = None
+    # Reserved fields. Should not be set by the user.
+    _G: nx.DiGraph = None
     _pre_hooks: List[RPCHook] = Field(default_factory=lambda: [])
     _post_hooks: List[RPCHook] = Field(default_factory=lambda: [])
 
     def __repr__(self):
-        return f"MFCDef[{self.node.mfc_name}]"
+        return f"MFCDef[{self.name}]"
+
+    @field_validator("model_name")
+    @classmethod
+    def _validate_model_name(cls, v) -> ModelName:
+        if isinstance(v, ModelName):
+            return v
+        return ModelName(role=v, replica_id=0)
+
+    @field_validator("model_type")
+    @classmethod
+    def _validate_model_type(cls, v) -> ModelFamily:
+        if isinstance(v, ModelFamily):
+            return v
+        if isinstance(v, DictConfig):
+            return ModelFamily(**v)
+
+    def __hash__(self):
+        return hash(self.name)
+
+    @property
+    def role(self):
+        return self.model_name.role
 
     def add_pre_hook(self, h: RPCHook):
         assert isinstance(h, RPCHook), type(h)
         if isinstance(h, SyncParamHook):
-            assert h.target == self.node.model_name or h.source == self.node.model_name
+            assert h.target == self.model_name or h.source == self.model_name
         if isinstance(h, OffloadHook):
             raise ValueError("Offload can only be post hooks!")
         self._pre_hooks.append(h)
 
     def add_post_hook(self, h: RPCHook):
         if isinstance(h, SyncParamHook):
-            assert h.target == self.node.model_name or h.source == self.node.model_name
+            assert h.target == self.model_name or h.source == self.model_name
         self._post_hooks.append(h)
 
     @property
     def max_min_flow_seqs(self) -> int:
-        return self.G.graph["max_min_flow_seqs"][self.node.role]
+        return self._G.graph["max_min_flow_seqs"][self.role]
 
     @property
     def is_src(self):
-        return len(self.G.predecessors(self.node)) == 0
+        return len(self._G.predecessors(self)) == 0
 
     @property
     def is_dst(self):
-        return len(self.G.successors(self.node)) == 0
+        return len(self._G.successors(self)) == 0
 
     @property
     def data_producers(self) -> Dict[str, ModelName]:
-        return self.G.graph["data_producers"]
+        return self._G.graph["data_producers"]
 
     @property
     def data_consumers(self) -> Dict[str, List[str]]:
-        return self.G.graph["data_consumers"]
+        return self._G.graph["data_consumers"]
 
     @property
     def parents(self) -> List["MFCDef"]:
-        return list(self.G.predecessors(self.node))
+        return list(self._G.predecessors(self))
 
     @property
     def children(self) -> List["MFCDef"]:
-        return list(self.G.successors(self.node))
+        return list(self._G.successors(self))
 
     @property
     def is_dst_of_model_role(self):
@@ -178,15 +188,55 @@ class MFCDef:
                 ]
             )
 
-        return not _has_children_of_model_name(self, self.node.model_name)
+        return not _has_children_of_model_name(self, self.model_name)
 
 
-def build_graph(nodes: List[MFCNode], verbose: bool = False) -> nx.DiGraph:
-    G = nx.DiGraph()
-    G.add_nodes_from(nodes)
+def _draw_topo_sorted_digraph(G: nx.DiGraph, graph_path: str):
+    topological_order = list(nx.topological_sort(G))
+    # Initialize a dictionary to store the depth of each node
+    node_depth = {node: 0 for node in G.nodes()}
 
-    data_producers: Dict[str, MFCNode] = {}
-    data_consumers: Dict[str, List[MFCNode]] = collections.defaultdict(list)
+    # Calculate the depth of each node
+    for node in topological_order:
+        for neighbor in G.successors(node):
+            node_depth[neighbor] = max(node_depth[neighbor], node_depth[node] + 1)
+
+    layers = {
+        i: [node for node, depth in node_depth.items() if depth == i]
+        for i in range(max(node_depth.values()) + 1)
+    }
+    pos = nx.multipartite_layout(G, subset_key=layers)
+    nx.draw(
+        G,
+        pos,
+        with_labels=False,
+        node_size=4000,
+        node_color="lightblue",
+        arrows=True,
+        arrowsize=20,
+        width=1.5,
+    )
+    labels = {node: node.name for node in G.nodes()}
+    nx.draw_networkx_labels(G, pos, labels=labels, font_size=12, font_color="black")
+    plt.savefig(graph_path, dpi=300)
+
+
+def build_graph(
+    nodes: List[MFCDef],
+    verbose: bool = False,
+    graph_path: Optional[str] = None,
+) -> nx.DiGraph:
+    if len(set(node.name for node in nodes)) != len(nodes):
+        raise ValueError(
+            "Each model function call should have an unique name. "
+            f"Got {[node.name for node in nodes]}."
+        )
+
+    _G = nx.DiGraph()
+    _G.add_nodes_from(nodes)
+
+    data_producers: Dict[str, MFCDef] = {}
+    data_consumers: Dict[str, List[MFCDef]] = collections.defaultdict(list)
     for node in nodes:
         for k in node.output_keys:
             data_producers[k] = node
@@ -199,21 +249,29 @@ def build_graph(nodes: List[MFCNode], verbose: bool = False) -> nx.DiGraph:
                 # This is a key from the dataset.
                 continue
             src, dst = data_producers[k], node
-            if G.has_edge(src, dst):
-                G[src][dst]["keys"].append(k)
+            if _G.has_edge(src, dst):
+                _G[src][dst]["keys"].append(k)
             else:
-                G.add_edge(data_producers[k], node, keys=[k])
+                _G.add_edge(src, dst, keys=[k])
     if verbose:
-        for u, v, data in G.edges(data=True):
-            logger.info(f"Edge: {u.mfc_name} -> {v.mfc_name} with keys {data['keys']}")
+        for u, v, data in _G.edges(data=True):
+            logger.info(f"Edge: {u.name} -> {v.name} with keys {data['keys']}")
+        if graph_path is not None:
+            _draw_topo_sorted_digraph(_G, graph_path)
+            logger.info(f"Graph illustration saved to: {graph_path}.")
+
+    if len(nodes) != len(_G.nodes):
+        raise ValueError("There are replicated nodes in the graph!")
+    if len(set(s.name for s in nodes)) != len(nodes):
+        raise ValueError("There are replicated node names in the graph!")
 
     # Store useful metadata
-    G.graph["data_producers"] = data_producers
-    G.graph["data_consumers"] = data_consumers
+    _G.graph["data_producers"] = data_producers
+    _G.graph["data_consumers"] = data_consumers
 
     max_min_flow_seqs = {}
     for node in nodes:
         max_min_flow_seqs[node] = max([r.n_seqs for r in nodes if r.role == node.role])
-    G.graph["max_min_flow_seqs"] = max_min_flow_seqs
+    _G.graph["max_min_flow_seqs"] = max_min_flow_seqs
 
-    return G
+    return _G

@@ -79,7 +79,7 @@ class ModelName:
         return self
 
 
-@pdclasses.dataclass(frozen=True)
+@pdclasses.dataclass
 class ModelFamily:
     """An identifier for the HF model type, e.g., llama, gpt2, etc.
 

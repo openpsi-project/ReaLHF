@@ -18,7 +18,7 @@ from realhf.api.core.config import (
 logger = logging.getLogger("Quickstart Model Config")
 
 
-@pdclasses.dataclass(frozen=True)
+@pdclasses.dataclass
 class ParallelismConfig:
     """Model 3D parallelism configuration.
 
