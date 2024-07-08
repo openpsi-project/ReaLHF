@@ -2,8 +2,6 @@ import dataclasses
 import enum
 from typing import *
 
-from typing_extensions import Self
-
 import realhf.base.topology as topology
 
 
