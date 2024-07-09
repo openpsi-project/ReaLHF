@@ -187,9 +187,6 @@ class ReaLModelConfig:
             raise ValueError("Critic model cannot share embeddings and output weights.")
         if self.head_dim is None:
             self.head_dim = self.hidden_dim // self.n_q_heads
-        elif self.head_dim != self.hidden_dim // self.n_q_heads:
-            raise ValueError("Head dimension must be hidden_dim // n_q_heads.")
-        return self
 
 
 def load_hf_tokenizer(
