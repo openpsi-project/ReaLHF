@@ -140,7 +140,7 @@ class _TensorDictSequenceBuffer:
 
 
 @dataclass
-class SequenceSample:
+class BufferSeqSample:
     indices: List[int]
     seqlens: List[int]
     hash_vals: List[int]
@@ -304,7 +304,7 @@ class AsyncIOSequenceBuffer:
                 pass
             self._load_data_requested = True
 
-    async def get_batch_for_rpc(self, rpc: dfg.MFCDef) -> SequenceSample:
+    async def get_batch_for_rpc(self, rpc: dfg.MFCDef) -> BufferSeqSample:
         rpc_idx = self._rpc_names.index(rpc.name)
 
         def _can_do_rpc() -> bool:
@@ -377,4 +377,4 @@ class AsyncIOSequenceBuffer:
 
             if self._is_idle[indices].any():
                 self._lock.notify(len(self._rpc_names))
-        return SequenceSample(indices=indices, seqlens=seqlens, hash_vals=hash_vals)
+        return BufferSeqSample(indices=indices, seqlens=seqlens, hash_vals=hash_vals)
