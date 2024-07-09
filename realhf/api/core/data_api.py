@@ -6,18 +6,52 @@ import json
 import os
 import random
 import time
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+
+# NOTE: We don't sue wildcard importing here because the type
+# `Sequence` has a very similar name to `SequenceSample`.
+# We don't want to confuse them.
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Hashable,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import numpy as np
+import torch
 import torch.utils.data
 import transformers
+from pydantic import Field
+from pydantic import dataclasses as pdclasses
+from pydantic import field_validator, model_validator
 
 from realhf.api.core import config as config_api
-from realhf.api.core import model_api
-from realhf.base import datapack, logging, namedarray
+from realhf.base import datapack, logging
 from realhf.base.cluster import spec as cluster_spec
 
 logger = logging.getLogger("api.data")
+
+
+def load_hf_tokenizer(
+    model_name_or_path: str,
+    fast_tokenizer=True,
+    padding_side: Optional[str] = None,
+) -> transformers.PreTrainedTokenizerFast:
+    kwargs = {}
+    if padding_side is not None:
+        kwargs["padding_side"] = padding_side
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
+    )
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    return tokenizer
 
 
 @dataclasses.dataclass
@@ -120,7 +154,7 @@ def make_dataset(
         cfg = config_api.DatasetAbstraction(type_=cfg)
 
     if isinstance(tokenizer_or_tokenizer_name, str):
-        tokenizer = model_api.load_hf_tokenizer(tokenizer_or_tokenizer_name)
+        tokenizer = load_hf_tokenizer(tokenizer_or_tokenizer_name)
     elif tokenizer_or_tokenizer_name is None:
         raise RuntimeError("tokenizer_or_tokenizer_name cannot be None.")
     else:
@@ -204,7 +238,7 @@ def PackedDataLoader(dataset, *args, **kwargs):
     return torch.utils.data.DataLoader(
         dataset,
         *args,
-        collate_fn=gather_sequences,
+        collate_fn=SequenceSample.gather,
         # NOTE: This is *NOT* the actual batch size for training.
         # It is just a proper size to load data to workers.
         batch_size=512,
@@ -221,7 +255,7 @@ def PackedEvalDataLoader(dataset, *args, **kwargs):
     return torch.utils.data.DataLoader(
         dataset,
         *args,
-        collate_fn=gather_sequences,
+        collate_fn=SequenceSample.gather,
         shuffle=False,
         **kwargs,
     )
@@ -231,223 +265,245 @@ register_dataloader("packed", PackedDataLoader)
 register_dataloader("packed_eval", PackedEvalDataLoader)
 
 
-def split_sequences(
-    src: namedarray.NamedArray,
-    n_dp: int = None,
-    return_sizes: bool = False,
-    partitions: Optional[List[Tuple[int, int]]] = None,
-    min_size: int = 1,
-    return_partitions=False,
-) -> List[namedarray.NamedArray]:
-    if src.metadata.get("seqlens", None) is None:
-        raise ValueError("seqlens must be in the metadata of the input namedarray.")
+@pdclasses.dataclass
+class SequenceSplitSpec:
+    partitions: Optional[List[Tuple[int, int]]] = None
+    sizes: Optional[List[int]] = None
 
-    seqlens = src.metadata["seqlens"]
+    @model_validator(mode="after")
+    def _validate_partitions(self) -> "SequenceSplitSpec":
+        if self.partitions is not None:
+            bound = 0
+            for start, end in self.partitions:
+                if start >= end:
+                    raise ValueError(f"Partition {start}-{end} is empty.")
+                if start != bound:
+                    raise ValueError(f"Partition {start}-{end} is not contiguous.")
+                bound = end
 
-    n_seqs = len(seqlens)
-    total_seqlens = sum(seqlens)
+        if self.sizes is None and self.partitions is None:
+            raise ValueError("Either sizes or partitions must be provided.")
+        elif self.sizes is not None and self.partitions is not None:
+            if len(self.sizes) != len(self.partitions):
+                raise ValueError("Sizes and partitions are not the consistent.")
+            if self.sizes != [end - start for start, end in self.partitions]:
+                raise ValueError("Sizes and partitions are not the consistent.")
+        elif self.sizes is None:
+            self.sizes = [end - start for start, end in self.partitions]
+        elif self.partitions is None:
+            offsets = np.cumsum([0] + self.sizes)
+            self.partitions = [
+                (offsets[i], offsets[i + 1]) for i in range(len(self.sizes))
+            ]
 
-    if n_dp is None:
-        partitions = [(i, i + 1) for i in range(len(seqlens))]
-        n_dp = len(seqlens)
+        return self
 
-    if partitions is None:
-        partitions = datapack.min_abs_diff_partition(seqlens, n_dp, min_size)
 
-    batch_sizes = [end - start for start, end in partitions]
+@pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
+class SequenceSample:
+    keys: Set[str]
+    trailing_shapes: Dict[str, torch.Size | Tuple]
+    dtypes: Dict[str, torch.dtype]
 
-    # These are used by log probabilities, which are one-step shorter than packed inputed ids.
-    # We use numpy/list for indexing to avoid host-device synchronization
-    batch_seqlens = [sum(seqlens[start:end]) for start, end in partitions]
-    offsets = [0] + np.cumsum(batch_seqlens).tolist()[:-1]
-    short1batch_seqlens = [
-        sum(seqlens[start:end]) - (end - start) for start, end in partitions
-    ]
-    short1offsets = [0] + np.cumsum(short1batch_seqlens).tolist()[:-1]
+    ids: List[Hashable]
 
-    splitted_data = [collections.defaultdict() for _ in range(n_dp)]
-    for k, v in src.items():
-        for i, sp in enumerate(splitted_data):
-            # NOTE: This is a terrible implementation, because we must know how to split each tensor according to its semantics.
-            # Different tensor has different shape and semantics,
-            # e.g., packed_seq has shape [tot_seqlen] and should be splited according to cumulative lengths,
-            # packed_logprobs has shape [tot_seqlen - bs] (each sequence is one-step shorter) and should be splitted
-            # according to short-1 cumulative lengths, seq_no_eos_mask has shape [bs] and performs similar as input_lens, ...
-            # so we must enumerate each possible key and deal with them separately, etc.
-            if v is None:
-                sp[k] = None
-            elif "cu_seqlens" in k:
-                continue
-            elif k in [
-                "prompt_lens",
-                "input_lens",
-                "seq_no_eos_mask",
-                "rewards",
-                "reward_score",
-                "group_factor",
-                "prompt_lens",
-                "pos_input_lens",
-                "group_input_lens",
-                "seqlogp",
-            ]:
-                assert v.shape[0] == n_seqs, (k, v.shape, total_seqlens, n_seqs)
-                start, end = partitions[i]
-                sp[k] = v[start:end]
-            elif k in [
-                "packed_seq",
-                "packed_logits_mask",
-                "prompt_mask",
-                "packed_input_ids",
-                "values",
-                "logits_mask",
-                "packed_prompts",
-            ]:
-                assert v.shape[0] == total_seqlens, (k, v.shape, total_seqlens, n_seqs)
-                sp[k] = v[offsets[i] : offsets[i] + batch_seqlens[i]]
-            elif k in [
-                "packed_logprobs",
-                "packed_ref_logprobs",
-                "old_logp",
-                "ref_logp",
-                "advantages",
-                "ppo_loss_mask",
-                "kl_rewards",
-                "returns",
-            ]:
-                assert v.shape[0] == total_seqlens - n_seqs, (
-                    k,
-                    v.shape,
-                    total_seqlens,
-                    n_seqs,
+    seqlens: Dict[str, List[torch.Tensor]]
+
+    data: Optional[Dict[str, torch.Tensor]] = None
+    buf_indices: Optional[List[int]] = None
+
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("keys")
+    @classmethod
+    def _validate_keys_type(cls, keys: Iterable) -> Set[str]:
+        keys_ = set(keys)
+        if len(keys_) != len(keys):
+            raise ValueError(f"Keys contain duplicates: {keys}.")
+        return keys_
+
+    @field_validator("seqlens")
+    @classmethod
+    def _validate_seqlens_device_dtype(
+        cls, seqlens: Dict[str, List[torch.Tensor]]
+    ) -> Dict[str, List[torch.Tensor]]:
+        for k, lens in seqlens.items():
+            assert isinstance(lens, list)
+            assert all(isinstance(l, torch.Tensor) for l in lens)
+            for i, lens_ in enumerate(lens):
+                if str(lens_.device) != "cpu":
+                    logger.warning(
+                        "The device of seqlens is not cpu. "
+                        "Transfering data between host and "
+                        "device will cause additional overheads."
+                    )
+                    lens[i] = lens_.cpu()
+                if lens_.dtype != torch.int32:
+                    logger.warning(
+                        "The dtype of seqlens is not int32. " "Converting to int32."
+                    )
+                    lens[i] = lens_.to(torch.int32)
+                if len(lens_.shape) != 1:
+                    raise ValueError(f"Seqlens should be 1D tensors: {lens_}.")
+        return seqlens
+
+    @model_validator(mode="after")
+    def _validate_list_length(self) -> "SequenceSample":
+        cond = True
+        l = len(self.ids)
+        cond &= all(len(lens) == l for lens in self.seqlens.values())
+        if self.buf_indices is not None:
+            cond &= len(self.buf_indices) == l
+        if not cond:
+            raise ValueError(
+                f"Lengths of ids({len(self.ids)})"
+                f"/seqlens({self.seqlens})"
+                f"/buf_indices({len(self.buf_indices)} "
+                "are not the same."
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def _validate_keys(self) -> "SequenceSample":
+        cond = True
+        cond &= self.keys == set(self.seqlens.keys())
+        cond &= self.keys == set(self.trailing_shapes.keys())
+        cond &= self.keys == set(self.dtypes.keys())
+        if self.data is not None:
+            cond &= self.keys == set(self.data.keys())
+        if not cond:
+            err = (
+                f"Keys are mismatched. "
+                f"keys={self.keys}, "
+                f"seqlens keys={set(self.seqlens.keys())}, "
+                f"trailing_shapes keys={set(self.trailing_shapes.keys())}, "
+                f"dtypes keys={set(self.dtypes.keys())}"
+            )
+            if self.data is not None:
+                err += f", data keys={set(self.data.keys())}"
+            raise KeyError(err)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_shapes(self) -> "SequenceSample":
+        if self.data is None:
+            return self
+        acc_seqlen = {
+            k: sum(lens.sum() for lens in lens_list)
+            for k, lens_list in self.seqlens.items()
+        }
+        for k, v in self.data.items():
+            if v.shape != (acc_seqlen[k], *self.trailing_shapes[k]):
+                raise ValueError(
+                    f"Key: {k}, Data shape {v.shape} does not match "
+                    f"configured shape {(acc_seqlen[k], *self.trailing_shapes[k])}."
                 )
-                sp[k] = v[short1offsets[i] : short1offsets[i] + short1batch_seqlens[i]]
-            elif not torch.is_tensor(src[k]):
-                # for constant, preserve value for each splitted instance
-                sp[k] = src[k]
-            else:
-                raise RuntimeError(
-                    f"Unknown key {k} in packed data. We don't know how to split it. "
-                    f"Check api/core/data_api.py for implemented keys."
+        return self
+
+    @model_validator(mode="after")
+    def _validate_dtypes(self) -> "SequenceSample":
+        if self.data is None:
+            return self
+        for k, v in self.data.items():
+            if v.dtype != self.dtypes[k]:
+                raise ValueError(
+                    f"Data dtype {v.dtype} "
+                    f"does not match configured "
+                    f"dtype {self.dtypes[k]}."
                 )
+        return self
 
-    splitted_data = [namedarray.from_dict(dict(x)) for x in splitted_data]
-    for x, (start, end) in zip(splitted_data, partitions):
-        x.register_metadata(seqlens=seqlens[start:end])
-
-    res = [splitted_data]
-    if return_sizes:
-        res.append(batch_sizes)
-    if return_partitions:
-        res.append(partitions)
-
-    if not return_sizes and not return_partitions:
-        return res[0]
-    else:
-        return res
-
-
-def gather_sequences(src: List[namedarray.NamedArray]) -> namedarray.NamedArray:
-    seqlens = []
-    for x in src:
-        if x.metadata.get("seqlens", None) is None:
-            raise ValueError("seqlens must be in the metadata of the input namedarray.")
-        seqlens += x.metadata["seqlens"]
-
-    res = namedarray.recursive_aggregate(src, lambda x: torch.cat(x, dim=0))
-
-    if "cu_seqlens" in src[0]:
-        slens = torch.cat(
-            [x["cu_seqlens"][1:] - x["cu_seqlens"][:-1] for x in src], dim=0
+    @classmethod
+    def gather(cls, samples: List["SequenceSample"]):
+        for sample in samples:
+            if sample.keys != samples[0].keys:
+                raise ValueError("Keys of samples are not the same.")
+        keys = samples[0].keys
+        seqlens = {k: sum([s.seqlens[k] for s in samples], []) for k in keys}
+        if samples[0].buf_indices is not None:
+            buf_indices = sum([s.buf_indices for s in samples], [])
+        else:
+            assert all(s.buf_indices is None for s in samples)
+            buf_indices = None
+        if samples[0].data is not None:
+            data = {k: torch.cat([s.data[k] for s in samples], dim=0) for k in keys}
+        else:
+            assert all(s.data is None for s in samples)
+            data = None
+        id_ = sum([s.ids for s in samples], [])
+        metadata = {}
+        for sample in samples:
+            for k, v in sample.metadata.items():
+                if k in metadata and metadata[k] != v:
+                    raise ValueError(
+                        f"Metadata {k} is not the same: {v} and {metadata[k]}."
+                    )
+                metadata[k] = v
+        return cls(
+            keys=keys,
+            dtypes=samples[0].dtypes,
+            trailing_shapes=samples[0].trailing_shapes,
+            ids=id_,
+            seqlens=seqlens,
+            buf_indices=buf_indices,
+            data=data,
+            metadata=metadata,
         )
-        res["cu_seqlens"] = torch.nn.functional.pad(slens.cumsum(dim=0), (1, 0)).int()
 
-    if "prompt_cu_seqlens" in src[0]:
-        slens = torch.cat(
-            [x["prompt_cu_seqlens"][1:] - x["prompt_cu_seqlens"][:-1] for x in src],
-            dim=0,
-        )
-        res["prompt_cu_seqlens"] = torch.nn.functional.pad(
-            slens.cumsum(dim=0), (1, 0)
-        ).int()
+    def _get_split_key(self):
+        acc_seqlen = {k: sum(l.sum() for l in lens) for k, lens in self.seqlens.items()}
+        return max(acc_seqlen, key=acc_seqlen.get)
 
-    res.register_metadata(seqlens=seqlens)
-    return res
+    def get_split_spec(
+        self, k: int, key: Optional[str] = None, min_size: int = 1
+    ) -> SequenceSplitSpec:
+        if key is None:
+            key = self._get_split_key()
+        lens = [lens.sum() for lens in self.seqlens[key]]
+        partitions = datapack.min_abs_diff_partition(lens, k, min_size)
+        return SequenceSplitSpec(partitions=partitions)
 
+    def split_with_spec(self, spec: SequenceSplitSpec) -> List["SequenceSample"]:
+        samples = []
+        data_offset = {k: 0 for k in self.keys}
+        for start, end in spec.partitions:
+            new_seqlens = {
+                k: lens_list[start:end] for k, lens_list in self.seqlens.items()
+            }
+            _data_len = {
+                k: sum(lens.sum() for lens in lens_list)
+                for k, lens_list in new_seqlens.items()
+            }
+            new_data = {
+                k: v[data_offset[k] : _data_len[k] + data_offset[k]]
+                for k, v in self.data.items()
+            }
+            for k in self.keys:
+                data_offset[k] += _data_len[k]
+            new_buf_indices = (
+                self.buf_indices[start:end] if self.buf_indices is not None else None
+            )
+            new_id = self.ids[start:end]
+            samples.append(
+                SequenceSample(
+                    dtypes=self.dtypes,
+                    trailing_shapes=self.trailing_shapes,
+                    keys=self.keys,
+                    ids=new_id,
+                    seqlens=new_seqlens,
+                    buf_indices=new_buf_indices,
+                    data=new_data,
+                    metadata=self.metadata,
+                )
+            )
+        return samples
 
-def get_shape_from_key_and_seqlen(k: str, seqlen: int, vocab_size: int):
-    if k in [
-        "input_lens",
-        "prompt_lens",
-        "seq_no_eos_mask",
-        "rewards",
-        "reward_score",
-        "group_factor",
-        "pos_input_lens",
-    ]:
-        shape = (1,)
-    elif k in ["cu_seqlens", "prompt_cu_seqlens"]:
-        shape = (2,)
-    # FIXME: problem here if we use groups instead of pairs?
-    elif k in ["seqlogp"]:
-        shape = (1, 2)
-    elif k in [
-        "packed_seq",
-        "prompt_mask",
-        "packed_input_ids",
-        "values",
-        "packed_prompts",
-    ]:
-        shape = (seqlen,)
-    elif k in [
-        "packed_logprobs",
-        "packed_ref_logprobs",
-        "old_logp",
-        "ref_logp",
-        "advantages",
-        "ppo_loss_mask",
-        "kl_rewards",
-        "returns",
-    ]:
-        shape = (seqlen - 1,)
-    elif k in ["logits_mask", "packed_logits_mask"]:
-        shape = (seqlen, vocab_size)
-    else:
-        raise NotImplementedError(f"Unknown key {k} in packed data.")
-    return shape
-
-
-def get_dtype_from_key(k: str):
-    if k in [
-        "seq_no_eos_mask",
-        "ppo_loss_mask",
-        "prompt_mask",
-        "logits_mask",
-        "packed_logits_mask",
-    ]:
-        dtype = torch.bool
-    elif k in [
-        "reward_score",
-        "packed_ref_logprobs",
-        "old_logp",
-        "ref_logp",
-        "advantages",
-        "kl_rewards",
-        "returns",
-        "values",
-    ]:
-        dtype = torch.float16
-    elif k in [
-        "input_lens",
-        "prompt_lens",
-        "cu_seqlens",
-        "prompt_cu_seqlens",
-        "pos_input_lens",
-    ]:
-        dtype = torch.int32
-    elif k in ["packed_seq", "packed_input_ids", "packed_prompts"]:
-        dtype = torch.int64
-    elif k in ["rewards", "packed_logprobs", "group_factor", "seqlogp"]:
-        dtype = torch.float32
-    else:
-        raise NotImplementedError(f"Unknown key {k} in packed data.")
-    return dtype
+    def split(
+        self,
+        k: int,
+        key: Optional[str] = None,
+        min_size: int = 1,
+    ) -> List["SequenceSample"]:
+        spec = self.get_split_spec(k, key, min_size)
+        return self.split_with_spec(spec)

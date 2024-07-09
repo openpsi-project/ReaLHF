@@ -19,7 +19,6 @@ from .api.quickstart.model import (
     OptimizerConfig,
     ParallelismConfig,
 )
-from .base.namedarray import NamedArray
 from .experiments.common.common import CommonExperimentConfig, ExperimentSaveEvalControl
 from .experiments.common.dpo_exp import DPOConfig
 from .experiments.common.gen_exp import GenerationConfig

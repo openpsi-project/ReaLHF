@@ -3,7 +3,7 @@ from typing import Callable, Dict, List, Optional
 import torch.utils.data
 
 from realhf.api.core import data_api
-from realhf.base import logging, namedarray
+from realhf.base import logging
 
 logger = logging.getLogger("Prompt Dataset")
 
@@ -60,11 +60,14 @@ class PromptDataset(torch.utils.data.Dataset):
         return len(self.prompts)
 
     def __getitem__(self, idx):
-        x = namedarray.NamedArray(
-            packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long),
+        return data_api.SequenceSample(
+            keys=["packed_prompts"],
+            trailing_shapes=dict(packed_prompts=()),
+            dtypes=dict(packed_prompts=torch.long),
+            ids=[idx],
+            seqlens=dict(packed_prompts=[torch.tensor([self.prompt_lengths[idx]])]),
+            data=dict(packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long)),
         )
-        x.register_metadata(seqlens=[self.prompt_lengths[idx]])
-        return x
 
 
 data_api.register_dataset("prompt", PromptDataset)
