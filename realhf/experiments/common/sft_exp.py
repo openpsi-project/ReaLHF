@@ -1,17 +1,17 @@
 import dataclasses
 
-from omegaconf import MISSING
-
-from realhf.api.core.dfg import MFCDef, ModelFamily, ModelInterface, ModelInterfaceType
-from realhf.api.core.system_api import *
+from realhf.api.core.config import (
+    DataLoaderAbstraction,
+    DatasetAbstraction,
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+    ModelName,
+)
+from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PromptAnswerDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
-from realhf.api.quickstart.model import (
-    ModelTrainEvalConfig,
-    OptimizerConfig,
-    get_real_model_config,
-)
+from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
 
 
@@ -46,28 +46,27 @@ class SFTConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterface("sft")
         rpc = MFCDef(
-            model_name=ModelName("default", 0),
+            n_seqs=self.dataset.train_bs_n_seqs,
+            name="trainDefault",
             interface_type=ModelInterfaceType.TRAIN_STEP,
-            interface_impl=interface,
+            interface_impl=ModelInterfaceAbstraction("sft"),
+            model_name="default",
+            input_keys=["packed_input_ids", "prompt_mask"],
+            log_return_value=True,
             model_type=self.model.type,
             model_path=self.model.path,
-            input_data=["packed_input_ids", "prompt_mask"],
-            log_return_value=True,
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
         )
-        return {"default": rpc}
+        return {"trainDefault": rpc}
 
     @property
     def allocations(self):
-        return {"default": self.allocation}
+        return {"trainDefault": self.allocation}
 
     @property
     def datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "prompt_answer",
                 args=dict(
                     max_length=self.dataset.max_seqlen,
@@ -77,13 +76,9 @@ class SFTConfig(CommonExperimentConfig):
         ]
 
     @property
-    def allocations(self):
-        return {"default": self.allocation}
-
-    @property
     def eval_datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "prompt_answer",
                 args=dict(
                     max_length=self.dataset.max_seqlen,
@@ -94,7 +89,7 @@ class SFTConfig(CommonExperimentConfig):
 
     @property
     def eval_dataloader(self):
-        return DataLoader(
+        return DataLoaderAbstraction(
             "packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs)
         )
 

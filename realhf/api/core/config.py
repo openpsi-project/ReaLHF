@@ -1,47 +1,63 @@
 import dataclasses
+import enum
 from typing import *
 
 import realhf.base.topology as topology
 
 
 @dataclasses.dataclass
-class Dataset:
+class DatasetAbstraction:
     type_: str
     args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
-class DataLoader:
+class DataLoaderAbstraction:
     type_: str = "default"
     args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
-class ModelWrapper:
+class ModelWrapperAbstraction:
     type_: str
     args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
-class Model:
+class ModelAbstraction:
     type_: str
     args: Dict[str, Any] = dataclasses.field(default_factory=dict)
-    wrappers: List[ModelWrapper] = dataclasses.field(default_factory=list)
+    wrappers: List[ModelWrapperAbstraction] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
-class ModelBackend:
+class ModelBackendAbstraction:
     type_: str
     args: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-@dataclasses.dataclass(unsafe_hash=True, order=True)
+@dataclasses.dataclass
+class ModelInterfaceAbstraction:
+    type_: str  # This type is the
+    args: Dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
+class ModelInterfaceType(enum.Enum):
+    GENERATE = "generate"
+    TRAIN_STEP = "train_step"
+    EVALUATE = "evaluate"
+    INFERENCE = "inference"
+
+
+@dataclasses.dataclass(unsafe_hash=True, order=True, frozen=True)
 class ModelName:
     """A unique identifier for a model.
 
     :param role: The role of the model, e.g. "actor", "critic".
     :type role: str
     :param replica_id: The replica id of the model.
+        Different replicas of the same role have the same
+        set of parameters with different memory locations.
     :type replica_id: int
     """
 
@@ -134,13 +150,13 @@ class ModelShardID:
 
 
 @dataclasses.dataclass
-class StandaloneModelShard:
+class StandaloneModelShardAbstraction:
     id: ModelShardID
-    model: Model
-    backend: ModelBackend
+    model: ModelAbstraction
+    backend: ModelBackendAbstraction
     # evaluation
-    eval_datasets: Optional[List[Dataset]] = None
-    eval_dataloader: Optional[DataLoader] = DataLoader(
+    eval_datasets: Optional[List[DatasetAbstraction]] = None
+    eval_dataloader: Optional[DataLoaderAbstraction] = DataLoaderAbstraction(
         "packed_eval", args=dict(batch_size=128)
     )
     should_instantiate: bool = True

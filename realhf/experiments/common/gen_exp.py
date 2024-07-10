@@ -1,10 +1,13 @@
 import dataclasses
 
-from omegaconf import MISSING
-
-from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
+from realhf.api.core.config import (
+    DatasetAbstraction,
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+    ModelName,
+)
+from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
-from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
@@ -14,7 +17,7 @@ from realhf.experiments.common.common import CommonExperimentConfig
 
 @dataclasses.dataclass
 class GenerationConfig(CommonExperimentConfig):
-    """Generation experiment configuration. Used for testing only.
+    """Generation experiment configuration.
 
     It is a subclass of :class:`CommonExperimentConfig`,
     so all CLI options in the base class are available.
@@ -48,24 +51,26 @@ class GenerationConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterface("generation", args={"generation_config": self.gen})
+        interface = ModelInterfaceAbstraction(
+            "generation", args={"generation_config": self.gen}
+        )
         gen = MFCDef(
+            name="gen",
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.model,
             model_path=self.model,
             interface_impl=interface,
-            input_data=["packed_prompts"],
+            input_keys=["packed_prompts"],
             balanced_dp=True,
             log_return_value=True,
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
-        return {"default": gen}
+        return {"gen": gen}
 
     @property
     def allocations(self):
-        return {"default": self.allocation}
+        return {"gen": self.allocation}
 
     @property
     def max_prompt_len(self):
@@ -74,7 +79,7 @@ class GenerationConfig(CommonExperimentConfig):
     @property
     def datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "prompt",
                 args=dict(
                     dataset_path=self.dataset.path,
@@ -85,20 +90,8 @@ class GenerationConfig(CommonExperimentConfig):
         ]
 
     @property
-    def allocations(self):
-        return {"default": self.allocation}
-
-    @property
     def tokenizer_name_or_path(self):
         return self.model.path
-
-    @property
-    def exp_ctrl(self):
-        return ExperimentSaveEvalControl(
-            total_train_epochs=1,
-            save_freq_steps=None,
-            eval_freq_epochs=None,
-        )
 
 
 register_quickstart_exp("gen", GenerationConfig)

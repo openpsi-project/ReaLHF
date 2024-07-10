@@ -38,8 +38,8 @@ python3 -m realhf.apps.quickstart dpo \
     allocation_mode=manual \
     actor.type._class=$MODEL_FAMILY \
     actor.path=$PRETRAINED_PATH \
-    actor_train.parallel.pipeline_parallel_size=1 \
-    actor_train.parallel.model_parallel_size=2 \
+    actor_train.parallel.pipeline_parallel_size=2 \
+    actor_train.parallel.model_parallel_size=1 \
     actor_train.parallel.data_parallel_size=4 \
     actor_train.parallel.use_sequence_parallel=True \
     ref.type._class=$MODEL_FAMILY \

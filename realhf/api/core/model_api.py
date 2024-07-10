@@ -1,21 +1,23 @@
 import abc
-import copy
 import dataclasses
 import keyword
-import os
-from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import *
 
 import torch
 import torch.utils.data
 import transformers
 
 import realhf.base.logging as logging
-from realhf.api.core import dfg, system_api
-from realhf.api.core.config import ModelFamily, ModelName
+from realhf.api.core.config import (
+    ModelAbstraction,
+    ModelBackendAbstraction,
+    ModelInterfaceAbstraction,
+    ModelName,
+    ModelWrapperAbstraction,
+)
 from realhf.base.namedarray import NamedArray
 
-logger = logging.getLogger("model")
+logger = logging.getLogger("model_api")
 
 
 @dataclasses.dataclass
@@ -321,16 +323,15 @@ def register_wrapper(name, cls_):
 
 
 def make_model_wrapper(
-    cfg: system_api.ModelWrapper,
+    cfg: ModelWrapperAbstraction,
 ) -> Callable[[Model], Model]:
     cls_ = ALL_WRAPPER_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 
 
 def make_model(
-    cfg: system_api.Model, name: ModelName, device: Union[str, torch.device]
+    cfg: ModelAbstraction, name: ModelName, device: Union[str, torch.device]
 ) -> Model:
-    logger.debug(f"making model {cfg.type_} on {device}")
     model_cls = ALL_MODEL_CLASSES[cfg.type_]
     model = model_cls(**cfg.args, name=name, device=device)
     assert isinstance(model, Model)
@@ -340,12 +341,12 @@ def make_model(
     return model
 
 
-def make_interface(cfg: dfg.ModelInterface) -> ModelInterface:
+def make_interface(cfg: ModelInterfaceAbstraction) -> ModelInterface:
     cls_ = ALL_INTERFACE_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 
 
-def make_backend(cfg: system_api.ModelBackend) -> ModelBackend:
+def make_backend(cfg: ModelBackendAbstraction) -> ModelBackend:
     cls_ = ALL_BACKEND_CLASSES[cfg.type_]
     return cls_(**cfg.args)
 
