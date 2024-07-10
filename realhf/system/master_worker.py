@@ -505,9 +505,7 @@ async def model_rpc_request_func(
         buf_indices, sample = await buffer.get_batch_for_rpc(rpc)
 
         if rpc.is_src:
-            ctrl.ids_to_clear = ctrl.ids_to_clear.union(
-                sample.ids
-            )
+            ctrl.ids_to_clear = ctrl.ids_to_clear.union(sample.ids)
             ctrl.used_hash_vals_this_epoch = ctrl.used_hash_vals_this_epoch.union(
                 sample.ids
             )
@@ -714,7 +712,9 @@ async def load_data_func(
                 for xx in x.meta_sample.unpack():
                     all_data.append(xx)
                     if xx.ids[0] in received_ids:
-                        raise ValueError(f"Duplicate data id {xx.ids[0]}. Is the final batch? {is_final_batch}.")
+                        raise ValueError(
+                            f"Duplicate data id {xx.ids[0]}. Is the final batch? {is_final_batch}."
+                        )
                     received_ids.add(xx.ids[0])
 
             # Store the owner information of the data.
@@ -1435,10 +1435,7 @@ class MasterWorker(worker_base.Worker):
             self.__stream,
             [vs[0] for vs in self.__mwid2msids.values()],
             "clear_data_cache",
-            [
-                self.__rpc_ctrl.ids_to_clear
-                for _ in self.__all_model_handlers
-            ],
+            [self.__rpc_ctrl.ids_to_clear for _ in self.__all_model_handlers],
         )
         self.__rpc_ctrl.ids_to_clear.clear()
 

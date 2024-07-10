@@ -202,6 +202,7 @@ class FinetuneSpec:
     total_train_steps: int
     steps_per_epoch: int
 
+
 class PipelinableEngine(abc.ABC):
     @abc.abstractmethod
     def train_batch(
@@ -242,6 +243,7 @@ class PipelinableEngine(abc.ABC):
     ):
         raise NotImplementedError()
 
+
 @dataclasses.dataclass
 class Model:
     name: ModelName
@@ -278,9 +280,6 @@ class ModelBackend(abc.ABC):
     def initialize(self, model: Model, spec: FinetuneSpec) -> Model:
         model.ft_spec = spec
         return self._initialize(model, spec)
-
-
-
 
 
 class NullBackend(ModelBackend):

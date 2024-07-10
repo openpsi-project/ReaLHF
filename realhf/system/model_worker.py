@@ -366,7 +366,7 @@ class ModelWorker(worker_base.Worker):
         self.__reply_queue = queue.Queue(maxsize=8)
         self.__request_sample_size = dict()
 
-        # Storing data loaded from the dataset and outputs of the 
+        # Storing data loaded from the dataset and outputs of the
         # model function call.
         self.__data_storage: Dict[int, data_api.SequenceSample] = {}
 

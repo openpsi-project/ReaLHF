@@ -179,8 +179,6 @@ def derive_data_transfer_plan(
     return comm_plan
 
 
-
-
 def run_data_transfer(
     comm_plan: List[DataTransferReceiverStep | DataTransferSenderStep],
     meta_samples: Dict[int, SequenceSample],
