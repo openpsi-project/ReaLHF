@@ -54,8 +54,13 @@ class DeviceMesh:
                 if self.n_nodes > 1
                 else f"{cluster_spec.node_name_prefix}01"
             )
+            if self.n_gpus_per_node < 8:
+                self.global_mesh_name += ":" + ",".join(
+                    map(str, range(self.n_gpus_per_node))
+                )
 
         if self.global_mesh_name is not None and self.name is None:
+            print(self.mapping.shape, self.n_nodes, self.n_gpus_per_node)
             self.name = device_mesh_name_from_mapping(
                 self.global_mesh_name, self.mapping
             )
@@ -218,7 +223,11 @@ def device_mesh_name_from_mapping(global_mesh_name: str, mapping: np.ndarray):
     prefix = cluster_spec.node_name_prefix
     node_list = parse_nodelist(global_mesh_name, prefix)
     n_nodes = len(node_list)
-    n_gpus_per_node = 8
+    n_gpus_per_node = (
+        8
+        if ":" not in global_mesh_name
+        else len(global_mesh_name.split(":")[1].split(","))
+    )
     assert mapping.shape == (n_nodes, n_gpus_per_node)
     node_indices, gpu_ids = np.where(mapping == 1)
 

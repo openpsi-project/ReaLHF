@@ -92,13 +92,5 @@ class GenerationConfig(CommonExperimentConfig):
     def tokenizer_name_or_path(self):
         return self.model.path
 
-    @property
-    def exp_ctrl(self):
-        return ExperimentSaveEvalControl(
-            total_train_epochs=1,
-            save_freq_steps=None,
-            eval_freq_epochs=None,
-        )
-
 
 register_quickstart_exp("gen", GenerationConfig)
