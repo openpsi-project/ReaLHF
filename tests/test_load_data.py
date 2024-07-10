@@ -43,6 +43,7 @@ def dataset_and_tokenizer(request, tmp_path_factory):
         resp_len = random.randint(1, max_resp_len)
         n_pairs = random.randint(1, 5)
         d = dict(
+            id=i,
             prompt=generate_random_sentence(prompt_len),
             answer=generate_random_sentence(prompt_len)
             + generate_random_sentence(resp_len),

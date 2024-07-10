@@ -12,8 +12,7 @@ import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 import realhf.impl.model.utils.ppo_functional as ppo_functional
-from realhf.api.core import data_api
-from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
+from realhf.api.core.data_api import SequenceSample
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output
 from realhf.impl.model.utils.functional import (
@@ -172,7 +171,7 @@ class PPOActorInterface(model_api.ModelInterface):
         )
 
     @torch.no_grad()
-    def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def generate(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
         module = model.module
 
         module.eval()
@@ -241,7 +240,7 @@ class PPOActorInterface(model_api.ModelInterface):
         return res
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -269,7 +268,7 @@ class PPOActorInterface(model_api.ModelInterface):
         res.register_metadata(seqlens=data.metadata["seqlens"])
         return res
 
-    def train_step(self, model: model_api.Model, data_: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, data_: SequenceSample) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
@@ -361,7 +360,7 @@ class PPOActorInterface(model_api.ModelInterface):
             )
         )
         data_.register_metadata(seqlens=batch_seqlens)
-        datas = data_api.split_sequences(
+        datas = xxx(
             data_,
             self.n_minibatches,
             min_size=constants.pipe_parallel_world_size() * 2,
@@ -583,7 +582,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         )
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -606,7 +605,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         res.register_metadata(seqlens=data.metadata["seqlens"])
         return res
 
-    def train_step(self, model: model_api.Model, data_: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, data_: SequenceSample) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
@@ -696,7 +695,7 @@ class PPOCriticInterface(model_api.ModelInterface):
             )
         )
         data_.register_metadata(seqlens=batch_seqlens)
-        datas = data_api.split_sequences(
+        datas = xx(
             data_,
             self.n_minibatches,
             min_size=constants.pipe_parallel_world_size() * 2,

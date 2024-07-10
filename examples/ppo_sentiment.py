@@ -8,11 +8,11 @@ import transformers
 
 from realhf.api.core import config as config_api
 from realhf.api.core import dfg, model_api, system_api
+from realhf.api.core.data_api import SequenceSample
 from realhf.api.core.system_api import ExperimentConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.apps.quickstart import main
 from realhf.base import logging
-from realhf.base.namedarray import NamedArray
 from realhf.experiments.common.ppo_exp import PPOConfig
 
 logger = logging.getLogger("Sentiment PPO example")
@@ -35,7 +35,7 @@ class SentimentScoringInterface(model_api.ModelInterface):
         )
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
         packed_input_ids: torch.Tensor = data["packed_input_ids"]
         seqlens_cpu: List[int] = data.metadata["seqlens"]
         max_seqlen = max(seqlens_cpu)
@@ -81,6 +81,7 @@ class SentimentScoringInterface(model_api.ModelInterface):
         #     )
         # #####################################################
 
+        # FIXME:
         res = NamedArray(scores=scores)
         res.register_metadata(**data.metadata)
         return res

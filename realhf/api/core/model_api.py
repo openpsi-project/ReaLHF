@@ -202,11 +202,50 @@ class FinetuneSpec:
     total_train_steps: int
     steps_per_epoch: int
 
+class PipelinableEngine(abc.ABC):
+    @abc.abstractmethod
+    def train_batch(
+        self,
+        input_: SequenceSample,
+        loss_fn: Callable,
+        version_steps: int,
+        num_micro_batches: Optional[int] = None,
+    ):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def eval_batch(
+        self,
+        input_: SequenceSample,
+        loss_fn: Callable,
+        num_micro_batches: Optional[int] = None,
+    ):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def forward(
+        self,
+        input_: SequenceSample,
+        num_micro_batches: Optional[int] = None,
+    ):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def generate(
+        self,
+        input_: SequenceSample,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        gconfig: GenerationHyperparameters = dataclasses.field(
+            default_factory=GenerationHyperparameters
+        ),
+        num_micro_batches: Optional[int] = None,
+    ):
+        raise NotImplementedError()
 
 @dataclasses.dataclass
 class Model:
     name: ModelName
-    module: torch.nn.Module
+    module: PipelinableEngine | torch.nn.Module
     tokenizer: transformers.PreTrainedTokenizerFast
     device: Union[str, torch.device]
     dtype: Optional[torch.dtype] = None
@@ -239,6 +278,9 @@ class ModelBackend(abc.ABC):
     def initialize(self, model: Model, spec: FinetuneSpec) -> Model:
         model.ft_spec = spec
         return self._initialize(model, spec)
+
+
+
 
 
 class NullBackend(ModelBackend):

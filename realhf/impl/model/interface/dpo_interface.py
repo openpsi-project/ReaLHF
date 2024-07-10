@@ -9,8 +9,8 @@ import tqdm
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 import realhf.impl.model.utils.dpo_functional as dpo_functional
+from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants
-from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
 
@@ -93,7 +93,7 @@ class DPOInterface(model_api.ModelInterface):
     enable_save: bool = True
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
         module = model.module
         module.eval()
         data = recursive_apply(data, lambda x: x.to(model.device))
@@ -150,7 +150,7 @@ class DPOInterface(model_api.ModelInterface):
         x.register_metadata(**data.metadata)
         return x
 
-    def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, data: SequenceSample) -> Dict:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]

@@ -15,15 +15,7 @@ import torch
 import torch.utils.data
 
 import realhf.api.core.data_api as data_api
-from realhf.base import (
-    constants,
-    gpu_utils,
-    logging,
-    name_resolve,
-    namedarray,
-    names,
-    topology,
-)
+from realhf.base import constants, gpu_utils, logging, name_resolve, names, topology
 from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
 logger = logging.getLogger("testing")
@@ -265,6 +257,7 @@ def make_random_packed_batches(
     dp_rank=None,
     dp_size=None,
 ):
+    # FIXME
     assert (dp_rank is None and dp_size is None) or (
         dp_rank is not None and dp_size is not None
     )
@@ -282,7 +275,7 @@ def make_random_packed_batches(
     batches = [
         seqs[j * dp_batch_size : (j + 1) * dp_batch_size] for j in range(n_batches)
     ]
-    batches = [data_api.gather_sequences(batch) for batch in batches]
+    batches = [xxx(batch) for batch in batches]
     return batches
 
 

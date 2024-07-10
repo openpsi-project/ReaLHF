@@ -4,7 +4,7 @@ from typing import Dict, Optional, Tuple
 import torch
 
 import realhf.api.core.model_api as model_api
-from realhf.base.namedarray import NamedArray, recursive_apply
+from realhf.api.core.data_api import SequenceSample
 
 
 @dataclasses.dataclass
@@ -14,7 +14,7 @@ class GenerationInterface(model_api.ModelInterface):
     )
 
     @torch.no_grad()
-    def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def generate(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
         module = model.module
 
         module.eval()

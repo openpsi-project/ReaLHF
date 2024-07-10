@@ -1,5 +1,4 @@
 import realhf.base.constants as constants
-import realhf.base.namedarray
 from realhf.api.core.model_api import ReaLModelConfig
 
 

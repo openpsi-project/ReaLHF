@@ -10,8 +10,8 @@ import tqdm
 
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
+from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants
-from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 
 logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")
@@ -97,7 +97,7 @@ class PairedRewardInterface(model_api.ModelInterface):
     train_total_correct_predictions: int = 0
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
         data = recursive_apply(data, lambda x: x.to(model.device))
         packed_input_ids: torch.Tensor = data["packed_seq"]
         seqlens_cpu = data.metadata["seqlens"]
@@ -139,7 +139,9 @@ class PairedRewardInterface(model_api.ModelInterface):
         res.register_metadata(**data.metadata)
         return res
 
-    def train_step(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def train_step(
+        self, model: model_api.Model, data: SequenceSample
+    ) -> SequenceSample:
         data = recursive_apply(data, lambda x: x.to(model.device))
 
         packed_input_ids: torch.Tensor = data["packed_input_ids"]

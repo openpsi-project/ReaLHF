@@ -54,14 +54,292 @@ def load_hf_tokenizer(
     return tokenizer
 
 
+@pdclasses.dataclass
+class SequenceSplitSpec:
+    partitions: Optional[List[Tuple[int, int]]] = None
+    sizes: Optional[List[int]] = None
+
+    @model_validator(mode="after")
+    def _validate_partitions(self) -> "SequenceSplitSpec":
+        if self.partitions is not None:
+            bound = 0
+            for start, end in self.partitions:
+                if start >= end:
+                    raise ValueError(f"Partition {start}-{end} is empty.")
+                if start != bound:
+                    raise ValueError(f"Partition {start}-{end} is not contiguous.")
+                bound = end
+
+        if self.sizes is None and self.partitions is None:
+            raise ValueError("Either sizes or partitions must be provided.")
+        elif self.sizes is not None and self.partitions is not None:
+            if len(self.sizes) != len(self.partitions):
+                raise ValueError("Sizes and partitions are not the consistent.")
+            if self.sizes != [end - start for start, end in self.partitions]:
+                raise ValueError("Sizes and partitions are not the consistent.")
+        elif self.sizes is None:
+            self.sizes = [end - start for start, end in self.partitions]
+        elif self.partitions is None:
+            offsets = np.cumsum([0] + self.sizes)
+            self.partitions = [
+                (offsets[i], offsets[i + 1]) for i in range(len(self.sizes))
+            ]
+
+        return self
+
+
+@pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
+class SequenceSample:
+    keys: Set[str]
+    trailing_shapes: Dict[str, torch.Size | Tuple]
+    dtypes: Dict[str, torch.dtype]
+
+    ids: List[Hashable]
+
+    seqlens: Dict[str, List[torch.Tensor]]
+
+    data: Optional[Dict[str, torch.Tensor]] = None
+
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("ids")
+    @classmethod
+    def _validate_ids(cls, ids: List[Hashable]) -> List[Hashable]:
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"IDs contain duplicates: {ids}.")
+        return ids
+
+    @field_validator("keys")
+    @classmethod
+    def _validate_keys_type(cls, keys: Iterable) -> Set[str]:
+        keys_ = set(keys)
+        if len(keys_) != len(keys):
+            raise ValueError(f"Keys contain duplicates: {keys}.")
+        return keys_
+
+    @field_validator("seqlens")
+    @classmethod
+    def _validate_seqlens_device_dtype(
+        cls, seqlens: Dict[str, List[torch.Tensor]]
+    ) -> Dict[str, List[torch.Tensor]]:
+        for k, lens in seqlens.items():
+            assert isinstance(lens, list)
+            assert all(isinstance(l, torch.Tensor) for l in lens)
+            for i, lens_ in enumerate(lens):
+                if str(lens_.device) != "cpu":
+                    logger.warning(
+                        "The device of seqlens is not cpu. "
+                        "Transfering data between host and "
+                        "device will cause additional overheads."
+                    )
+                    lens[i] = lens_.cpu()
+                if lens_.dtype != torch.int32:
+                    logger.warning(
+                        "The dtype of seqlens is not int32. " "Converting to int32."
+                    )
+                    lens[i] = lens_.to(torch.int32)
+                if len(lens_.shape) != 1:
+                    raise ValueError(f"Seqlens should be 1D tensors: {lens_}.")
+        return seqlens
+
+    @model_validator(mode="after")
+    def _validate_list_length(self) -> "SequenceSample":
+        cond = True
+        l = len(self.ids)
+        cond &= all(len(lens) == l for lens in self.seqlens.values())
+        if not cond:
+            raise ValueError(
+                f"Lengths of ids({len(self.ids)})"
+                f"/seqlens({self.seqlens}) "
+                "are not the same."
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def _validate_keys(self) -> "SequenceSample":
+        cond = True
+        cond &= self.keys == set(self.seqlens.keys())
+        cond &= self.keys == set(self.trailing_shapes.keys())
+        cond &= self.keys == set(self.dtypes.keys())
+        if self.data is not None:
+            cond &= self.keys == set(self.data.keys())
+        if not cond:
+            err = (
+                f"Keys are mismatched. "
+                f"keys={self.keys}, "
+                f"seqlens keys={set(self.seqlens.keys())}, "
+                f"trailing_shapes keys={set(self.trailing_shapes.keys())}, "
+                f"dtypes keys={set(self.dtypes.keys())}"
+            )
+            if self.data is not None:
+                err += f", data keys={set(self.data.keys())}"
+            raise KeyError(err)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_shapes(self) -> "SequenceSample":
+        if self.data is None:
+            return self
+        acc_seqlen = {
+            k: sum(lens.sum() for lens in lens_list)
+            for k, lens_list in self.seqlens.items()
+        }
+        for k, v in self.data.items():
+            if v.shape != (acc_seqlen[k], *self.trailing_shapes[k]):
+                raise ValueError(
+                    f"Key: {k}, Data shape {v.shape} does not match "
+                    f"configured shape {(acc_seqlen[k], *self.trailing_shapes[k])}."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_dtypes(self) -> "SequenceSample":
+        if self.data is None:
+            return self
+        for k, v in self.data.items():
+            if v.dtype != self.dtypes[k]:
+                raise ValueError(
+                    f"Data dtype {v.dtype} "
+                    f"does not match configured "
+                    f"dtype {self.dtypes[k]}."
+                )
+        return self
+
+    @classmethod
+    def gather(cls, samples: List["SequenceSample"], keys: Optional[List[str]] = None):
+        if keys is None:
+            for sample in samples:
+                if sample.keys != samples[0].keys:
+                    raise ValueError("Keys of samples are not the same.")
+            keys = samples[0].keys
+        else:
+            for k in keys:
+                assert all(k in s.keys for s in samples)
+
+        seqlens = {k: sum([s.seqlens[k] for s in samples], []) for k in keys}
+        if samples[0].data is not None:
+            data = {k: torch.cat([s.data[k] for s in samples], dim=0) for k in keys}
+        else:
+            assert all(s.data is None for s in samples)
+            data = None
+        id_ = sum([s.ids for s in samples], [])
+        metadata = {}
+        for sample in samples:
+            for k, v in sample.metadata.items():
+                if k in metadata and metadata[k] != v:
+                    raise ValueError(
+                        f"Metadata {k} is not the same: {v} and {metadata[k]}."
+                    )
+                metadata[k] = v
+        return cls(
+            keys=keys,
+            dtypes=samples[0].dtypes,
+            trailing_shapes=samples[0].trailing_shapes,
+            ids=id_,
+            seqlens=seqlens,
+            data=data,
+            metadata=metadata,
+        )
+
+    def _get_split_key(self):
+        acc_seqlen = {k: sum(l.sum() for l in lens) for k, lens in self.seqlens.items()}
+        return max(acc_seqlen, key=acc_seqlen.get)
+
+    def get_split_spec(
+        self, k: int, key: Optional[str] = None, min_size: int = 1
+    ) -> SequenceSplitSpec:
+        if key is None:
+            key = self._get_split_key()
+        lens = [lens.sum() for lens in self.seqlens[key]]
+        partitions = datapack.min_abs_diff_partition(lens, k, min_size)
+        return SequenceSplitSpec(partitions=partitions)
+
+    def split_with_spec(self, spec: SequenceSplitSpec) -> List["SequenceSample"]:
+        samples = []
+        data_offset = {k: 0 for k in self.keys}
+        for start, end in spec.partitions:
+            new_seqlens = {
+                k: lens_list[start:end] for k, lens_list in self.seqlens.items()
+            }
+            _data_len = {
+                k: sum(lens.sum() for lens in lens_list)
+                for k, lens_list in new_seqlens.items()
+            }
+            if self.data is not None:
+                new_data = {
+                    k: v[data_offset[k] : _data_len[k] + data_offset[k]]
+                    for k, v in self.data.items()
+                }
+            else:
+                new_data = None
+            for k in self.keys:
+                data_offset[k] += _data_len[k]
+            new_id = self.ids[start:end]
+            samples.append(
+                SequenceSample(
+                    dtypes=self.dtypes,
+                    trailing_shapes=self.trailing_shapes,
+                    keys=self.keys,
+                    ids=new_id,
+                    seqlens=new_seqlens,
+                    data=new_data,
+                    metadata=self.metadata,
+                )
+            )
+        return samples
+
+    def split(
+        self,
+        k: int,
+        key: Optional[str] = None,
+        min_size: int = 1,
+    ) -> List["SequenceSample"]:
+        spec = self.get_split_spec(k, key, min_size)
+        return self.split_with_spec(spec)
+
+    def unpack(self):
+        return self.split(self.bs, min_size=1)
+
+    def cuda(self):
+        if self.data is None:
+            return self
+        self.data = {k: v.cuda() for k, v in self.data.items()}
+        return self
+
+    @property
+    def bs(self):
+        return len(self.ids)
+
+    def meta(self) -> "SequenceSample":
+        """Create a new SequenceSample that does not contain any data."""
+        return SequenceSample(
+            keys=self.keys,
+            trailing_shapes=self.trailing_shapes,
+            dtypes=self.dtypes,
+            ids=self.ids,
+            data=None,
+            seqlens=self.seqlens,
+            metadata=self.metadata,
+        )
+
+    def update_(self, other: "SequenceSample"):
+        self.keys = self.keys.union(other.keys)
+        self.trailing_shapes.update(other.trailing_shapes)
+        self.dtypes.update(other.dtypes)
+        assert self.ids == other.ids
+        if self.data is not None:
+            self.data.update(other.data)
+        self.seqlens.update(other.seqlens)
+        self.metadata.update(other.metadata)
+
+
 @dataclasses.dataclass
 class DataBatchMeta:
     dp_rank: int
-    keys: List[str]
-    seqlens: List[int]
+    meta_sample: SequenceSample
     epoch: int
     is_final_batch: bool
-    hash_vals: List[int]
 
 
 @dataclasses.dataclass
@@ -76,13 +354,6 @@ class DatasetUtility:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
             if self.tokenizer.eos_token_id is None:
                 raise ValueError("eos_token_id of tokenizer must be defined.")
-
-
-def unpack_data_batch(x: DataBatchMeta) -> List[DataBatchMeta]:
-    return [
-        DataBatchMeta(x.dp_rank, x.keys, [seqlen], x.epoch, False, [hash_val])
-        for seqlen, hash_val in zip(x.seqlens, x.hash_vals)
-    ]
 
 
 def get_shuffle_indices(seed: int, size: int):
@@ -263,247 +534,3 @@ def PackedEvalDataLoader(dataset, *args, **kwargs):
 
 register_dataloader("packed", PackedDataLoader)
 register_dataloader("packed_eval", PackedEvalDataLoader)
-
-
-@pdclasses.dataclass
-class SequenceSplitSpec:
-    partitions: Optional[List[Tuple[int, int]]] = None
-    sizes: Optional[List[int]] = None
-
-    @model_validator(mode="after")
-    def _validate_partitions(self) -> "SequenceSplitSpec":
-        if self.partitions is not None:
-            bound = 0
-            for start, end in self.partitions:
-                if start >= end:
-                    raise ValueError(f"Partition {start}-{end} is empty.")
-                if start != bound:
-                    raise ValueError(f"Partition {start}-{end} is not contiguous.")
-                bound = end
-
-        if self.sizes is None and self.partitions is None:
-            raise ValueError("Either sizes or partitions must be provided.")
-        elif self.sizes is not None and self.partitions is not None:
-            if len(self.sizes) != len(self.partitions):
-                raise ValueError("Sizes and partitions are not the consistent.")
-            if self.sizes != [end - start for start, end in self.partitions]:
-                raise ValueError("Sizes and partitions are not the consistent.")
-        elif self.sizes is None:
-            self.sizes = [end - start for start, end in self.partitions]
-        elif self.partitions is None:
-            offsets = np.cumsum([0] + self.sizes)
-            self.partitions = [
-                (offsets[i], offsets[i + 1]) for i in range(len(self.sizes))
-            ]
-
-        return self
-
-
-@pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
-class SequenceSample:
-    keys: Set[str]
-    trailing_shapes: Dict[str, torch.Size | Tuple]
-    dtypes: Dict[str, torch.dtype]
-
-    ids: List[Hashable]
-
-    seqlens: Dict[str, List[torch.Tensor]]
-
-    data: Optional[Dict[str, torch.Tensor]] = None
-    buf_indices: Optional[List[int]] = None
-
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("keys")
-    @classmethod
-    def _validate_keys_type(cls, keys: Iterable) -> Set[str]:
-        keys_ = set(keys)
-        if len(keys_) != len(keys):
-            raise ValueError(f"Keys contain duplicates: {keys}.")
-        return keys_
-
-    @field_validator("seqlens")
-    @classmethod
-    def _validate_seqlens_device_dtype(
-        cls, seqlens: Dict[str, List[torch.Tensor]]
-    ) -> Dict[str, List[torch.Tensor]]:
-        for k, lens in seqlens.items():
-            assert isinstance(lens, list)
-            assert all(isinstance(l, torch.Tensor) for l in lens)
-            for i, lens_ in enumerate(lens):
-                if str(lens_.device) != "cpu":
-                    logger.warning(
-                        "The device of seqlens is not cpu. "
-                        "Transfering data between host and "
-                        "device will cause additional overheads."
-                    )
-                    lens[i] = lens_.cpu()
-                if lens_.dtype != torch.int32:
-                    logger.warning(
-                        "The dtype of seqlens is not int32. " "Converting to int32."
-                    )
-                    lens[i] = lens_.to(torch.int32)
-                if len(lens_.shape) != 1:
-                    raise ValueError(f"Seqlens should be 1D tensors: {lens_}.")
-        return seqlens
-
-    @model_validator(mode="after")
-    def _validate_list_length(self) -> "SequenceSample":
-        cond = True
-        l = len(self.ids)
-        cond &= all(len(lens) == l for lens in self.seqlens.values())
-        if self.buf_indices is not None:
-            cond &= len(self.buf_indices) == l
-        if not cond:
-            raise ValueError(
-                f"Lengths of ids({len(self.ids)})"
-                f"/seqlens({self.seqlens})"
-                f"/buf_indices({len(self.buf_indices)} "
-                "are not the same."
-            )
-
-        return self
-
-    @model_validator(mode="after")
-    def _validate_keys(self) -> "SequenceSample":
-        cond = True
-        cond &= self.keys == set(self.seqlens.keys())
-        cond &= self.keys == set(self.trailing_shapes.keys())
-        cond &= self.keys == set(self.dtypes.keys())
-        if self.data is not None:
-            cond &= self.keys == set(self.data.keys())
-        if not cond:
-            err = (
-                f"Keys are mismatched. "
-                f"keys={self.keys}, "
-                f"seqlens keys={set(self.seqlens.keys())}, "
-                f"trailing_shapes keys={set(self.trailing_shapes.keys())}, "
-                f"dtypes keys={set(self.dtypes.keys())}"
-            )
-            if self.data is not None:
-                err += f", data keys={set(self.data.keys())}"
-            raise KeyError(err)
-        return self
-
-    @model_validator(mode="after")
-    def _validate_shapes(self) -> "SequenceSample":
-        if self.data is None:
-            return self
-        acc_seqlen = {
-            k: sum(lens.sum() for lens in lens_list)
-            for k, lens_list in self.seqlens.items()
-        }
-        for k, v in self.data.items():
-            if v.shape != (acc_seqlen[k], *self.trailing_shapes[k]):
-                raise ValueError(
-                    f"Key: {k}, Data shape {v.shape} does not match "
-                    f"configured shape {(acc_seqlen[k], *self.trailing_shapes[k])}."
-                )
-        return self
-
-    @model_validator(mode="after")
-    def _validate_dtypes(self) -> "SequenceSample":
-        if self.data is None:
-            return self
-        for k, v in self.data.items():
-            if v.dtype != self.dtypes[k]:
-                raise ValueError(
-                    f"Data dtype {v.dtype} "
-                    f"does not match configured "
-                    f"dtype {self.dtypes[k]}."
-                )
-        return self
-
-    @classmethod
-    def gather(cls, samples: List["SequenceSample"]):
-        for sample in samples:
-            if sample.keys != samples[0].keys:
-                raise ValueError("Keys of samples are not the same.")
-        keys = samples[0].keys
-        seqlens = {k: sum([s.seqlens[k] for s in samples], []) for k in keys}
-        if samples[0].buf_indices is not None:
-            buf_indices = sum([s.buf_indices for s in samples], [])
-        else:
-            assert all(s.buf_indices is None for s in samples)
-            buf_indices = None
-        if samples[0].data is not None:
-            data = {k: torch.cat([s.data[k] for s in samples], dim=0) for k in keys}
-        else:
-            assert all(s.data is None for s in samples)
-            data = None
-        id_ = sum([s.ids for s in samples], [])
-        metadata = {}
-        for sample in samples:
-            for k, v in sample.metadata.items():
-                if k in metadata and metadata[k] != v:
-                    raise ValueError(
-                        f"Metadata {k} is not the same: {v} and {metadata[k]}."
-                    )
-                metadata[k] = v
-        return cls(
-            keys=keys,
-            dtypes=samples[0].dtypes,
-            trailing_shapes=samples[0].trailing_shapes,
-            ids=id_,
-            seqlens=seqlens,
-            buf_indices=buf_indices,
-            data=data,
-            metadata=metadata,
-        )
-
-    def _get_split_key(self):
-        acc_seqlen = {k: sum(l.sum() for l in lens) for k, lens in self.seqlens.items()}
-        return max(acc_seqlen, key=acc_seqlen.get)
-
-    def get_split_spec(
-        self, k: int, key: Optional[str] = None, min_size: int = 1
-    ) -> SequenceSplitSpec:
-        if key is None:
-            key = self._get_split_key()
-        lens = [lens.sum() for lens in self.seqlens[key]]
-        partitions = datapack.min_abs_diff_partition(lens, k, min_size)
-        return SequenceSplitSpec(partitions=partitions)
-
-    def split_with_spec(self, spec: SequenceSplitSpec) -> List["SequenceSample"]:
-        samples = []
-        data_offset = {k: 0 for k in self.keys}
-        for start, end in spec.partitions:
-            new_seqlens = {
-                k: lens_list[start:end] for k, lens_list in self.seqlens.items()
-            }
-            _data_len = {
-                k: sum(lens.sum() for lens in lens_list)
-                for k, lens_list in new_seqlens.items()
-            }
-            new_data = {
-                k: v[data_offset[k] : _data_len[k] + data_offset[k]]
-                for k, v in self.data.items()
-            }
-            for k in self.keys:
-                data_offset[k] += _data_len[k]
-            new_buf_indices = (
-                self.buf_indices[start:end] if self.buf_indices is not None else None
-            )
-            new_id = self.ids[start:end]
-            samples.append(
-                SequenceSample(
-                    dtypes=self.dtypes,
-                    trailing_shapes=self.trailing_shapes,
-                    keys=self.keys,
-                    ids=new_id,
-                    seqlens=new_seqlens,
-                    buf_indices=new_buf_indices,
-                    data=new_data,
-                    metadata=self.metadata,
-                )
-            )
-        return samples
-
-    def split(
-        self,
-        k: int,
-        key: Optional[str] = None,
-        min_size: int = 1,
-    ) -> List["SequenceSample"]:
-        spec = self.get_split_spec(k, key, min_size)
-        return self.split_with_spec(spec)

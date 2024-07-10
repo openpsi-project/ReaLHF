@@ -41,6 +41,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
         prompts = [x["prompt"] for x in data]
+        self.ids = [x["id"] for x in data]
 
         pos_answers = [
             [x["prompt"] + c + tokenizer.eos_token for c in x["pos_answers"]]
@@ -154,7 +155,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
                 neg_input_ids=(),
                 prompt_lens=(),
             ),
-            ids=[idx],
+            ids=[self.ids[idx]],
             seqlens=dict(
                 pos_input_ids=[pos_input_lens],
                 neg_input_ids=[neg_input_lens],
