@@ -265,7 +265,7 @@ class PPOActorInterface(model_api.ModelInterface):
         logprobs = gather_packed_shifted_log_probs(
             logits, cu_seqlens, data["packed_seq"]
         )
-        res = from_dict(dict(logprobs=logprobs))
+        res = from_dict(dict(packed_ref_logprobs=logprobs))
         res.register_metadata(seqlens=data.metadata["seqlens"])
         return res
 
@@ -602,7 +602,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         if scores is None:
             return None
         scores = scores.squeeze(-1)
-        res = from_dict(dict(scores=scores))
+        res = from_dict(dict(values=scores))
         res.register_metadata(seqlens=data.metadata["seqlens"])
         return res
 

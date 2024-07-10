@@ -5,6 +5,7 @@ import dataclasses
 import getpass
 import itertools
 import os
+import pprint
 import re
 import time
 import uuid
@@ -273,7 +274,7 @@ class RPCCorountineControl:
     can_do_rpc: Dict[str, asyncio.Semaphore]
     rpc_traversal: Dict[str, int]
     # for synchronizing req ids between req and reply coroutines
-    request_queues: Dict[str, List[asyncio.Queue]]
+    request_queues: Dict[str, asyncio.Queue]
 
     training_buffer_indices: Set[int] = dataclasses.field(default_factory=set)
     data_amount: InterfaceDataAmount = dataclasses.field(
@@ -299,7 +300,7 @@ def _attach_payloads_with_hooks(
     assert hook_type in ["pre", "post"], hook_type
 
     main_mwids = set([msid2mwid[h] for h in main_handlers])
-    for hook in getattr(rpc, f"{hook_type}_hooks"):
+    for hook in getattr(rpc, f"_{hook_type}_hooks"):
         if isinstance(hook, dfg.SyncParamHook):
             assert (hook.source is None) != (hook.target is None), hook
             if hook.source is None:
@@ -374,14 +375,12 @@ async def scatter_tensor_to_mws(
 ) -> List[uuid.UUID]:
 
     dt_data = {
-        "keys": rpc.input_data,
+        "keys": rpc.input_keys,
         "target": rpc.model_name,
         "producer_names": producer_names,
         "producer_mappings": producer_mappings,
         "target_mapping": target_mapping,
         "handle_name": rpc.interface_type.value,
-        "input_key_remap": rpc.input_key_remap,
-        "output_key_remap": rpc.output_key_remap,
         "rpc_name": rpc.name,
         "buffer_indices": buffer_indices,
         "seqlens": seqlens,
@@ -469,7 +468,7 @@ async def model_rpc_request_func(
     ]
 
     producer_names = {}  # data key -> model name
-    for k in rpc.input_data:
+    for k in rpc.input_keys:
         if k in rpc.data_producers:
             producer_names[k] = rpc.data_producers[k]
         else:
@@ -488,19 +487,18 @@ async def model_rpc_request_func(
             for j in range(model_topos[producer_name].world_size())
         ]
 
+    request_queue = ctrl.request_queues[rpc.name]
     can_do_rpc = ctrl.can_do_rpc[rpc.name]
-    request_queues = ctrl.request_queues[rpc.name]
-
-    response_coroutine_idx = 0
 
     this_rpc_consumed_seqs = 0
     while not ctrl.stop.is_set():
+
         await can_do_rpc.acquire()
 
         # Ensure that parent RPCs will not be over-consumed.
         while any(
-            this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.max_n_seqs
-            for c in rpc.children_rpcs
+            this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.n_seqs
+            for c in rpc.children
         ):
             await asyncio.sleep(0.1)
 
@@ -550,14 +548,12 @@ async def model_rpc_request_func(
         # whether to fetch these data.
         for dp_idx, (st, ed) in enumerate(partitions):
             for i in range(st, ed):
-                for k in rpc.output_data:
-                    if k in rpc.output_key_remap:
-                        k = rpc.output_key_remap[k]
+                for k in rpc.output_keys:
                     data_owner[sample.indices[i], k] = (rpc.model_name, dp_idx)
 
         # Get the data owner of this RPC's input data.
         producer_mappings: Dict[Tuple[str, str], List[Tuple[int, int]]] = {}
-        for k in rpc.input_data:
+        for k in rpc.input_keys:
             names, dp_indices = [], []
             for buf_idx in sample.indices:
                 owner_name, dp_idx = data_owner[(buf_idx, k)]
@@ -585,15 +581,11 @@ async def model_rpc_request_func(
             seqlens=sample.seqlens,
             handlers=handlers,
         )
-        await request_queues[response_coroutine_idx].put(
-            (req_ids, other_req_ids, time.perf_counter())
-        )
-        response_coroutine_idx = (response_coroutine_idx + 1) % len(request_queues)
+        await request_queue.put((req_ids, other_req_ids, time.perf_counter()))
         logger.info(f"Model rpc {rpc.name} requested.")
 
 
 async def model_rpc_reply_func(
-    corountine_idx: int,
     rpc: dfg.MFCDef,
     stream: request_reply_stream.NameResolvingRequstClient,
     buffer: AsyncIOSequenceBuffer,
@@ -611,7 +603,7 @@ async def model_rpc_reply_func(
         for i in dp_head_indices
     ]
 
-    request_queue = ctrl.request_queues[rpc.name][corountine_idx]
+    request_queue = ctrl.request_queues[rpc.name]
     can_do_rpc = ctrl.can_do_rpc[rpc.name]
 
     while not ctrl.stop.is_set():
@@ -648,10 +640,7 @@ async def model_rpc_reply_func(
         ):
             res = []
             for k in responses[0].data["keys"]:
-                if k in rpc.output_key_remap:
-                    res.append(rpc.output_key_remap[k])
-                else:
-                    res.append(k)
+                res.append(k)
         else:
             res = _gather_stat([response.data for response in responses])
 
@@ -659,7 +648,6 @@ async def model_rpc_reply_func(
             logger.info(f"RPC name {rpc.name} returns {res}")
 
         can_do_rpc.release()
-
         ctrl.rpc_traversal[rpc.name] += 1
 
         if rpc.is_dst:
@@ -717,7 +705,7 @@ async def load_data_func(
         for x in loaded_data_batches:
             all_data += data_api.unpack_data_batch(x)
 
-        steps_per_epoch = len(all_data) // src_rpc.max_n_seqs
+        steps_per_epoch = len(all_data) // src_rpc.n_seqs
         avg_tokens_per_batch = sum(x.seqlens[0] for x in all_data) / steps_per_epoch
         logger.info(
             f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
@@ -734,7 +722,7 @@ async def load_data_func(
 
         # NOTE: The reordered indices prioritize longer sequences for detecting OOM errors early.
         reorder_indices, _ = datapack.reorder_to_balanced_batches(
-            seqlens, src_rpc.max_n_seqs
+            seqlens, src_rpc.n_seqs
         )
         recover_indices = np.argsort(reorder_indices)
         all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
@@ -848,18 +836,17 @@ class MasterWorker(worker_base.Worker):
         )
 
         # Build execution graph and initialize concurrency utilities.
-        self.__model_rpcs, _ = dfg.build_graph(config.model_rpcs)
+        self.__model_rpcs = config.model_rpcs
         for rpc in self.__model_rpcs:
             _dp_size = self.__model_topos[rpc.model_name].get_dim("data")
             _pp_size = self.__model_topos[rpc.model_name].get_dim("pipe")
-            if rpc.min_n_seqs < _dp_size * _pp_size:
+            if rpc.n_seqs < _dp_size * _pp_size:
                 logger.warning(
                     f"The batch size of RPC `{rpc.name}` in terms of #seqs is smaller than "
                     f"dp_size * pp_size ({_dp_size}*{_pp_size}). Forcely enlarge the batch size "
-                    f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.min_n_seqs})"
+                    f"to {_dp_size * _pp_size} (dp_size * pp_size). (original: {rpc.n_seqs})"
                 )
-                rpc.min_n_seqs_per_dp = 1
-                rpc.min_n_seqs = _dp_size * _pp_size
+                rpc.n_seqs = _dp_size * _pp_size
 
         self.__mwid2msids = defaultdict(list)
         for msid, mwid in self.config.msid2mwid.items():
@@ -1089,9 +1076,9 @@ class MasterWorker(worker_base.Worker):
                 assert len(train_rpcs) == 1
                 steps_per_epoch = (
                     total_n_seqs * self.config.exp_ctrl.total_train_epochs
-                    + train_rpcs[0].max_n_seqs
+                    + train_rpcs[0].n_seqs
                     - 1
-                ) // train_rpcs[0].max_n_seqs
+                ) // train_rpcs[0].n_seqs
                 ft_spec = model_api.FinetuneSpec(
                     total_train_epochs=self.config.exp_ctrl.total_train_epochs,
                     total_train_steps=steps_per_epoch
@@ -1156,14 +1143,8 @@ class MasterWorker(worker_base.Worker):
             eval_queue=asyncio.Queue(1),
             save_queue=asyncio.Queue(1),
             rpc_traversal={rpc.name: 0 for rpc in self.__model_rpcs},
-            can_do_rpc={
-                rpc.name: asyncio.Semaphore(rpc.max_concurrent_calls)
-                for rpc in self.__model_rpcs
-            },
-            request_queues={
-                rpc.name: [asyncio.Queue(1) for _ in range(rpc.max_concurrent_calls)]
-                for rpc in self.__model_rpcs
-            },
+            request_queues={rpc.name: asyncio.Queue(1) for rpc in self.__model_rpcs},
+            can_do_rpc={rpc.name: asyncio.Semaphore(1) for rpc in self.__model_rpcs},
             is_recover_epoch=self.__recover_run,
             used_hash_vals_this_epoch=(
                 self.__recover_info.hash_vals_to_ignore if self.__recover_run else set()
@@ -1204,20 +1185,16 @@ class MasterWorker(worker_base.Worker):
                     ctrl=self.__rpc_ctrl,
                 )
             )
-            reply_tasks = []
-            for j in range(rpc.max_concurrent_calls):
-                _reply_task = event_loop.create_task(
-                    model_rpc_reply_func(
-                        corountine_idx=j,
-                        rpc=rpc,
-                        stream=self.__stream,
-                        buffer=self.__seqbuffer,
-                        model_topos=self.__model_topos,
-                        ctrl=self.__rpc_ctrl,
-                    )
+            reply_task = event_loop.create_task(
+                model_rpc_reply_func(
+                    rpc=rpc,
+                    stream=self.__stream,
+                    buffer=self.__seqbuffer,
+                    model_topos=self.__model_topos,
+                    ctrl=self.__rpc_ctrl,
                 )
-                reply_tasks.append(_reply_task)
-            coroutine_tasks += [request_task] + reply_tasks
+            )
+            coroutine_tasks += [request_task, reply_task]
 
         # Append some utilization coroutines to handle data loading, saving, and evaluation.
         load_data_task = event_loop.create_task(
@@ -1491,7 +1468,6 @@ class MasterWorker(worker_base.Worker):
             last_step_info=self.__last_step_info,
             hash_vals_to_ignore=self.__rpc_ctrl.used_hash_vals_this_epoch,
         )
-        import pprint
 
         logger.info("dumped recover info to file")
         pprint.pprint(recover_info.recover_start)

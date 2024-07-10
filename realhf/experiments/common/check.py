@@ -6,7 +6,10 @@ def check_is_realhf_native_impl(_cls):
 
 
 def check_is_realhf_native_model_interface(name):
+    # NOTE: we should not use auto-importing here,
+    # because the user may write customized interfaces under this folder.
     import realhf.impl.model.interface.dpo_interface
+    import realhf.impl.model.interface.gen_interface
     import realhf.impl.model.interface.ppo_interface
     import realhf.impl.model.interface.rw_interface
     import realhf.impl.model.interface.sft_interface

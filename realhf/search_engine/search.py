@@ -3,6 +3,7 @@ import functools
 import json
 import os
 import pickle
+import pprint
 import re
 from typing import Any, Dict, List, Literal, Optional
 
@@ -14,8 +15,8 @@ except ModuleNotFoundError:
     mdm_search = None
 
 import realhf.base.constants as constants
-from realhf.api.core.dfg import MFCDef, ModelInterfaceType
-from realhf.api.core.model_api import ModelFamily
+from realhf.api.core.config import ModelInterfaceType
+from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.api.quickstart.search import RPCExecution
@@ -104,11 +105,8 @@ def search_rpc_allocations(
     )
     if not from_file:
         with open(rs_dir, "w") as f:
-            import pprint
 
             pprint.pprint(rs, stream=f)
-
-    import pprint
 
     r: Dict[str, Dict[str, Any]] = rs[-1]
     pprint.pprint(r)
@@ -147,7 +145,6 @@ def search_rpc_allocations(
         with open(dump_dir, "w") as f:
             json.dump([rpc_alloc.to_dict() for rpc_alloc in rpc_allocs], f, indent=4)
         with open(log_dir, "w") as f:
-            import pprint
 
             pprint.pprint(rpc_allocs, stream=f)
 

@@ -1,16 +1,18 @@
 import dataclasses
-from typing import List
+from typing import List, Optional
 
-from realhf.api.core.dfg import MFCDef, ModelInterface, ModelInterfaceType
-from realhf.api.core.system_api import *
+from realhf.api.core.config import (
+    DataLoaderAbstraction,
+    DatasetAbstraction,
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+    ModelName,
+)
+from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig
 from realhf.api.quickstart.device_mesh import AllocationConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
-from realhf.api.quickstart.model import (
-    ModelTrainEvalConfig,
-    OptimizerConfig,
-    get_real_model_config,
-)
+from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
 
 
@@ -62,28 +64,28 @@ class RWConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
-        interface = ModelInterface("paired_rw")
+        interface = ModelInterfaceAbstraction("paired_rw")
         rpc = MFCDef(
+            name="rwTrain",
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,
             model_type=self.model.type,
             model_path=self.model.path,
-            input_data=["packed_input_ids", "group_factor", "pos_input_lens"],
+            input_keys=["packed_input_ids", "group_factor", "pos_input_lens"],
             log_return_value=True,
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
-        return {"default": rpc}
+        return {"rwTrain": rpc}
 
     @property
     def allocations(self):
-        return {"default": self.allocation}
+        return {"rwTrain": self.allocation}
 
     @property
     def datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "rw_pair",
                 args=dict(
                     max_length=self.dataset.max_seqlen,
@@ -96,7 +98,7 @@ class RWConfig(CommonExperimentConfig):
     @property
     def eval_datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "rw_pair",
                 args=dict(
                     max_length=self.dataset.max_seqlen,
@@ -108,7 +110,7 @@ class RWConfig(CommonExperimentConfig):
 
     @property
     def eval_dataloader(self):
-        return DataLoader(
+        return DataLoaderAbstraction(
             "packed_eval", args=dict(batch_size=self.dataset.valid_bs_n_seqs)
         )
 

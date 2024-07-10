@@ -1,6 +1,8 @@
 import contextlib
 import dataclasses
 import functools
+import itertools
+import pprint
 from collections import defaultdict
 from typing import *
 
@@ -8,9 +10,23 @@ import numpy as np
 from omegaconf import MISSING
 
 import realhf.base.logging as logging
-from realhf.api.core.config import Dataset
-from realhf.api.core.dfg import MFCDef, ModelInterfaceType, OffloadHook, SyncParamHook
-from realhf.api.core.system_api import *
+from realhf.api.core.config import (
+    DataLoaderAbstraction,
+    DatasetAbstraction,
+    ModelName,
+    ModelShardID,
+    StandaloneModelShardAbstraction,
+)
+from realhf.api.core.dfg import MFCDef, ModelInterfaceType, build_graph
+from realhf.api.core.system_api import (
+    Experiment,
+    ExperimentConfig,
+    ExperimentSaveEvalControl,
+    ExperimentScheduling,
+    ModelWorker,
+    Scheduling,
+    TasksGroup,
+)
 from realhf.api.quickstart.device_mesh import (
     AllocationConfig,
     DeviceMesh,
@@ -18,8 +34,14 @@ from realhf.api.quickstart.device_mesh import (
     make_device_mesh_from_name,
 )
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
-from realhf.experiments.common.check import *
-from realhf.experiments.common.utils import *
+from realhf.experiments.common.check import check_is_realhf_native_model_interface
+from realhf.experiments.common.utils import (
+    get_topo,
+    make_inf_backend_config,
+    make_model_config,
+    make_train_backend_config,
+    resolve_rpc_hooks,
+)
 from realhf.search_engine.search import search_rpc_allocations
 
 logger = logging.getLogger("CommonExperimentConfig", "colored")
@@ -145,40 +167,79 @@ class CommonExperimentConfig(Experiment):
 
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
+        """A dict mapping from model roles to model configurations.
+
+        Should be implemented in all subclasses.
+        """
         raise NotImplementedError(f"models is not implemented in {self.__class__}")
 
     @property
     def rpcs(self) -> Dict[str, MFCDef]:
+        """A dict mapping from model function call names to the MFCDef objects.
+
+        Note that model function call names are different from model names.
+        Should be implemented in all subclasses.
+        """
         raise NotImplementedError(f"rpcs is not implemented in {self.__class__}")
 
     @property
-    def datasets(self) -> List[Dataset]:
-        return []
+    def allocations(self) -> Dict[str, AllocationConfig]:
+        """The allocation configuration for each model function call.
+
+        A dictionary mapping MFC names to its allocation configuration.
+        Must be implemented in the subclass.
+        """
+        raise NotImplementedError(
+            f"allocations is not implemented in {self.__class__}."
+        )
 
     @property
-    def eval_datasets(self) -> List[Dataset]:
+    def datasets(self) -> List[DatasetAbstraction]:
+        """A list of dataset configurations used for training.
+
+        Should be implemented in all subclasses.
+        """
+        return NotImplementedError(f"datasets is not implemented in {self.__class__}")
+
+    @property
+    def eval_datasets(self) -> List[DatasetAbstraction]:
+        """A list of dataset configurations used for evaluation.
+
+        Can be None if runtime evaluation is not needed.
+        """
         return None
 
     @property
-    def eval_dataloader(self) -> DataLoader:
-        return DataLoader("packed_eval", args=dict(batch_size=128))
+    def eval_dataloader(self) -> DataLoaderAbstraction:
+        """The dataloader configuration used for evaluation.
+
+        Reserved to changed the evaluation batch size.
+        Training does not require this property because the batch size
+        is handled in MFC definitions.
+        """
+        return DataLoaderAbstraction("packed_eval", args=dict(batch_size=128))
 
     @property
     def tokenizer_name_or_path(self) -> str:
+        """The tokenizer for tokenizing train/validation datasets.
+
+        Required for all experiments.
+        """
         raise NotImplementedError(
-            f"tokenizer_name_or_path is not implemented in {self.__class__}"
+            f"tokenizer_name_or_path is not implemented in {self.__class__}."
         )
 
     @property
     def max_prompt_len(self) -> int:
+        """The maximum prompt length for generation.
+
+        Used by CUDAGraph-enabled generation.
+        If no generation is used in the algorithm, this property can be None.
+        """
         return None
 
     @property
     def search_kwargs(self) -> Dict[str, Any]:
-        return {}
-
-    @property
-    def allocations(self) -> Dict[str, AllocationConfig]:
         return {}
 
     @property
@@ -211,11 +272,18 @@ class CommonExperimentConfig(Experiment):
         return rpc_allocs
 
     def scheduling_setup(self) -> ExperimentScheduling:
+        """The resourced occupied by each worker.
+
+        The resource requirements will be sent to SLURM or Ray,
+        while being ignored in the local mode.
+        """
         return ExperimentScheduling(
             master_worker=TasksGroup(
                 count=1,
                 scheduling=Scheduling.master_worker_default(
-                    cpu=4, mem=20000, nodelist=self.nodelist
+                    cpu=4,
+                    mem=20000,
+                    nodelist=self.nodelist,
                 ),
             ),
             model_worker=TasksGroup(
@@ -283,7 +351,7 @@ class CommonExperimentConfig(Experiment):
                         ),
                     ),
                 )
-                for rpc in self.rpcs.values()
+                for rpc in rpcs.values()
             ]
         elif self.allocation_mode == "manual":
             rpc_allocs: List[RPCAllocation] = [
@@ -299,7 +367,7 @@ class CommonExperimentConfig(Experiment):
                     ),
                     parallel=self.allocations[rpc_type].parallel,
                 )
-                for rpc_type, rpc in self.rpcs.items()
+                for rpc_type, rpc in rpcs.items()
             ]
         elif self.allocation_mode == "heuristic":
             rpc_allocs: List[RPCAllocation] = self._heuristic_rpc_allocation()
@@ -308,7 +376,6 @@ class CommonExperimentConfig(Experiment):
 
         shard_counter = defaultdict(lambda: 0)
         resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
-        import pprint
 
         pprint.pprint(rpc_allocs)
 
@@ -370,7 +437,7 @@ class CommonExperimentConfig(Experiment):
                     #       f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
                     #       f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
                     mw.shards.append(
-                        StandaloneModelShard(
+                        StandaloneModelShardAbstraction(
                             id=ModelShardID(
                                 model_name=model_name,
                                 topo=topo,
@@ -411,6 +478,10 @@ class CommonExperimentConfig(Experiment):
             )
 
         for rpc_name, rpc in self.rpcs.items():
+            if rpc_name != rpc.name:
+                raise KeyError(
+                    f"RPC name {rpc_name} does not match the name in the MFCDef object {rpc.name}."
+                )
             if not check_is_realhf_native_model_interface(
                 rpc.interface_impl.type_
             ) and self.allocation_mode in ["search", "heuristic"]:

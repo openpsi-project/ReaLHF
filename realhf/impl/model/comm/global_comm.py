@@ -7,8 +7,7 @@ from typing import *
 
 import torch.distributed
 
-from realhf.api.core import system_api
-from realhf.api.core.config import ModelName
+from realhf.api.core.config import ModelName, ModelShardID
 from realhf.base import constants, gpu_utils, name_resolve, names, network, topology
 
 
@@ -24,21 +23,17 @@ class NCCLProcessGroupInfo:
 def filter_match_mwids(
     model_name: ModelName,
     topo: topology.PipeModelDataParallelTopology,
-    msid2mwid: Dict[system_api.ModelShardID, int],
+    msid2mwid: Dict[ModelShardID, int],
     **conditions,
 ) -> List[int]:
     if len(conditions) == 0:
         mwids_this_model = [
-            msid2mwid[
-                system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)
-            ]
+            msid2mwid[ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in range(topo.world_size())
         ]
     else:
         mwids_this_model = [
-            msid2mwid[
-                system_api.ModelShardID.from_parallelism_rank(model_name, topo, j)
-            ]
+            msid2mwid[ModelShardID.from_parallelism_rank(model_name, topo, j)]
             for j in topo.filter_match(**conditions)
         ]
     mwids_this_model = sorted(mwids_this_model)
@@ -51,7 +46,7 @@ def setup_global_comm(
     trial_name: str,
     worker_index: int,
     model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
-    msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
+    msid2mwid: Optional[Dict[ModelShardID, int]] = None,
     world_size: Optional[int] = None,  # for testing only
     global_rank: Optional[int] = None,  # for testing only
 ) -> NCCLProcessGroupInfo:

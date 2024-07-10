@@ -14,14 +14,7 @@ import realhf.api.core.system_api as config_package
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.model_api import ReaLModelConfig
-
-# from base.topology import *
-
-
-try:
-    from flash_attn.bert_padding import unpad_input
-except ModuleNotFoundError:
-    pass
+from realhf.impl.model.utils.padding import unpad_input
 
 logger = logging.getLogger("profile layers", "system")
 

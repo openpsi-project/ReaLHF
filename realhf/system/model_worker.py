@@ -92,8 +92,7 @@ class ModelWorker(worker_base.Worker):
         self.__experiment_name = self.config.worker_info.experiment_name
         self.__trial_name = self.config.worker_info.trial_name
 
-        self.config.model_rpcs, _ = dfg.build_graph(self.config.model_rpcs)
-        self.data2required_rpc_names = self.config.model_rpcs[0].data2required_rpc_names
+        self.data_consumers = self.config.model_rpcs[0].data_consumers
 
         # NOTE: here worker_index is different from peer/ddp rank
         self.__worker_index = cfg.worker_info.worker_index
@@ -651,7 +650,7 @@ class ModelWorker(worker_base.Worker):
         input_queue = self.__compute_input_queues[request.handler.model_name][
             request.handle_name
         ]
-        data, buffer_indices, seqlens, output_key_remap = input_queue.get_nowait()
+        data, buffer_indices, seqlens = input_queue.get_nowait()
         data: namedarray.NamedArray
         data.register_metadata(seqlens=seqlens)
         if request.handle_name == "inference":
@@ -664,10 +663,7 @@ class ModelWorker(worker_base.Worker):
         if res is not None and isinstance(res, namedarray.NamedArray):
             new_res = {}
             for k, v in res.items():
-                if k in output_key_remap:
-                    new_res[output_key_remap[k]] = v
-                else:
-                    new_res[k] = v
+                new_res[k] = v
             new_res = namedarray.from_dict(new_res)
             new_res.register_metadata(**res.metadata)
             res = new_res, buffer_indices, seqlens
@@ -828,14 +824,11 @@ class ModelWorker(worker_base.Worker):
             for buf_idx in local_buffer_indices:
                 local_seqlens.append(data[(buf_idx, local_keys[0])][1])
 
-            input_key_remap = hook_data["input_key_remap"]
             _data = []
             for buf_idx in local_buffer_indices:
                 d = {}
                 for k in local_keys:
                     v, seqlen = data[(buf_idx, k)]
-                    if k in input_key_remap:
-                        k = input_key_remap[k]
                     d[k] = v
                 x = namedarray.from_dict(d)
                 x.register_metadata(seqlens=[seqlen])
@@ -848,7 +841,6 @@ class ModelWorker(worker_base.Worker):
                     r,
                     local_buffer_indices,
                     local_seqlens,
-                    hook_data["output_key_remap"],
                 )
             )
 
