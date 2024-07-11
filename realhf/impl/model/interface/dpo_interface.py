@@ -1,10 +1,10 @@
 import dataclasses
+import functools
 from typing import Dict
 
 import torch
 import torch.distributed as dist
 import torch.utils.data
-import functools
 
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
@@ -37,22 +37,18 @@ def _dpo_loss_from_model_outputs(
     logprob_sum = []
     offset = 0
     for i in range(prompt_lens.shape[0]):
-        pair_input_lens = input_.seqlens['packed_input_ids'][i]
+        pair_input_lens = input_.seqlens["packed_input_ids"][i]
         prompt_len = prompt_lens[i]
         assert len(pair_input_lens) % 2 == 0
         for j in range(len(pair_input_lens) // 2):
             pos_len = pair_input_lens[2 * j]
             neg_len = pair_input_lens[2 * j + 1]
             logprob_sum.append(
-                logprobs[
-                    offset + prompt_len - 1 : offset + pos_len - 1
-                ].sum()
+                logprobs[offset + prompt_len - 1 : offset + pos_len - 1].sum()
             )
             offset += pos_len - 1
             logprob_sum.append(
-                logprobs[
-                    offset + prompt_len - 1 : offset + neg_len - 1
-                ].sum()
+                logprobs[offset + prompt_len - 1 : offset + neg_len - 1].sum()
             )
             offset += neg_len - 1
     assert offset == sum(input_lens) - input_lens.shape[0], (
@@ -126,22 +122,18 @@ class DPOInterface(model_api.ModelInterface):
         logprob_sum = []
         offset = 0
         for i in range(prompt_lens.shape[0]):
-            pair_input_lens = input_.seqlens['packed_input_ids'][i]
+            pair_input_lens = input_.seqlens["packed_input_ids"][i]
             prompt_len = prompt_lens[i]
             assert len(pair_input_lens) % 2 == 0
             for j in range(len(pair_input_lens) // 2):
                 pos_len = pair_input_lens[2 * j]
                 neg_len = pair_input_lens[2 * j + 1]
                 logprob_sum.append(
-                    logprobs[
-                        offset + prompt_len - 1 : offset + pos_len - 1
-                    ].sum()
+                    logprobs[offset + prompt_len - 1 : offset + pos_len - 1].sum()
                 )
                 offset += pos_len - 1
                 logprob_sum.append(
-                    logprobs[
-                        offset + prompt_len - 1 : offset + neg_len - 1
-                    ].sum()
+                    logprobs[offset + prompt_len - 1 : offset + neg_len - 1].sum()
                 )
                 offset += neg_len - 1
         assert offset == sum(input_lens) - input_lens.shape[0], (
@@ -158,7 +150,12 @@ class DPOInterface(model_api.ModelInterface):
             dtypes=dict(seqlogp=torch.float32),
             ids=input_.ids,
             data=dict(seqlogp=seqlogp),
-            seqlens=dict(seqlogp=[torch.tensor([len(slens)], dtype=torch.int32) for slens in input_.seqlens['packed_input_ids']]),
+            seqlens=dict(
+                seqlogp=[
+                    torch.tensor([len(slens)], dtype=torch.int32)
+                    for slens in input_.seqlens["packed_input_ids"]
+                ]
+            ),
         )
         return res
 

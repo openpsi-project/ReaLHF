@@ -1,12 +1,12 @@
 import collections
 import dataclasses
+import functools
 import itertools
 import time
 from typing import Dict, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-import functools
 
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
@@ -37,9 +37,13 @@ def _ppo_actor_loss_from_model_outputs(
     """
     logits_mask = input_.data["packed_logits_mask"]
     packed_input_ids = input_.data["packed_input_ids"]
-    cu_seqlens = torch.nn.functional.pad(
-        torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
-    ).int().cuda()
+    cu_seqlens = (
+        torch.nn.functional.pad(
+            torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
+        )
+        .int()
+        .cuda()
+    )
     ppo_loss_mask = input_.data["ppo_loss_mask"]
     advantages = input_.data["advantages"]
     old_logp = input_.data["old_logp"]
@@ -521,9 +525,13 @@ def _ppo_critic_loss_from_model_outputs(
     rms=None,
 ) -> Tuple[torch.FloatTensor, Dict]:
 
-    cu_seqlens = torch.nn.functional.pad(
-        torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
-    ).int().cuda()
+    cu_seqlens = (
+        torch.nn.functional.pad(
+            torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
+        )
+        .int()
+        .cuda()
+    )
     ppo_loss_mask = input_.data["ppo_loss_mask"]
     returns = input_.data["returns"]
     values = input_.data["values"]

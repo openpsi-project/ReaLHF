@@ -696,9 +696,12 @@ class ModelWorker(worker_base.Worker):
             received_worker_idx_table=self.__data_received_worker_indices,
         )
 
-        if hook_data['target'] in self.__models:
-            with constants.model_scope(hook_data['target']):
-                local_ids = [meta_sample.ids[i] for i in hook_data['target_mapping'][self._dp_rank]]
+        if hook_data["target"] in self.__models:
+            with constants.model_scope(hook_data["target"]):
+                local_ids = [
+                    meta_sample.ids[i]
+                    for i in hook_data["target_mapping"][self._dp_rank]
+                ]
             r = data_api.SequenceSample.gather(
                 [self.__data_storage[_id] for _id in local_ids],
                 keys=meta_sample.keys,

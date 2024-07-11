@@ -14,7 +14,9 @@ class GenerationInterface(model_api.ModelInterface):
     )
 
     @torch.no_grad()
-    def generate(self, model: model_api.Model, input_: SequenceSample) -> SequenceSample:
+    def generate(
+        self, model: model_api.Model, input_: SequenceSample
+    ) -> SequenceSample:
         module = model.module
 
         module.eval()
@@ -22,12 +24,12 @@ class GenerationInterface(model_api.ModelInterface):
         # Remap the key `packed_prompts` to `packed_input_ids`,
         # because the pipe runner only recognizes `packed_input_ids`.
         x = SequenceSample(
-            keys=['packed_input_ids'],
+            keys=["packed_input_ids"],
             trailing_shapes=dict(packed_input_ids=()),
             dtypes=dict(packed_input_ids=torch.long),
             ids=input_.ids,
-            seqlens=dict(packed_input_ids=input_.seqlens['packed_prompts']),
-            data=dict(packed_input_ids=input_.data['packed_prompts']),
+            seqlens=dict(packed_input_ids=input_.seqlens["packed_prompts"]),
+            data=dict(packed_input_ids=input_.data["packed_prompts"]),
         )
 
         res = module.generate(

@@ -1,4 +1,5 @@
 import dataclasses
+import itertools
 import os
 from typing import Dict, Optional
 
@@ -7,7 +8,7 @@ import deepspeed
 import torch
 import torch.distributed as dist
 import tqdm
-import itertools
+
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
@@ -28,7 +29,7 @@ def _paired_rw_loss_from_model_outputs(
     # Normalize pairs of each prompt with the group factor,
     # which is the reciprocal of the number of pairs in the group.
     group_sizes = [len(x) // 2 for x in input_.seqlens["packed_input_ids"]]
-    assert all([x>=1 for x in group_sizes])
+    assert all([x >= 1 for x in group_sizes])
     group_factor = torch.tensor(
         flatten_list([[1 / g for _ in range(g)] for g in group_sizes]),
         device=scores.device,
