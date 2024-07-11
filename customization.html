@@ -417,7 +417,7 @@ issues MFC requests to <em>ModelWorkers</em> once the dependencies are satisfied
                 <span class="k">break</span>
             <span class="n">idx</span> <span class="o">+=</span> <span class="mi">1</span>
         <span class="n">inf_reward_rpc</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">model_rpcs</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
-        <span class="n">inf_reward_rpc</span><span class="o">.</span><span class="n">interface_impl</span> <span class="o">=</span> <span class="n">dfg</span><span class="o">.</span><span class="n">ModelInterface</span><span class="p">(</span><span class="s2">&quot;sentiment_scoring&quot;</span><span class="p">)</span>
+        <span class="n">inf_reward_rpc</span><span class="o">.</span><span class="n">interface_impl</span> <span class="o">=</span> <span class="n">config_api</span><span class="o">.</span><span class="n">ModelInterfaceAbstraction</span><span class="p">(</span><span class="s2">&quot;sentiment_scoring&quot;</span><span class="p">)</span>
         <span class="n">inf_reward_rpc</span><span class="o">.</span><span class="n">post_hooks</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">return</span> <span class="n">cfg</span>
 </pre></div>

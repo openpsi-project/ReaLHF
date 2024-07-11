@@ -37,6 +37,8 @@ Experiment Configurations
 
 .. autoclass:: PPOConfig
 
+.. autoclass:: GenerationConfig
+
 Model Configurations
 ---------------------
 
