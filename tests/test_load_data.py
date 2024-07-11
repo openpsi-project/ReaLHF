@@ -3,8 +3,9 @@ import os
 import pathlib
 import random
 import uuid
-import torch
+
 import pytest
+import torch
 from tokenizers import Tokenizer
 from tokenizers.models import WordPiece
 from tokenizers.pre_tokenizers import Whitespace

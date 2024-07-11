@@ -14,7 +14,7 @@ import pytest
 import torch
 import torch.utils.data
 
-import realhf.api.core.data_api as data_api
+from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants, gpu_utils, logging, name_resolve, names, topology
 from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
@@ -256,8 +256,7 @@ def make_random_packed_batches(
     seed: int = 1,
     dp_rank=None,
     dp_size=None,
-):
-    # FIXME
+) -> List[SequenceSample]:
     assert (dp_rank is None and dp_size is None) or (
         dp_rank is not None and dp_size is not None
     )
@@ -265,18 +264,22 @@ def make_random_packed_batches(
         dp_rank = constants.data_parallel_rank()
         dp_size = constants.data_parallel_world_size()
     assert batch_size % dp_size == 0
-    dp_batch_size = batch_size // dp_size
     n_seqs = batch_size * n_batches
-    seqs = random_sample(batch_size * n_batches, seq_len, vocab_size, seed)
+    seqs = random_sample(batch_size * n_batches, seq_len, vocab_size, seed).view(-1)
     seqs = seqs[n_seqs * dp_rank // dp_size : n_seqs * (dp_rank + 1) // dp_size]
-    seqs = [namedarray.NamedArray(packed_prompts=seqs[i]) for i in range(len(seqs))]
-    for seq in seqs:
-        seq.register_metadata(seqlens=[seq_len])
-    batches = [
-        seqs[j * dp_batch_size : (j + 1) * dp_batch_size] for j in range(n_batches)
-    ]
-    batches = [xxx(batch) for batch in batches]
-    return batches
+    x = SequenceSample(
+        keys=["packed_prompts"],
+        dtypes=dict(packed_prompts=torch.long),
+        trailing_shapes=dict(packed_prompts=()),
+        seqlens=dict(
+            packed_prompts=[
+                torch.tensor([seq_len], dtype=torch.int32) for _ in range(seqs.shape[0])
+            ]
+        ),
+        data=dict(packed_prompts=seqs.view(-1)),
+        ids=list(range(seqs.shape[0])),
+    )
+    return x.split(n_batches)
 
 
 def make_random_unpacked_batches(

@@ -2,6 +2,7 @@
 # otherwise the name will have a long prefix like
 # realhf.api.quickstart.model.ModelTrainEvalConfig.
 from .api.core.config import ModelFamily
+from .api.core.data_api import SequenceSample
 from .api.core.dfg import MFCDef
 from .api.core.model_api import (
     GenerationHyperparameters,

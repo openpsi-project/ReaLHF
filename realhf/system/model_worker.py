@@ -453,10 +453,11 @@ class ModelWorker(worker_base.Worker):
             with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
                 m = self.__unwrapped_models[hook_data["model_name"]]
                 if not isinstance(m, ReaLModel):
-                    raise ValueError(
-                        f"Model {from_model_name} (type={type(m)}) is not a ReaLModel, "
+                    logger.warning(
+                        f"Model {hook_data['model_name']} (type={type(m)}) is not a ReaLModel, "
                         f"so it can't use offload."
                     )
+                    return
                 m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")

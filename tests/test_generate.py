@@ -193,7 +193,6 @@ def real_model_generate(
     test_params: GenerateTestParams,
 ):
     from realhf.api.core.model_api import GenerationHyperparameters
-    from realhf.base.namedarray import NamedArray
 
     assert not test_params.huggingface
     parallel = test_params.parallel
@@ -225,26 +224,14 @@ def real_model_generate(
         )
         results = []
         for i, data_batch in enumerate(data_batches):
-            data_batch: NamedArray
-            packed_prompts = data_batch["packed_prompts"].cuda()
-            prompt_lengths = torch.full(
-                (test_params.batch_size // constants.data_parallel_world_size(),),
-                test_params.prompt_len,
-                dtype=torch.int32,
-            ).cuda()
-            prompt_cu_seqlens = torch.nn.functional.pad(
-                prompt_lengths.cumsum(0), (1, 0)
-            )
             logger.info(
                 f"Batch {i} rank {constants.parallelism_rank()} "
-                f"prompt shape {packed_prompts.shape}"
+                f"prompt shape {data_batch.data['packed_prompts'].shape}"
             )
             st = time.monotonic()
             res = model.generate(
-                seqlens_cpu=data_batch.metadata["seqlens"],
+                input_=data_batch,
                 tokenizer=tokenizer,
-                packed_input_ids=packed_prompts,
-                cu_seqlens=prompt_cu_seqlens,
                 gconfig=generation_config,
             )
             t = time.monotonic() - st

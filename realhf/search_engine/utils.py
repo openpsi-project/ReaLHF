@@ -1,26 +1,4 @@
-import realhf.base.constants as constants
 from realhf.api.core.model_api import ReaLModelConfig
-
-
-def random_sample(bs, seq_len, vocab_size):
-    import torch
-
-    from realhf.impl.model.utils.padding import unpad_input
-
-    input_ids = torch.randint(0, vocab_size, (bs, seq_len), dtype=torch.long)
-    attention_mask = torch.ones_like(input_ids)
-    packed_input_ids, _, cu_seqlens, max_seqlen = unpad_input(input_ids, attention_mask)
-    prompt_mask = torch.zeros_like(packed_input_ids)
-    data = realhf.base.namedarray.NamedArray(
-        packed_input_ids=packed_input_ids,
-        cu_seqlens=cu_seqlens,
-        # prompts=input_ids,
-        prompt_mask=prompt_mask.bool(),
-        # prompt_att_mask=attention_mask,
-    )
-    seqlens_cpu = [seq_len for _ in range(bs)]
-    data.register_metadata(seqlens=seqlens_cpu)
-    return data
 
 
 def find_factors(n):
