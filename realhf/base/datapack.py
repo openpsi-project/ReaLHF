@@ -225,7 +225,7 @@ def partition_balanced_tuples(
 
 def min_abs_diff_partition(
     arr: Union[np.ndarray, List], k: int, min_size: int = 1
-) -> List[Tuple[int]]:
+) -> List[Tuple[int, int]]:
     err_hint = (
         " Errors should not be reported in this function. It is probably a bug in the dataset code"
         " or too small batch size in pipeline parallel realhf.experiments."

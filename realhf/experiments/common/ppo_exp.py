@@ -298,7 +298,7 @@ class PPOConfig(CommonExperimentConfig):
             input_keys=["packed_prompts"],
             output_keys=[
                 "seq_no_eos_mask",
-                "packed_seq",
+                "packed_input_ids",
                 "packed_logprobs",
                 "prompt_mask",
                 "packed_logits_mask",
@@ -319,7 +319,7 @@ class PPOConfig(CommonExperimentConfig):
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
-        inf_ref_inputs = ["packed_seq"]
+        inf_ref_inputs = ["packed_input_ids"]
         if not self.ppo.force_no_logits_mask:
             inf_ref_inputs.append(
                 "packed_logits_mask",
@@ -349,7 +349,7 @@ class PPOConfig(CommonExperimentConfig):
         )
 
         train_actor_inputs = [
-            "packed_seq",
+            "packed_input_ids",
             "packed_logprobs",
             "packed_ref_logprobs",
             "rewards",

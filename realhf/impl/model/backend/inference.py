@@ -6,6 +6,7 @@ import transformers
 
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
+from realhf.api.core.data_api import SequenceSample
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 
@@ -32,62 +33,53 @@ class PipelinableInferenceEngine:
     @torch.no_grad()
     def eval_batch(
         self,
-        seqlens_cpu: List[int],
-        packed_input_ids: torch.Tensor,
-        cu_seqlens: torch.Tensor,
+        input_: SequenceSample,
         loss_fn: Callable,
         num_micro_batches: Optional[int] = None,
-        **loss_fn_kwargs,
     ):
         if constants.pipe_parallel_world_size() > 1:
             return self.pipe_runner.eval_batch(
-                seqlens_cpu=seqlens_cpu,
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
+                input_=input_,
                 loss_fn=loss_fn,
                 num_micro_batches=num_micro_batches,
-                **loss_fn_kwargs,
             )
         else:
-            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            input_lens = torch.cat(input_.seqlens["packed_input_ids"], dim=0).cuda()
+            max_seqlen = int(max(input_lens))
+            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
             model_output = self.module(
-                packed_input_ids=packed_input_ids,
+                packed_input_ids=input_.data["packed_input_ids"],
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             ).logits
-            _, stat = loss_fn(
-                model_output, packed_input_ids, cu_seqlens, **loss_fn_kwargs
-            )
+            _, stat = loss_fn(model_output, input_)
             return stat
 
     def forward(
         self,
-        seqlens_cpu: List[int],
-        packed_input_ids: torch.Tensor,
-        cu_seqlens: torch.Tensor,
+        input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:
             return self.pipe_runner.forward(
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
-                seqlens_cpu=seqlens_cpu,
+                input_=input_,
                 num_micro_batches=num_micro_batches,
             )
         else:
-            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
-            return self.module(
-                packed_input_ids=packed_input_ids,
+            input_lens = torch.cat(input_.seqlens["packed_input_ids"], dim=0).cuda()
+            max_seqlen = int(max(input_lens))
+            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+            model_output = self.module(
+                packed_input_ids=input_.data["packed_input_ids"],
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
             ).logits
+            return model_output
 
     @torch.no_grad()
     def generate(
         self,
-        seqlens_cpu: List[int],
-        packed_input_ids: torch.Tensor,
-        cu_seqlens: torch.Tensor,
+        input_: SequenceSample,
         tokenizer: transformers.PreTrainedTokenizerFast,
         gconfig: model_api.GenerationHyperparameters = dataclasses.field(
             default_factory=model_api.GenerationHyperparameters
@@ -96,18 +88,18 @@ class PipelinableInferenceEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             return self.pipe_runner.generate(
-                seqlens_cpu=seqlens_cpu,
+                input_=input_,
                 num_micro_batches=num_micro_batches,
                 tokenizer=tokenizer,
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
                 gconfig=gconfig,
             )
         else:
-            max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+            input_lens = torch.cat(input_.seqlens["packed_input_ids"], dim=0).cuda()
+            max_seqlen = int(max(input_lens))
+            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
             res = self.module.generate(
                 tokenizer=tokenizer,
-                packed_input_ids=packed_input_ids,
+                packed_input_ids=input_.data["packed_input_ids"],
                 cu_seqlens=cu_seqlens,
                 max_seqlen=max_seqlen,
                 gconfig=gconfig,

@@ -19,7 +19,7 @@ Please refer to the respective configuration documentation for detailed instruct
 Datasets in ReaL are commonly used
 `PyTorch map-style datasets <https://pytorch.org/docs/stable/data.html#map-style-datasets>`_.
 Users need to implement a ``__getitem__`` method in the dataset class,
-which returns a :class:`realhf.NamedArray` object containing the data of a single sample and its sequence length.
+which returns a :class:`realhf.SequenceSample` object containing the data of a single sample and its sequence length.
 The sequence length is necessary because ReaL uses variable-length inputs without padding to save GPU memory.
 
 How Dataset Configuration is Parsed
@@ -63,7 +63,7 @@ Steps for Implementing a New Dataset
 
 1. Create a new dataset file under ``realhf/impl/dataset/``.
 
-2. Implement a map-style PyTorch dataset class with a ``__getitem__`` method. This method should return a :class:`realhf.NamedArray` object containing the sequence length as metadata.
+2. Implement a map-style PyTorch dataset class with a ``__getitem__`` method. This method should return a :class:`realhf.SequenceSample` object containing the sequence length as metadata.
 
 3. Register the class with ``data_api.register_dataset`` at the end of the file, using the name "my-dataset".
 
@@ -188,7 +188,9 @@ First, we need to implement a new model interface class for our customized use:
             )
 
         @torch.no_grad()
-        def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+        def inference(
+            self, model: model_api.Model, input_: SequenceSample
+        ) -> SequenceSample:
             # Re-tokenize the texts.
             texts = model.tokenizer.batch_decode(
                 input_ids, skip_special_tokens=True
@@ -199,13 +201,23 @@ First, we need to implement a new model interface class for our customized use:
 
             # Perform inference to get the score.
             # For IMDB, 0 is negative and 1 is positive. We record the logits of the positive class.
-            scores = self.score_model(
+            logits = self.score_model(
                 input_ids=encoding["input_ids"].cuda(),
                 attention_mask=encoding["attention_mask"].cuda(),
-            ).logits[..., -1].contiguous().float()
+            ).logits
+            # For IMDB, 0 is negative and 1 is positive. We record the logits of positive.
+            scores = logits[..., -1].contiguous().float()
 
-            res = NamedArray(scores=scores)
-            res.register_metadata(**data.metadata)
+            res = SequenceSample(
+                keys=["rewards"],
+                trailing_shapes=dict(rewards=()),
+                dtypes=dict(rewards=torch.float32),
+                ids=input_.ids,
+                seqlens=dict(
+                    rewards=[torch.tensor([1], dtype=torch.int32) for _ in range(bs)]
+                ),
+                data=dict(rewards=scores),
+            )
             return res
 
 Key points in this code:

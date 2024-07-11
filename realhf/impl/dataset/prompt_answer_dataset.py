@@ -6,7 +6,7 @@ import torch
 import torch.utils.data
 
 from realhf.api.core import data_api
-from realhf.base import logging, namedarray
+from realhf.base import logging
 
 logger = logging.getLogger("Prompt Answer Dataset")
 
@@ -37,6 +37,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
         data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
         seqs = [x["prompt"] + x["answer"] + tokenizer.eos_token for x in data]
+        self.ids = [x["id"] for x in data]
         prompts = [x["prompt"] for x in data]
 
         self.tokens = tokenizer(
@@ -94,9 +95,15 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
             "prompt_mask": torch.tensor(self.prompt_masks[idx], dtype=torch.bool),
         }
         assert len(d["packed_input_ids"]) == len(d["prompt_mask"])
-        seqlen = len(d["packed_input_ids"])
-        x = namedarray.from_dict(d)
-        x.register_metadata(seqlens=[seqlen])
+        seqlen = torch.tensor([len(d["packed_input_ids"])], dtype=torch.int32)
+        x = data_api.SequenceSample(
+            keys=list(d.keys()),
+            trailing_shapes={k: () for k in d.keys()},
+            dtypes={k: d[k].dtype for k in d.keys()},
+            ids=[self.ids[idx]],
+            seqlens={k: [seqlen] for k in d.keys()},
+            data=d,
+        )
         return x
 
 
