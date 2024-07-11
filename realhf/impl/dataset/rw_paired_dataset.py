@@ -121,44 +121,33 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         group_size = min(self.max_pairs_per_prompt, n_pairs_this_prompt)
         pair_indices = self.rng.choice(n_pairs_this_prompt, group_size, replace=False)
 
-        pos_input_ids = []
-        neg_input_ids = []
+        packed_input_ids = []
+        input_lens = []
         for i in pair_indices:
-            pos_input_ids += self.pos_answer_tokens[idx]["input_ids"][i]
-            neg_input_ids += self.neg_answer_tokens[idx]["input_ids"][i]
-
-        pos_input_lens = torch.tensor(
-            [len(self.pos_answer_tokens[idx]["input_ids"][i]) for i in pair_indices],
-            dtype=torch.int,
-        )
-        neg_input_lens = torch.tensor(
-            [len(self.neg_answer_tokens[idx]["input_ids"][i]) for i in pair_indices],
-            dtype=torch.int,
-        )
+            packed_input_ids += self.pos_answer_tokens[idx]["input_ids"][i]
+            packed_input_ids += self.neg_answer_tokens[idx]["input_ids"][i]
+            input_lens += [len(self.pos_answer_tokens[idx]["input_ids"][i])]
+            input_lens += [len(self.neg_answer_tokens[idx]["input_ids"][i])]
 
         data = dict(
-            pos_input_ids=torch.tensor(pos_input_ids, dtype=torch.long),
-            neg_input_ids=torch.tensor(neg_input_ids, dtype=torch.long),
+            packed_input_ids=torch.tensor(packed_input_ids, dtype=torch.long),
             prompt_lens=torch.tensor([prompt_len], dtype=torch.int32),
         )
 
         x = data_api.SequenceSample(
-            keys=["pos_input_ids", "neg_input_ids", "prompt_lens"],
+            keys=["packed_input_ids", "prompt_lens"],
             data=data,
             dtypes=dict(
-                pos_input_ids=torch.long,
-                neg_input_ids=torch.long,
+                packed_input_ids=torch.long,
                 prompt_lens=torch.int32,
             ),
             trailing_shapes=dict(
-                pos_input_ids=(),
-                neg_input_ids=(),
+                packed_input_ids=(),
                 prompt_lens=(),
             ),
             ids=[self.ids[idx]],
             seqlens=dict(
-                pos_input_ids=[pos_input_lens],
-                neg_input_ids=[neg_input_lens],
+                packed_input_ids=[torch.tensor(input_lens, dtype=torch.int32)],
                 prompt_lens=[torch.tensor([1], dtype=torch.int32)],
             ),
         )

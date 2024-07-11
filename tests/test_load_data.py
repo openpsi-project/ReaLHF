@@ -3,7 +3,7 @@ import os
 import pathlib
 import random
 import uuid
-
+import torch
 import pytest
 from tokenizers import Tokenizer
 from tokenizers.models import WordPiece
@@ -95,6 +95,8 @@ def _validate_dataset(cfg: config_api.DatasetAbstraction, tokenizer):
     for x in dataloader:
         assert isinstance(x, data_api.SequenceSample)
         assert x.data is not None
+        for k, v in x.data.items():
+            assert v.device == torch.device("cpu")
         bs = len(x.ids)
         assert len(x.ids) == len(set(x.ids))
         xs = x.split(bs)

@@ -234,8 +234,8 @@ class SequenceSample:
                 metadata[k] = v
         return cls(
             keys=keys,
-            dtypes=samples[0].dtypes,
-            trailing_shapes=samples[0].trailing_shapes,
+            dtypes={key: samples[0].dtypes[key] for key in keys},
+            trailing_shapes={key: samples[0].trailing_shapes[key] for key in keys},
             ids=id_,
             seqlens=seqlens,
             data=data,

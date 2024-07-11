@@ -7,7 +7,7 @@ import deepspeed
 import torch
 import torch.distributed as dist
 import tqdm
-
+import itertools
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
@@ -17,14 +17,26 @@ from realhf.impl.model.nn.real_llm_api import ReaLModel
 logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")
 
 
+def flatten_list(l):
+    return list(itertools.chain(*l))
+
+
 def _paired_rw_loss_from_model_outputs(
     scores: torch.FloatTensor,
-    packed_input_ids: torch.LongTensor,
-    cu_seqlens: torch.IntTensor,
-    group_factor: torch.FloatTensor,
-    **kwargs,
+    input_: SequenceSample,
 ):
-    scores = scores[cu_seqlens[1:] - 1].view(-1, 2).float()
+    # Normalize pairs of each prompt with the group factor,
+    # which is the reciprocal of the number of pairs in the group.
+    group_sizes = [len(x) // 2 for x in input_.seqlens["packed_input_ids"]]
+    group_factor = torch.tensor(
+        flatten_list([[1 / g for _ in range(g)] for g in group_sizes]),
+        device=scores.device,
+    )
+
+    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+
+    assert scores.shape[0] == input_lens.sum(), (scores.shape, input_lens.sum())
+    scores = scores[input_lens.cumsum(0) - 1].view(-1, 2).float()
     loss = -(
         torch.nn.functional.logsigmoid(scores[:, 0] - scores[:, 1]) * group_factor
     ).sum()
@@ -98,29 +110,18 @@ class PairedRewardInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
-        data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data["packed_seq"]
-        seqlens_cpu = data.metadata["seqlens"]
-        max_seqlen = max(seqlens_cpu)
-        cu_seqlens = torch.nn.functional.pad(
-            torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0),
-            (1, 0),
-        )
 
         module: deepspeed.DeepSpeedEngine = model.module
 
         module.eval()
 
-        r = module.forward(
-            seqlens_cpu=data.metadata["seqlens"],
-            packed_input_ids=packed_input_ids,
-            cu_seqlens=cu_seqlens,
-        )
+        r = module.forward(input_=data)
         if r is None:
             return
         scores = r.float()
 
-        scores = scores.squeeze(-1)[cu_seqlens[1:] - 1].float()  # [bs]
+        input_lens = torch.cat(data.seqlens["packed_input_ids"])
+        scores = scores.squeeze(-1)[input_lens.cumsum(0) - 1].float()  # [bs]
         scores = (scores - self.output_bias) * self.output_scaling
 
         ###################### logging ######################
@@ -135,41 +136,28 @@ class PairedRewardInterface(model_api.ModelInterface):
         #     )
         #####################################################
 
-        res = from_dict(dict(rewards=scores))
-        res.register_metadata(**data.metadata)
+        res = SequenceSample(
+            keys=["scores"],
+            trailing_shapes=dict(scores=()),
+            dtypes=dict(scores=torch.float32),
+            ids=data.ids,
+            seqlens=dict(
+                scores=[torch.tensor([1], dtype=torch.int32) for _ in range(data.bs)]
+            ),
+            data=dict(scores=scores),
+        )
         return res
 
     def train_step(
         self, model: model_api.Model, data: SequenceSample
     ) -> SequenceSample:
-        data = recursive_apply(data, lambda x: x.to(model.device))
-
-        packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        pair_lens = torch.tensor(
-            data.metadata["seqlens"], dtype=torch.int32, device=model.device
-        )
-        neg_input_lens = pair_lens - data["pos_input_lens"]
-        input_lens: torch.Tensor = torch.stack(
-            [data["pos_input_lens"], neg_input_lens], 1
-        ).view(-1)
-        group_factor: torch.Tensor = data["group_factor"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
-        max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
-
         module = model.module
         module.train()
 
-        loss_fn_kwargs = dict(
-            input_lens=pair_lens,
-            group_factor=data["group_factor"],
-        )
         stats = module.train_batch(
-            seqlens_cpu=data.metadata["seqlens"],
-            packed_input_ids=packed_input_ids,
-            cu_seqlens=cu_seqlens,
+            input_=data,
             loss_fn=_paired_rw_loss_from_model_outputs,
             version_steps=model.version.global_step,
-            **loss_fn_kwargs,
         )
 
         res = {}
@@ -218,7 +206,6 @@ class PairedRewardInterface(model_api.ModelInterface):
         model_: model_api.Model,
         eval_dataloader: torch.utils.data.DataLoader,
     ) -> Dict:
-        device = model_.device
         model = model_.module
 
         model.eval()
@@ -229,35 +216,13 @@ class PairedRewardInterface(model_api.ModelInterface):
         min_neg_score = float("inf")
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
-            pair_lens = torch.tensor(
-                data.metadata["seqlens"], dtype=torch.int32, device=model.device
-            )
-            data = recursive_apply(data, lambda x: x.to(device))
-
-            packed_input_ids: torch.Tensor = data["packed_input_ids"]
-            neg_input_lens = pair_lens - data["pos_input_lens"]
-            assert (neg_input_lens > 0).all()
-            input_lens = torch.stack([data["pos_input_lens"], neg_input_lens], 1).view(
-                -1
-            )
-            cu_seqlens = torch.cat(
-                [input_lens.new_zeros(1), input_lens.cumsum(0)], 0
-            ).int()
-
-            loss_fn_kwargs = dict(
-                input_lens=pair_lens,
-                group_factor=data["group_factor"],
-            )
+            data: SequenceSample
             stats = model.eval_batch(
-                seqlens_cpu=data.metadata["seqlens"],
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
+                input_=data.cuda(),
                 loss_fn=_paired_rw_loss_from_model_outputs,
-                **loss_fn_kwargs,
             )
 
             if stats:
-                assert input_lens.shape[0] % 2 == 0
                 losses += stats["loss"].item()
                 correct_predictions += stats["correct_predictions"].item()
                 total_predictions += stats["total_predictions"].item()

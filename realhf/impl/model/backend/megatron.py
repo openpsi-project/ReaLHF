@@ -772,6 +772,8 @@ class ReaLMegatronEngine:
         with megatron_ctx():
             self.engine.zero_grad()
             if constants.pipe_parallel_world_size() > 1:
+                if num_micro_batches is None:
+                    num_micro_batches = self.pipe_runner.default_train_mbs
                 instr_set = PipeTrainInstrSetForMegatron(self.engine, num_micro_batches)
                 return self.pipe_runner.train_batch(
                     instr_set=instr_set,
