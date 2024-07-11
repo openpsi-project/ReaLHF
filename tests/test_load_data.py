@@ -98,6 +98,8 @@ def _validate_dataset(cfg: config_api.DatasetAbstraction, tokenizer):
         for k, v in x.data.items():
             assert v.device == torch.device("cpu")
         bs = len(x.ids)
+        for k, vs in x.seqlens.items():
+            assert all(v.dtype == torch.int32 for v in vs)
         assert len(x.ids) == len(set(x.ids))
         xs = x.split(bs)
 

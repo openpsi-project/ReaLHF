@@ -138,14 +138,14 @@ class PairedRewardInterface(model_api.ModelInterface):
         #####################################################
 
         res = SequenceSample(
-            keys=["scores"],
-            trailing_shapes=dict(scores=()),
-            dtypes=dict(scores=torch.float32),
+            keys=["rewards"],
+            trailing_shapes=dict(rewards=()),
+            dtypes=dict(rewards=torch.float32),
             ids=data.ids,
             seqlens=dict(
-                scores=[torch.tensor([1], dtype=torch.int32) for _ in range(data.bs)]
+                rewards=[torch.tensor([1], dtype=torch.int32) for _ in range(data.bs)]
             ),
-            data=dict(scores=scores),
+            data=dict(rewards=scores),
         )
         return res
 

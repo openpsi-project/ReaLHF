@@ -665,6 +665,7 @@ async def model_rpc_reply_func(
         if rpc.is_dst:
             await ctrl.train_count.put(1)
         else:
+            logger.info(f"Amending RPC {rpc.name} output keys: {res.keys}")
             await buffer.amend_batch(buf_indices, res.unpack())
 
         logger.info(
