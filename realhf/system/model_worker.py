@@ -651,14 +651,14 @@ class ModelWorker(worker_base.Worker):
             raise NotImplementedError(f"Unknown MFC type: {request.handle_name}.")
 
         # Store data into storage.
-        if self._is_dp_head and request.handle_name != "train_step":
+        if self._is_dp_head and isinstance(res, data_api.SequenceSample):
             for x in res.unpack():
                 # The input data must exist in the storage, otherwise
                 # the model function call will not run.
                 self.__data_storage[x.ids[0]].update_(x)
 
         # Only return meta data back to the master worker.
-        if request.handle_name != "train_step" and res is not None:
+        if isinstance(res, data_api.SequenceSample):
             res = res.meta()
 
         # Log GPU utilization and memory statistics.
