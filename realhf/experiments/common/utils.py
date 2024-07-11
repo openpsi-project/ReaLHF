@@ -1,16 +1,22 @@
 import collections
 from typing import *
 
-from realhf.api.core.config import ModelBackend
-from realhf.api.core.dfg import MFCDef, ModelInterfaceType, OffloadHook, SyncParamHook
-from realhf.api.core.system_api import ModelName
-from realhf.api.quickstart.device_mesh import DeviceMesh, RPCAllocation
+from realhf.api.core.config import (
+    ModelBackendAbstraction,
+    ModelInterfaceType,
+    ModelName,
+)
+from realhf.api.core.dfg import OffloadHook, SyncParamHook
+from realhf.api.quickstart.device_mesh import RPCAllocation
 from realhf.api.quickstart.model import (
     ModelTrainEvalConfig,
     ParallelismConfig,
     get_real_model_config,
 )
+from realhf.base import logging
 from realhf.base.topology import PipeModelDataParallelTopology
+
+logger = logging.getLogger("Experiment Common Utils", "benchmark")
 
 
 def get_topo(
@@ -40,7 +46,7 @@ def make_train_backend_config(
     model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig
 ):
     if model_cfg.backend == "deepspeed":
-        return ModelBackend(
+        return ModelBackendAbstraction(
             "deepspeed",
             args=dict(
                 optimizer_name="adam",
@@ -72,7 +78,7 @@ def make_train_backend_config(
             raise ValueError("Offload is not supported in Megatron backend.")
         if model_cfg.zero_stage == 3:
             raise ValueError("Zero stage 3 is not supported in Megatron backend.")
-        return ModelBackend(
+        return ModelBackendAbstraction(
             "megatron",
             args=dict(
                 optimizer_name="adam",
@@ -92,7 +98,7 @@ def make_train_backend_config(
                 enable_fp16=model_cfg.enable_fp16,
                 use_zero_optimization=model_cfg.zero_stage > 0,
                 overlap_grad_reduce=model_cfg.zero_stage > 0,
-                overlap_param_gather=model_cfg.zero_stage > 2,
+                overlap_param_gather=model_cfg.zero_stage > 0,
             ),
         )
     else:
@@ -102,7 +108,7 @@ def make_train_backend_config(
 def make_inf_backend_config(
     model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig
 ):
-    return ModelBackend("inference")
+    return ModelBackendAbstraction("inference")
 
 
 def make_model_config(cfg: ModelTrainEvalConfig):
@@ -117,38 +123,34 @@ def make_model_config(cfg: ModelTrainEvalConfig):
 
 
 def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
-
     role_cnt = collections.defaultdict(int)
+    role_interface_types = collections.defaultdict(set)
     for rpc_alloc in rpc_allocs:
+        role_interface_types[rpc_alloc.rpc.role].add(rpc_alloc.rpc.interface_type)
+
+    for i, rpc_alloc in enumerate(rpc_allocs):
         rpc = rpc_alloc.rpc
         parallel = rpc_alloc.parallel
         device_mesh = rpc_alloc.device_mesh
         # check param realloc hooks for train_step rpcs
         if rpc.interface_type == ModelInterfaceType.TRAIN_STEP:
-            for other in rpc_allocs:
+            for j, other in enumerate(rpc_allocs):
                 if rpc.name == other.rpc.name:
                     continue
-                if rpc.model_name.role == other.rpc.model_name.role and not (
-                    parallel == other.parallel and device_mesh == other.device_mesh
-                ):
-                    other.rpc.model_name = ModelName(
-                        rpc.model_name.role, role_cnt[rpc.model_name.role] + 1
-                    )
-                    role_cnt[rpc.model_name.role] += 1
-                    other.rpc.pre_hooks.append(SyncParamHook(source=rpc.model_name))
-                    other.rpc.post_hooks.append(SyncParamHook(target=rpc.model_name))
+                if rpc.role != other.rpc.role:
+                    continue
+                if parallel == other.parallel and device_mesh == other.device_mesh:
+                    continue
+                other.rpc.model_name = ModelName(rpc.role, role_cnt[rpc.role] + 1)
+                role_cnt[rpc.role] += 1
+                other.rpc.add_pre_hook(SyncParamHook(source=rpc.model_name))
+                other.rpc.add_post_hook(SyncParamHook(target=rpc.model_name))
+                logger.info(
+                    f"Add param sync hooks between "
+                    f"{rpc.name} and {other.rpc.name} for role {rpc.role}"
+                )
 
-        # add offload hooks for inference rpcs
-        if rpc.interface_type == ModelInterfaceType.INFERENCE:
-            offload_flag = True
-            # if there is training rpcs for the same model, can not offload
-            for other in rpc_allocs:
-                if (
-                    other.rpc.model_name.role == rpc.model_name.role
-                    and other.rpc.interface_type == ModelInterfaceType.TRAIN_STEP
-                ):
-                    offload_flag = False
-            if offload_flag:
-                rpc.post_hooks.append(OffloadHook())
-
-        print("resolve rpc hooks", rpc.name, rpc.model_name)
+        # add offload hooks for inference and generate rpcs
+        if ModelInterfaceType.TRAIN_STEP not in role_interface_types[rpc.role]:
+            rpc.add_post_hook(OffloadHook())
+            logger.info(f"Add offload hook for rpc {rpc.name} for role {rpc.role}")

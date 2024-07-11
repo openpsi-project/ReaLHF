@@ -1,11 +1,18 @@
-import os
+import copy
+import dataclasses
+import math
+from typing import *
 
-import torch
+import numpy as np
 
 import realhf.base.logging as logging
-from realhf.api.core.dfg import MFCDef, ModelFamily, ModelInterface, ModelInterfaceType
+from realhf.api.core.config import (
+    DatasetAbstraction,
+    ModelInterfaceAbstraction,
+    ModelInterfaceType,
+)
+from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
-from realhf.api.core.system_api import *
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import (
     AllocationConfig,
@@ -13,14 +20,8 @@ from realhf.api.quickstart.device_mesh import (
     RPCAllocation,
 )
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
-from realhf.api.quickstart.model import (
-    ModelTrainEvalConfig,
-    ParallelismConfig,
-    get_real_model_config,
-)
-from realhf.base.topology import PipeModelDataParallelTopology
+from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.experiments.common.common import CommonExperimentConfig
-from realhf.experiments.common.utils import *
 
 logger = logging.getLogger("PPO exp", "colored")
 
@@ -262,7 +263,7 @@ class PPOConfig(CommonExperimentConfig):
     @property
     def rpcs(self):
         # interfaces
-        actor_interface = ModelInterface(
+        actor_interface = ModelInterfaceAbstraction(
             "ppo_actor",
             args={
                 **copy.deepcopy(self.ppo_kwargs),
@@ -275,11 +276,11 @@ class PPOConfig(CommonExperimentConfig):
         ref_interface = copy.deepcopy(actor_interface)
         ref_interface.args["enable_save"] = False
 
-        critic_interface = ModelInterface(
+        critic_interface = ModelInterfaceAbstraction(
             "ppo_critic",
             args=copy.deepcopy(self.ppo_kwargs),
         )
-        rw_interface = ModelInterface(
+        rw_interface = ModelInterfaceAbstraction(
             "paired_rw",
             args=dict(
                 enable_save=False,
@@ -288,13 +289,14 @@ class PPOConfig(CommonExperimentConfig):
             ),
         )
         rollout = MFCDef(
-            model_name=ModelName("actor", 0),
+            name="actor_gen",
+            model_name="actor",
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
             interface_impl=actor_interface,
-            input_data=["packed_prompts"],
-            output_data=[
+            input_keys=["packed_prompts"],
+            output_keys=[
                 "seq_no_eos_mask",
                 "packed_seq",
                 "packed_logprobs",
@@ -302,22 +304,19 @@ class PPOConfig(CommonExperimentConfig):
                 "packed_logits_mask",
             ],
             balanced_dp=True,
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_reward = MFCDef(
-            model_name=ModelName("reward", 0),
+            name="rew_inf",
+            model_name="reward",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
             model_path=self.rew.path,
-            input_data=["packed_seq"],
-            input_key_remap={"packed_seq": "packed_input_ids"},
-            output_data=["scores"],
-            output_key_remap={"scores": "rewards"},
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            input_keys=["packed_seq"],
+            output_keys=["rewards"],
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_ref_inputs = ["packed_seq"]
@@ -326,29 +325,27 @@ class PPOConfig(CommonExperimentConfig):
                 "packed_logits_mask",
             )
         inf_ref_logits = MFCDef(
-            model_name=ModelName("ref", 0),
+            name="ref_inf",
+            model_name="ref",
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
             model_path=self.ref.path,
             interface_impl=ref_interface,
-            input_data=inf_ref_inputs,
-            output_data=["logprobs"],
-            output_key_remap={"logprobs": "packed_ref_logprobs"},
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            input_keys=inf_ref_inputs,
+            output_keys=["packed_ref_logprobs"],
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         inf_values = MFCDef(
-            model_name=ModelName("critic", 0),
+            name="critic_inf",
+            model_name="critic",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
             model_type=self.critic.type,
             model_path=self.critic.path,
-            input_data=["packed_seq", "seq_no_eos_mask"],
-            output_data=["scores"],
-            output_key_remap={"scores": "values"},
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            input_keys=["packed_seq", "seq_no_eos_mask"],
+            output_keys=["values"],
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_actor_inputs = [
@@ -364,26 +361,25 @@ class PPOConfig(CommonExperimentConfig):
         if self.ppo.force_no_logits_mask:
             train_actor_inputs.remove("packed_logits_mask")
         train_actor = MFCDef(
-            model_name=ModelName("actor", 0),
+            name="actor_train",
+            model_name="actor",
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
             model_path=self.actor.path,
             interface_impl=actor_interface,
-            input_data=train_actor_inputs,
+            input_keys=train_actor_inputs,
             log_return_value=True,
-            # pre_hooks=[SyncParamHook(source=ModelName("actor", 0))],
-            # post_hooks=[SyncParamHook(target=ModelName("actor", 0))],
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_critic = MFCDef(
-            model_name=ModelName("critic", 0),
+            name="critic_train",
+            model_name="critic",
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,
             model_type=self.critic.type,
             model_path=self.critic.path,
-            input_data=[
+            input_keys=[
                 "packed_seq",
                 "packed_logprobs",
                 "packed_ref_logprobs",
@@ -393,12 +389,8 @@ class PPOConfig(CommonExperimentConfig):
                 "seq_no_eos_mask",
             ],
             log_return_value=True,
-            # pre_hooks=[SyncParamHook(source=ModelName("critic", 0))],
-            # post_hooks=[SyncParamHook(target=ModelName("critic", 0))],
-            min_n_seqs=self.dataset.train_bs_n_seqs,
-            max_n_seqs=self.dataset.train_bs_n_seqs,
+            n_seqs=self.dataset.train_bs_n_seqs,
         )
-        # rpcs = [rollout, inf_reward, inf_ref_logits, inf_values, train_actor, train_critic]
         return {
             "actor_gen": rollout,
             "actor_train": train_actor,
@@ -422,7 +414,7 @@ class PPOConfig(CommonExperimentConfig):
     @property
     def datasets(self):
         return [
-            Dataset(
+            DatasetAbstraction(
                 "prompt",
                 args=dict(
                     dataset_path=self.dataset.path,
@@ -450,9 +442,6 @@ class PPOConfig(CommonExperimentConfig):
 
     def _heuristic_rpc_allocation(self):
         """Heurisitc RPC allocation for PPO experiments."""
-        import math
-
-        import numpy as np
 
         assert self.n_gpus_per_node == 8
 

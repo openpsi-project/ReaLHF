@@ -22,6 +22,7 @@ from .api.quickstart.model import (
 from .base.namedarray import NamedArray
 from .experiments.common.common import CommonExperimentConfig, ExperimentSaveEvalControl
 from .experiments.common.dpo_exp import DPOConfig
+from .experiments.common.gen_exp import GenerationConfig
 from .experiments.common.ppo_exp import PPOConfig, PPOHyperparameters
 from .experiments.common.rw_exp import RWConfig
 from .experiments.common.sft_exp import SFTConfig

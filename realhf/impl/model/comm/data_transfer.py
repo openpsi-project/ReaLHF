@@ -5,8 +5,7 @@ from typing import *
 
 import torch.distributed
 
-from realhf.api.core import system_api
-from realhf.api.core.config import ModelName
+from realhf.api.core.config import ModelName, ModelShardID
 from realhf.base import topology
 from realhf.impl.model.comm.global_comm import filter_match_mwids
 from realhf.impl.model.comm.param_realloc import pipeline_repartition_strategy
@@ -30,7 +29,7 @@ class DataTransferInfo:
 
 def setup_data_transfer(
     model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
-    msid2mwid: Optional[Dict[system_api.ModelShardID, int]] = None,
+    msid2mwid: Optional[Dict[ModelShardID, int]] = None,
     data_transfer_pairs: Optional[List[Tuple[ModelName, ModelName]]] = None,
 ) -> DataTransferInfo:
 

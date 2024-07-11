@@ -121,7 +121,9 @@ class MyPPOConfig(PPOConfig):
                 break
             idx += 1
         inf_reward_rpc = cfg.model_rpcs[idx]
-        inf_reward_rpc.interface_impl = dfg.ModelInterface("sentiment_scoring")
+        inf_reward_rpc.interface_impl = config_api.ModelInterfaceAbstraction(
+            "sentiment_scoring"
+        )
         inf_reward_rpc.post_hooks = []
 
         return cfg

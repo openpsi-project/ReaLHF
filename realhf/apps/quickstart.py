@@ -1,19 +1,21 @@
 import argparse
 import datetime
 import getpass
+import pathlib
+import re
 import sys
 
 import hydra
 
-import realhf.experiments.common.dpo_exp
-import realhf.experiments.common.gen_exp
-import realhf.experiments.common.ppo_exp
-import realhf.experiments.common.rw_exp
-import realhf.experiments.common.sft_exp
-
-# NOTE: Register all implemented experiments inside ReaL.
 from realhf.api.quickstart.entrypoint import QUICKSTART_FN
 from realhf.base.cluster import spec as cluster_spec
+from realhf.base.importing import import_module
+
+# NOTE: Register all implemented experiments inside ReaL.
+import_module(
+    str(pathlib.Path(__file__).resolve().parent.parent / "experiments" / "common"),
+    re.compile(r".*_exp\.py$"),
+)
 
 
 def main():

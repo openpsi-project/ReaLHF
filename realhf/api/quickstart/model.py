@@ -2,7 +2,11 @@ import dataclasses
 from typing import *
 
 import realhf.base.logging as logging
-from realhf.api.core.config import Model, ModelFamily, ModelWrapper
+from realhf.api.core.config import (
+    ModelAbstraction,
+    ModelFamily,
+    ModelWrapperAbstraction,
+)
 
 logger = logging.getLogger("Quickstart Model Config")
 
@@ -200,9 +204,9 @@ def get_real_model_config(
     sft_lora_path: Optional[str] = None,
     is_rew_lora: bool = False,
     rew_lora_path: Optional[str] = None,
-) -> Model:
+) -> ModelAbstraction:
     """Make a configuration to build model."""
-    model = Model(
+    model = ModelAbstraction(
         "real_model",
         args=dict(
             model_path=model_path,
@@ -214,7 +218,7 @@ def get_real_model_config(
     )
     if is_sft_lora:
         model.wrappers += [
-            ModelWrapper(
+            ModelWrapperAbstraction(
                 "lora",
                 args=dict(
                     lora_module_kwargs=dict(
@@ -229,7 +233,7 @@ def get_real_model_config(
         ]
     if is_rew_lora:
         model.wrappers += [
-            ModelWrapper(
+            ModelWrapperAbstraction(
                 "lora",
                 args=dict(
                     lora_module_kwargs=dict(
@@ -244,7 +248,7 @@ def get_real_model_config(
         ]
     if lora is not None:
         model.wrappers += [
-            ModelWrapper(
+            ModelWrapperAbstraction(
                 "lora",
                 args=dict(
                     lora_module_kwargs=dict(

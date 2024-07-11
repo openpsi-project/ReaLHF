@@ -179,12 +179,12 @@ class AsyncIOSequenceBuffer:
         self._completed_rpc = np.zeros((max_size, len(rpcs)), dtype=bool)
 
         self._rpc_data_keys = rpc_data_keys = list(
-            set().union(*[rpc.input_data for rpc in rpcs])
+            set().union(*[rpc.input_keys for rpc in rpcs])
         )
         # We can efficiently compute whether an RPC is ready using this mask
         self._rpc_key_mask = np.stack(
             [
-                np.array([k in rpc.input_data for k in rpc_data_keys], dtype=bool)
+                np.array([k in rpc.input_keys for k in rpc_data_keys], dtype=bool)
                 for rpc in rpcs
             ],
             axis=1,
@@ -313,7 +313,7 @@ class AsyncIOSequenceBuffer:
                 & self._ready_for_rpcs[:, rpc_idx]
                 & ~self._completed_rpc[:, rpc_idx]
             )[0]
-            if len(ready_indices) < rpc.min_n_seqs:
+            if len(ready_indices) < rpc.n_seqs:
                 return False
             return True
 
@@ -326,7 +326,7 @@ class AsyncIOSequenceBuffer:
                     & ~self._completed_rpc[:, rpc_idx]
                 )[0]
                 # *2 because we want to fetch new data as long as the *next* RPC does not have enough data.
-                if len(ready_indices) < rpc.min_n_seqs * 2:
+                if len(ready_indices) < rpc.n_seqs * 2:
                     self._request_load_data()
 
             while not _can_do_rpc():
@@ -342,14 +342,9 @@ class AsyncIOSequenceBuffer:
             seqlens = self.__buffer._get_seqlen(ready_indices)
             hash_vals = self.__buffer._get_hash_val(ready_indices)
 
-            indices = ready_indices[: rpc.max_n_seqs]
-            seqlens = seqlens[: rpc.max_n_seqs]
-            hash_vals = hash_vals[: rpc.max_n_seqs]
-            assert rpc.min_n_seqs <= len(indices) <= rpc.max_n_seqs, (
-                rpc.min_n_seqs,
-                len(indices),
-                rpc.max_n_seqs,
-            )
+            indices = ready_indices[: rpc.n_seqs]
+            seqlens = seqlens[: rpc.n_seqs]
+            hash_vals = hash_vals[: rpc.n_seqs]
 
             self._is_idle[indices] = False
             self._is_being_read[indices] = True
