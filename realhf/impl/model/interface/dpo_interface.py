@@ -4,7 +4,7 @@ from typing import Dict
 import torch
 import torch.distributed as dist
 import torch.utils.data
-import tqdm
+import functools
 
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
@@ -19,14 +19,16 @@ logger = logging.getLogger("Packed DPO Interface")
 
 def _dpo_loss_from_model_outputs(
     logits: torch.FloatTensor,
-    packed_input_ids: torch.LongTensor,
-    cu_seqlens: torch.IntTensor,
-    prompt_lens: torch.IntTensor,
-    seqlogp: torch.FloatTensor,
+    input_: SequenceSample,
     beta: float,
-    **kwargs,
 ):
-    input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+    packed_input_ids = input_.data["packed_input_ids"]
+    prompt_lens = input_.data["prompt_lens"]
+
+    seqlogp = input_.data["seqlogp"]
+
     logprobs = gather_packed_shifted_log_probs(
         logits, cu_seqlens, packed_input_ids
     ).float()
@@ -35,20 +37,29 @@ def _dpo_loss_from_model_outputs(
     logprob_sum = []
     offset = 0
     for i in range(prompt_lens.shape[0]):
-        logprob_sum.append(
-            logprobs[offset + prompt_lens[i] - 1 : offset + input_lens[2 * i] - 1].sum()
-        )
-        offset += input_lens[2 * i] - 1
-        logprob_sum.append(
-            logprobs[
-                offset + prompt_lens[i] - 1 : offset + input_lens[2 * i + 1] - 1
-            ].sum()
-        )
-        offset += input_lens[2 * i + 1] - 1
+        pair_input_lens = input_.seqlens['packed_input_ids'][i]
+        prompt_len = prompt_lens[i]
+        assert len(pair_input_lens) % 2 == 0
+        for j in range(len(pair_input_lens) // 2):
+            pos_len = pair_input_lens[2 * j]
+            neg_len = pair_input_lens[2 * j + 1]
+            logprob_sum.append(
+                logprobs[
+                    offset + prompt_len - 1 : offset + pos_len - 1
+                ].sum()
+            )
+            offset += pos_len - 1
+            logprob_sum.append(
+                logprobs[
+                    offset + prompt_len - 1 : offset + neg_len - 1
+                ].sum()
+            )
+            offset += neg_len - 1
     assert offset == sum(input_lens) - input_lens.shape[0], (
         offset,
         sum(input_lens),
         input_lens.shape,
+        prompt_lens.shape,
     )
 
     pi_seqlogp = torch.stack(logprob_sum)
@@ -93,97 +104,77 @@ class DPOInterface(model_api.ModelInterface):
     enable_save: bool = True
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
+    def inference(
+        self, model: model_api.Model, input_: SequenceSample
+    ) -> SequenceSample:
         module = model.module
         module.eval()
-        data = recursive_apply(data, lambda x: x.to(model.device))
 
-        n_pairs = data["pos_input_lens"].shape[0]
-        pair_lens = torch.tensor(
-            data.metadata["seqlens"], dtype=torch.int32, device=model.device
-        )
-        input_lens: torch.IntTensor = torch.stack(
-            [data["pos_input_lens"], pair_lens - data["pos_input_lens"]], 1
-        ).view(-1)
-        prompt_lens: torch.IntTensor = data["prompt_lens"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)]).int()
-        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-        max_seqlen = int(max(input_lens))
-
-        seqlens_cpu = input_lens.cpu().numpy().tolist()
-
-        logits = module.forward(
-            seqlens_cpu=seqlens_cpu,
-            packed_input_ids=data["packed_input_ids"],
-            cu_seqlens=cu_seqlens,
-        )
+        logits = module.forward(input_=input_)
         if logits is None:
             return None
 
+        input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+        prompt_lens = input_.data["prompt_lens"]
+
         logprobs = gather_packed_shifted_log_probs(
-            logits, cu_seqlens, data["packed_input_ids"]
+            logits, cu_seqlens, input_.data["packed_input_ids"]
         ).float()
 
         assert (prompt_lens > 0).all(), prompt_lens
         logprob_sum = []
         offset = 0
         for i in range(prompt_lens.shape[0]):
-            logprob_sum.append(
-                logprobs[
-                    offset + prompt_lens[i] - 1 : offset + input_lens[2 * i] - 1
-                ].sum()
-            )
-            offset += input_lens[2 * i] - 1
-            logprob_sum.append(
-                logprobs[
-                    offset + prompt_lens[i] - 1 : offset + input_lens[2 * i + 1] - 1
-                ].sum()
-            )
-            offset += input_lens[2 * i + 1] - 1
+            pair_input_lens = input_.seqlens['packed_input_ids'][i]
+            prompt_len = prompt_lens[i]
+            assert len(pair_input_lens) % 2 == 0
+            for j in range(len(pair_input_lens) // 2):
+                pos_len = pair_input_lens[2 * j]
+                neg_len = pair_input_lens[2 * j + 1]
+                logprob_sum.append(
+                    logprobs[
+                        offset + prompt_len - 1 : offset + pos_len - 1
+                    ].sum()
+                )
+                offset += pos_len - 1
+                logprob_sum.append(
+                    logprobs[
+                        offset + prompt_len - 1 : offset + neg_len - 1
+                    ].sum()
+                )
+                offset += neg_len - 1
         assert offset == sum(input_lens) - input_lens.shape[0], (
             offset,
             sum(input_lens),
             input_lens.shape,
+            prompt_lens.shape,
         )
 
-        x = from_dict(dict(seqlogp=torch.stack(logprob_sum).view(n_pairs, -1)))
-        x.register_metadata(**data.metadata)
-        return x
-
-    def train_step(self, model: model_api.Model, data: SequenceSample) -> Dict:
-        data = recursive_apply(data, lambda x: x.to(model.device))
-
-        packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        pair_lens = torch.tensor(
-            data.metadata["seqlens"], dtype=torch.int32, device=model.device
+        seqlogp = torch.stack(logprob_sum)
+        res = SequenceSample(
+            keys=["seqlogp"],
+            trailing_shapes=dict(seqlogp=()),
+            dtypes=dict(seqlogp=torch.float32),
+            ids=input_.ids,
+            data=dict(seqlogp=seqlogp),
+            seqlens=dict(seqlogp=[torch.tensor([len(slens)], dtype=torch.int32) for slens in input_.seqlens['packed_input_ids']]),
         )
-        neg_input_lens = pair_lens - data["pos_input_lens"]
-        input_lens: torch.Tensor = torch.stack(
-            [data["pos_input_lens"], neg_input_lens], 1
-        ).view(-1)
-        prompt_lens: torch.IntTensor = data["prompt_lens"]
-        cu_seqlens = torch.cat([input_lens.new_zeros(1), input_lens.cumsum(0)], 0).int()
-        max_seqlen = int(max(cu_seqlens[1:] - cu_seqlens[:-1]))
+        return res
 
+    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
         module = model.module
+
+        # Determining whether to disable dropout is a bit tricky.
+        # We disable it by default.
         module.eval()
 
-        loss_fn_kwargs = dict(
-            input_lens=pair_lens,
-            prompt_lens=prompt_lens,
-            seqlogp=data["seqlogp"],
-            beta=self.beta,
-        )
         stats = module.train_batch(
-            seqlens_cpu=data.metadata["seqlens"],
-            packed_input_ids=packed_input_ids,
-            cu_seqlens=cu_seqlens,
+            input_=input_,
             version_steps=model.version.global_step,
-            loss_fn=_dpo_loss_from_model_outputs,
-            **loss_fn_kwargs,
+            loss_fn=functools.partial(_dpo_loss_from_model_outputs, beta=self.beta),
         )
 
-        cur_epoch = model.version.epoch
         model.inc_version()
 
         res = {}

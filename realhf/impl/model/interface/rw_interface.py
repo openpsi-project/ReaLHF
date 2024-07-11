@@ -28,6 +28,7 @@ def _paired_rw_loss_from_model_outputs(
     # Normalize pairs of each prompt with the group factor,
     # which is the reciprocal of the number of pairs in the group.
     group_sizes = [len(x) // 2 for x in input_.seqlens["packed_input_ids"]]
+    assert all([x>=1 for x in group_sizes])
     group_factor = torch.tensor(
         flatten_list([[1 / g for _ in range(g)] for g in group_sizes]),
         device=scores.device,

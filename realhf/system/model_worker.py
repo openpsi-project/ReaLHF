@@ -658,7 +658,7 @@ class ModelWorker(worker_base.Worker):
                 self.__data_storage[x.ids[0]].update_(x)
 
         # Only return meta data back to the master worker.
-        if request.handle_name != "train_step":
+        if request.handle_name != "train_step" and res is not None:
             res = res.meta()
 
         # Log GPU utilization and memory statistics.
@@ -688,7 +688,7 @@ class ModelWorker(worker_base.Worker):
             data_transfer_info=self.__data_transfer_info,
         )
 
-        local_ids, local_keys = data_transfer_comm.run_data_transfer(
+        data_transfer_comm.run_data_transfer(
             comm_plan=comm_plan,
             meta_samples={x.ids[0]: x for x in meta_sample.unpack()},
             storage=self.__data_storage,
@@ -696,10 +696,12 @@ class ModelWorker(worker_base.Worker):
             received_worker_idx_table=self.__data_received_worker_indices,
         )
 
-        if local_ids:
+        if hook_data['target'] in self.__models:
+            with constants.model_scope(hook_data['target']):
+                local_ids = [meta_sample.ids[i] for i in hook_data['target_mapping'][self._dp_rank]]
             r = data_api.SequenceSample.gather(
                 [self.__data_storage[_id] for _id in local_ids],
-                keys=local_keys,
+                keys=meta_sample.keys,
             )
             self.__compute_input_queues[hook_data["target"]][
                 hook_data["handle_name"]

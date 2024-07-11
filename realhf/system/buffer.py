@@ -271,6 +271,7 @@ class AsyncIOSequenceBuffer:
     async def get_batch_for_rpc(
         self, rpc: dfg.MFCDef
     ) -> Tuple[List[int], SequenceSample]:
+        logger.info(f"MFC {rpc.name} is waiting for its input keys: {rpc.input_keys}...")
         rpc_idx = self._rpc_names.index(rpc.name)
 
         def _can_do_rpc() -> bool:
@@ -298,6 +299,7 @@ class AsyncIOSequenceBuffer:
             while not _can_do_rpc():
                 await self._lock.wait()
 
+            logger.info(f"Input keys ({rpc.input_keys}) for MFC {rpc.name} are ready!")
             self._assert_valid_indicator()
 
             ready_indices = np.nonzero(
@@ -337,4 +339,4 @@ class AsyncIOSequenceBuffer:
 
             if self._is_idle[indices].any():
                 self._lock.notify(len(self._rpc_names))
-        return indices, SequenceSample.gather([e.sample for e in entries])
+        return indices, SequenceSample.gather([e.sample for e in entries], keys=rpc.input_keys)

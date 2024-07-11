@@ -327,7 +327,7 @@ class SequenceSample:
         self.keys = self.keys.union(other.keys)
         self.trailing_shapes.update(other.trailing_shapes)
         self.dtypes.update(other.dtypes)
-        assert self.ids == other.ids
+        assert self.ids == other.ids, (self.ids, other.ids)
         if self.data is not None:
             self.data.update(other.data)
         self.seqlens.update(other.seqlens)

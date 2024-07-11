@@ -186,14 +186,10 @@ def run_data_transfer(
     sent_worker_idx_table: Dict[int, Dict[str, Set[int]]],
     received_worker_idx_table: Dict[int, Dict[str, Set[int]]],
 ) -> Tuple[Set[int], Set[str]]:
-    local_ids = set()
-    local_keys = set()
     for step in comm_plan:
 
         if isinstance(step, DataTransferReceiverStep) and step.rank == dist.get_rank():
             ids = step.ids
-            local_ids.update(ids)
-            local_keys.add(step.key)
             if step.src == dist.get_rank():
                 # The receiver is also a sender.
                 # We can directly use the data without comm.
@@ -283,4 +279,3 @@ def run_data_transfer(
                 dist.broadcast(vs, src=step.rank, group=step.group)
                 for _id in step.ids:
                     sent_worker_idx_table[_id][step.key].union(step.dst_ranks)
-    return local_ids, local_keys

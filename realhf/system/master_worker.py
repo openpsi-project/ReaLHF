@@ -648,7 +648,7 @@ async def model_rpc_reply_func(
         # model function calls. The data shoulbe be amended into buffer.
         # Otherwise, it's the train statistics and should be reduced and logged.
         if isinstance(responses[-1].data, data_api.SequenceSample):
-            res = responses[-1].data
+            res = data_api.SequenceSample.gather([r.data for r in responses])
         else:
             res = _gather_stat([response.data for response in responses])
 
