@@ -61,16 +61,9 @@ class PromptDataset(torch.utils.data.Dataset):
         return len(self.prompts)
 
     def __getitem__(self, idx):
-        return data_api.SequenceSample(
-            keys=["packed_prompts"],
-            trailing_shapes=dict(packed_prompts=()),
-            dtypes=dict(packed_prompts=torch.long),
+        return data_api.SequenceSample.from_default(
             ids=[self.ids[idx]],
-            seqlens=dict(
-                packed_prompts=[
-                    torch.tensor([self.prompt_lengths[idx]], dtype=torch.int32)
-                ]
-            ),
+            seqlens=[self.prompt_lengths[idx]],
             data=dict(packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long)),
         )
 

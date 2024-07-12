@@ -186,12 +186,9 @@ class PPOActorInterface(model_api.ModelInterface):
 
         # Remap the key `packed_prompts` to `packed_input_ids`,
         # because the pipe runner only recognizes `packed_input_ids`.
-        x = SequenceSample(
-            keys=["packed_input_ids"],
-            trailing_shapes=dict(packed_input_ids=()),
-            dtypes=dict(packed_input_ids=torch.long),
+        x = SequenceSample.from_default(
             ids=input_.ids,
-            seqlens=dict(packed_input_ids=input_.seqlens["packed_prompts"]),
+            seqlens=input_.seqlens["packed_prompts"],
             data=dict(packed_input_ids=input_.data["packed_prompts"]),
         )
 
@@ -235,36 +232,9 @@ class PPOActorInterface(model_api.ModelInterface):
             torch.tensor([s], dtype=torch.int32)
             for s in seq_lengths.cpu().numpy().tolist()
         ]
-        res = SequenceSample(
-            keys=[
-                "packed_input_ids",
-                "packed_logprobs",
-                "packed_logits_mask",
-                "prompt_mask",
-                "seq_no_eos_mask",
-            ],
-            trailing_shapes=dict(
-                packed_input_ids=(),
-                packed_logprobs=(),
-                packed_logits_mask=(packed_logits_mask.shape[-1],),
-                prompt_mask=(),
-                seq_no_eos_mask=(),
-            ),
-            dtypes=dict(
-                packed_input_ids=torch.long,
-                packed_logprobs=torch.float32,
-                packed_logits_mask=torch.bool,
-                prompt_mask=torch.bool,
-                seq_no_eos_mask=torch.bool,
-            ),
+        res = SequenceSample.from_default(
             ids=input_.ids,
-            seqlens=dict(
-                packed_input_ids=seqlens,
-                packed_logprobs=[x - 1 for x in seqlens],
-                packed_logits_mask=seqlens,
-                prompt_mask=seqlens,
-                seq_no_eos_mask=[torch.ones_like(s) for s in seqlens],
-            ),
+            seqlens=seqlens,
             data=dict(
                 seq_no_eos_mask=seq_no_eos_mask,
                 packed_input_ids=packed_input_ids,
@@ -301,14 +271,9 @@ class PPOActorInterface(model_api.ModelInterface):
         logprobs = gather_packed_shifted_log_probs(
             logits, cu_seqlens, input_.data["packed_input_ids"]
         )
-        res = SequenceSample(
-            keys=["packed_ref_logprobs"],
-            trailing_shapes=dict(packed_ref_logprobs=()),
-            dtypes=dict(packed_ref_logprobs=torch.float16),
+        res = SequenceSample.from_default(
             ids=input_.ids,
-            seqlens=dict(
-                packed_ref_logprobs=[x - 1 for x in input_.seqlens["packed_input_ids"]]
-            ),
+            seqlens=input_.seqlens["packed_input_ids"],
             data=dict(packed_ref_logprobs=logprobs),
         )
         return res
@@ -385,35 +350,7 @@ class PPOActorInterface(model_api.ModelInterface):
             advantages = masked_normalization(advantages, loss_mask)
 
         # Prepare data to be splitted into mini-batches.
-        input_ = SequenceSample(
-            keys=[
-                "advantages",
-                "old_logp",
-                "ppo_loss_mask",
-                "packed_input_ids",
-                "kl_rewards",
-                "packed_logits_mask",
-            ],
-            dtypes=dict(
-                advantages=torch.float32,
-                old_logp=torch.float32,
-                ppo_loss_mask=torch.bool,
-                packed_input_ids=torch.long,
-                kl_rewards=torch.float32,
-                packed_logits_mask=torch.bool,
-            ),
-            trailing_shapes=dict(
-                advantages=(),
-                old_logp=(),
-                ppo_loss_mask=(),
-                packed_input_ids=(),
-                kl_rewards=(),
-                packed_logits_mask=(
-                    (input_.data["packed_logits_mask"].shape[-1],)
-                    if "packed_logits_mask" in input_.data
-                    else ()
-                ),
-            ),
+        input_ = SequenceSample.from_default(
             ids=input_.ids,
             data=dict(
                 advantages=advantages,
@@ -427,14 +364,7 @@ class PPOActorInterface(model_api.ModelInterface):
                     else None
                 ),
             ),
-            seqlens=dict(
-                advantages=[x - 1 for x in input_.seqlens["packed_input_ids"]],
-                old_logp=[x - 1 for x in input_.seqlens["packed_input_ids"]],
-                ppo_loss_mask=[x - 1 for x in input_.seqlens["packed_input_ids"]],
-                packed_input_ids=input_.seqlens["packed_input_ids"],
-                kl_rewards=[x - 1 for x in input_.seqlens["packed_input_ids"]],
-                packed_logits_mask=input_.seqlens["packed_input_ids"],
-            ),
+            seqlens=input_.seqlens["packed_input_ids"],
         )
         # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.
@@ -654,13 +584,10 @@ class PPOCriticInterface(model_api.ModelInterface):
         if scores is None:
             return None
         scores = scores.squeeze(-1)
-        res = SequenceSample(
-            keys=["values"],
-            trailing_shapes=dict(values=()),
-            dtypes=dict(values=torch.float16),
+        res = SequenceSample.from_default(
             ids=input_.ids,
             data=dict(values=scores),
-            seqlens=dict(values=input_.seqlens["packed_input_ids"]),
+            seqlens=input_.seqlens["packed_input_ids"],
         )
         return res
 
@@ -739,28 +666,7 @@ class PPOCriticInterface(model_api.ModelInterface):
             normalized_returns = returns
 
         # Prepare data to be splitted into mini-batches.
-        input_ = SequenceSample(
-            keys=[
-                "values",
-                "returns",
-                "ppo_loss_mask",
-                "packed_input_ids",
-                "kl_rewards",
-            ],
-            dtypes=dict(
-                values=torch.float32,
-                returns=torch.float32,
-                ppo_loss_mask=torch.bool,
-                packed_input_ids=torch.long,
-                kl_rewards=torch.float32,
-            ),
-            trailing_shapes=dict(
-                values=(),
-                returns=(),
-                ppo_loss_mask=(),
-                packed_input_ids=(),
-                kl_rewards=(),
-            ),
+        input_ = SequenceSample.from_default(
             ids=input_.ids,
             data=dict(
                 returns=normalized_returns,
@@ -769,13 +675,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                 packed_input_ids=input_.data["packed_input_ids"],
                 kl_rewards=kl_rewards,
             ),
-            seqlens=dict(
-                returns=[x - 1 for x in input_.seqlens["packed_input_ids"]],
-                ppo_loss_mask=[x - 1 for x in input_.seqlens["packed_input_ids"]],
-                packed_input_ids=input_.seqlens["packed_input_ids"],
-                values=input_.seqlens["packed_input_ids"],
-                kl_rewards=[x - 1 for x in input_.seqlens["packed_input_ids"]],
-            ),
+            seqlens=input_.seqlens["packed_input_ids"],
         )
         # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.

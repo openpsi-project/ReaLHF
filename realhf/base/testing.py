@@ -272,30 +272,9 @@ def make_random_packed_batches(
     n_seqs = batch_size * n_batches
     seqs = random_sample(batch_size * n_batches, seq_len, vocab_size, seed)
     seqs = seqs[n_seqs * dp_rank // dp_size : n_seqs * (dp_rank + 1) // dp_size]
-    x = SequenceSample(
-        keys=["packed_prompts", "packed_input_ids", "prompt_mask"],
-        dtypes=dict(
-            packed_prompts=torch.long,
-            packed_input_ids=torch.long,
-            prompt_mask=torch.bool,
-        ),
-        trailing_shapes=dict(packed_prompts=(), packed_input_ids=(), prompt_mask=()),
-        seqlens=dict(
-            packed_prompts=[
-                torch.tensor([seq_len], dtype=torch.int32) for _ in range(seqs.shape[0])
-            ],
-            packed_input_ids=[
-                torch.tensor([seq_len], dtype=torch.int32) for _ in range(seqs.shape[0])
-            ],
-            prompt_mask=[
-                torch.tensor([seq_len], dtype=torch.int32) for _ in range(seqs.shape[0])
-            ],
-        ),
-        data=dict(
-            packed_prompts=seqs.view(-1),
-            packed_input_ids=seqs.view(-1),
-            prompt_mask=torch.zeros_like(seqs.view(-1), dtype=torch.bool),
-        ),
+    x = SequenceSample.from_default(
+        seqlens=[seq_len for _ in range(seqs.shape[0])],
+        data=dict(packed_prompts=seqs.view(-1)),
         ids=list(range(seqs.shape[0])),
     )
     return x.split(n_batches)

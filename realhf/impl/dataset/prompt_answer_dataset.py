@@ -96,12 +96,9 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
         }
         assert len(d["packed_input_ids"]) == len(d["prompt_mask"])
         seqlen = torch.tensor([len(d["packed_input_ids"])], dtype=torch.int32)
-        x = data_api.SequenceSample(
-            keys=list(d.keys()),
-            trailing_shapes={k: () for k in d.keys()},
-            dtypes={k: d[k].dtype for k in d.keys()},
+        x = data_api.SequenceSample.from_default(
             ids=[self.ids[idx]],
-            seqlens={k: [seqlen] for k in d.keys()},
+            seqlens=[seqlen],
             data=d,
         )
         return x

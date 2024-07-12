@@ -91,8 +91,8 @@ class SequenceSplitSpec:
 @pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
 class SequenceSample:
     keys: Set[str]
-    trailing_shapes: Dict[str, torch.Size | Tuple]
-    dtypes: Dict[str, torch.dtype]
+    trailing_shapes: Dict[str, torch.Size | Tuple | None]
+    dtypes: Dict[str, torch.dtype | None]
 
     ids: List[Hashable]
 
@@ -349,6 +349,73 @@ class SequenceSample:
             self.data.update(other.data)
         self.seqlens.update(other.seqlens)
         self.metadata.update(other.metadata)
+
+    @staticmethod
+    def _resolve_seqlen_from_key(key, seqlens: List[int]) -> List[torch.Tensor]:
+        if key in [
+            "seq_no_eos_mask",
+            "loss_mask",
+            "rewards",
+        ]:
+            return [torch.tensor([1], dtype=torch.int32) for _ in seqlens]
+        elif key in [
+            "input_ids",
+            "packed_seq",
+            "seq",
+            "packed_logits_mask",
+            "logits_mask",
+            "prompt_mask",
+            "packed_input_ids",
+            "values",
+            "packed_prompts",
+        ]:
+            return [torch.tensor([seqlen], dtype=torch.int32) for seqlen in seqlens]
+        elif key in [
+            "packed_logprobs",
+            "logprobs",
+            "packed_ref_logprobs",
+            "ref_logprobs",
+            "old_logp",
+            "ref_logp",
+            "advantages",
+            "ppo_loss_mask",
+            "kl_rewards",
+            "returns",
+        ]:
+            return [torch.tensor([seqlen - 1], dtype=torch.int32) for seqlen in seqlens]
+        else:
+            raise NotImplementedError(
+                f"Seqlen could not be resolved given key {key}. "
+                f"Please explicltly construct the `SequenceSample` object"
+                " without using the `from_default` method."
+            )
+
+    @classmethod
+    def from_default(
+        cls,
+        seqlens: List[int],
+        ids: List[Hashable],
+        data: Dict[str, torch.Tensor],
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        keys = set(data.keys())
+        seqlens = [int(seqlen) for seqlen in seqlens]
+        seqlens = {key: cls._resolve_seqlen_from_key(key, seqlens) for key in keys}
+        trailing_shapes = {
+            key: data[key].shape[1:] if data[key] is not None else None for key in keys
+        }
+        dtypes = {
+            key: data[key].dtype if data[key] is not None else None for key in keys
+        }
+        return cls(
+            keys=keys,
+            ids=ids,
+            seqlens=seqlens,
+            trailing_shapes=trailing_shapes,
+            dtypes=dtypes,
+            data=data,
+            metadata=metadata if metadata is not None else {},
+        )
 
 
 @dataclasses.dataclass

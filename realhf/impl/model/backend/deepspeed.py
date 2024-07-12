@@ -24,7 +24,7 @@ import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.impl.model.backend.inference import PipelinableInferenceEngine
-from realhf.impl.model.backend.pipe_runner import PipelineRunner, PipeTrainInstrSet
+from realhf.impl.model.backend.pipe_runner import PipeTrainInstrSet
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.parallelism.pipeline_parallel.tensor_storage import TensorBuffer
 
@@ -172,63 +172,13 @@ class ReaLDeepSpeedEngine:
         self.module = module
 
         self.inf_engine = PipelinableInferenceEngine(module)
+        if constants.pipe_parallel_world_size() > 1:
+            self.pipe_runner = self.inf_engine.pipe_runner
 
         self.device = module.device
         self.dtype = module.dtype
 
         self.ds_engine = ds_engine
-
-        if constants.pipe_parallel_world_size() > 1:
-            self.pipe_runner = PipelineRunner(module)
-
-            assert (
-                self.ds_engine.zero_optimization_stage() < 2
-            ), "ZeRO-2 and ZeRO-3 are incompatible with pipeline parallelism"
-            if self.ds_engine.bfloat16_enabled():
-                assert isinstance(self.ds_engine.optimizer, BF16_Optimizer)
-
-            model_parameters = filter(
-                lambda p: p.requires_grad, self.module.parameters()
-            )
-            num_params = sum([p.numel() for p in model_parameters])
-            shared_params = 0
-            if (
-                module.shared_embedding_or_output_weights
-                and not module.config.is_critic
-            ):
-                shared_params = module.shared_embedding_or_output_weight().numel()
-            unique_params = num_params - shared_params
-
-            params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(
-                self.device
-            )
-            dist.all_reduce(
-                params_tensor, group=constants.grid().get_model_parallel_group()
-            )
-            params_tensor = params_tensor.tolist()
-            total_params = params_tensor[0]
-            unique_params = params_tensor[1]
-
-            if constants.parallelism_rank() == 0:
-                logger.info(
-                    f"CONFIG: default_train_mbs={self.pipe_runner.default_train_mbs} "
-                    f"default_inf_mbs={self.pipe_runner.default_inf_mbs} "
-                    f"num_layers(this stage)={self.module.num_layers} "
-                    f"pp_size={constants.pipe_parallel_world_size()} "
-                    f"dp_size={constants.data_parallel_world_size()} "
-                    f"mp_size={constants.model_parallel_world_size()} "
-                    f"bf16={self.ds_engine.bfloat16_enabled()} "
-                )
-            if constants.data_parallel_rank() == 0:
-                logger.info(
-                    f"rank={constants.parallelism_rank()} "
-                    f"stage={constants.pipe_parallel_rank()} "
-                    f"layers={self.module.num_layers} "
-                    f"[{self.module.layer_idx_start}, {self.module.layer_idx_end}) "
-                    f"stage_params={num_params} ({num_params/1e6:0.3f}M) "
-                    f"total_params={total_params} ({total_params/1e6:0.3f}M) "
-                    f"unique_params={unique_params} ({unique_params/1e6:0.3f}M)"
-                )
 
     def train(self, mode: bool = True):
         self.ds_engine.train(mode)
