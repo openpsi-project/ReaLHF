@@ -54,6 +54,9 @@ ENV NVTE_WITH_USERBUFFERS=1 NVTE_FRAMEWORK=pytorch MAX_JOBS=8 MPI_HOME=/usr/loca
 ENV PATH="${PATH}:/opt/hpcx/ompi/bin:/opt/hpcx/ucx/bin"
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 
+COPY ./requirements.txt /requirements.txt
+RUN pip3 install -r /requirements.txt && rm /requirements.txt
+
 # NOTE: we should also install flash_attn and transformer_engine in the image
 # However, using `pip install flash_attn -no-build-isolation` will cause the
 # building process to get stuck forever, so we have to pre-compile the wheel

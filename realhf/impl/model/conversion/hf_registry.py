@@ -225,7 +225,7 @@ class HFModelRegistry:
         )
 
         # By default a shard is at most 1GB. A small size enables parallel saving during training.
-        max_shard_size_byte = int(os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e9)))
+        max_shard_size_byte = int(os.getenv("REAL_SAVE_MAX_SHARD_SIZE_BYTE", int(1e10)))
         n_shards_this_stage = (
             approx_param_size + max_shard_size_byte - 1
         ) // max_shard_size_byte

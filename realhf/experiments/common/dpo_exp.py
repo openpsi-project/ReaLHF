@@ -102,7 +102,6 @@ class DPOConfig(CommonExperimentConfig):
             model_path=self.ref.path,
             input_keys=[
                 "packed_input_ids",
-                "pos_input_lens",
                 "prompt_lens",
             ],
             output_keys=["seqlogp"],
@@ -117,7 +116,6 @@ class DPOConfig(CommonExperimentConfig):
             model_path=self.actor.path,
             input_keys=[
                 "packed_input_ids",
-                "pos_input_lens",
                 "seqlogp",
                 "prompt_lens",
             ],

@@ -26,8 +26,6 @@ from realhf.base import (
     constants,
     gpu_utils,
     logging,
-    namedarray,
-    numpy_utils,
     recover,
     seeding,
     timeutil,
@@ -277,7 +275,7 @@ class ModelWorker(worker_base.Worker):
             )
             self.__dataset_n_seqs = 0
             for tmp_sample in self.__dataloader:
-                self.__dataset_n_seqs += len(data_api.split_sequences(tmp_sample))
+                self.__dataset_n_seqs += tmp_sample.bs
 
             self.__data_generator = enumerate(self.__dataloader)
             self.__dataset_batch_counter = None
@@ -285,8 +283,7 @@ class ModelWorker(worker_base.Worker):
             self.__dataset_epoch = (
                 0 if not self.__recover_run else self.__recover_info.recover_start.epoch
             )
-            self.__cur_sample = None
-            self.__fetched_sample_cache = []
+            self.__cur_sample: data_api.SequenceSample | None = None
 
         self.__models: Dict[ModelName, model_api.Model] = dict()
         self.__model_is_handle: Dict[ModelName, bool] = dict()
@@ -369,14 +366,14 @@ class ModelWorker(worker_base.Worker):
         self.__reply_queue = queue.Queue(maxsize=8)
         self.__request_sample_size = dict()
 
-        # Storing model function call outputs. Model worker will serve as
-        # the data producer when other model workers require this data.
-        self.__data_owner_storage: Dict[int, Dict[str, torch.Tensor]] = (
-            collections.defaultdict(dict)
-        )
-        self.__data_receive_cache: Dict[int, Dict[str, torch.Tensor]] = (
-            collections.defaultdict(dict)
-        )
+        # Storing data loaded from the dataset and outputs of the
+        # model function call.
+        self.__data_storage: Dict[int, data_api.SequenceSample] = {}
+
+        # When entering a new epoch, the loaded data with the same id
+        # may have not consumed in the previous epoch. We store them
+        # temporarily in the following list.
+        self.__early_arrived_data: List[data_api.SequenceSample] = []
 
         self.__data_sent_worker_indices: Dict[int, Dict[str, Set]] = (
             collections.defaultdict(lambda: collections.defaultdict(set))
@@ -395,7 +392,7 @@ class ModelWorker(worker_base.Worker):
             for model_name in self.__models.keys()
         }
 
-    def __prefetch_from_dataset(self):
+    def prefetch_from_dataset(self):
         if self.__cur_sample is None:
             try:
                 self.__dataset_batch_counter, self.__cur_sample = next(
@@ -456,15 +453,16 @@ class ModelWorker(worker_base.Worker):
             with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
                 m = self.__unwrapped_models[hook_data["model_name"]]
                 if not isinstance(m, ReaLModel):
-                    raise ValueError(
-                        f"Model {from_model_name} (type={type(m)}) is not a ReaLModel, "
+                    logger.warning(
+                        f"Model {hook_data['model_name']} (type={type(m)}) is not a ReaLModel, "
                         f"so it can't use offload."
                     )
+                    return
                 m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
-    def __handle_all_pre_hooks(self):
+    def handle_all_pre_hooks(self):
         # drain request queues, handle all pending hooks, then recover the queue
         cache = []
         while True:
@@ -486,7 +484,7 @@ class ModelWorker(worker_base.Worker):
         for c in cache:
             self.__request_queue.put_nowait(c)
 
-    def __model_poll_step(
+    def model_poll_step(
         self,
         request: request_reply_stream.Payload,
         data: Any,
@@ -518,9 +516,7 @@ class ModelWorker(worker_base.Worker):
             # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
             #                          f"finish handling request *{request.handle_name}*, "
             #                          f"request_id {request.request_id}.")
-            sample_count = (
-                data.length(0) if isinstance(data, namedarray.NamedArray) else 1
-            )
+            sample_count = data.bs if isinstance(data, data_api.SequenceSample) else 1
             self.__request_sample_size[request.request_id] = sample_count
             return
 
@@ -533,7 +529,8 @@ class ModelWorker(worker_base.Worker):
         with constants.model_scope(handler_model_name):
             res = None
             if request.handle_name == "empty":
-                # Empty request is used for executing hooks, e.g., data transfer, parameter syncrhonization.
+                # Empty request is used for executing hooks,
+                # e.g., data transfer, parameter syncrhonization.
                 pass
             ############## initialization ##############
             elif request.handle_name == "initialize":
@@ -550,54 +547,46 @@ class ModelWorker(worker_base.Worker):
                     res = self.__unwrapped_models[request.handler.model_name].config
             ############## data loading ##############
             elif request.handle_name == "fetch":
-                fetched_data = data_api.split_sequences(self.__cur_sample)
+                fetched_data = self.__cur_sample.unpack() + self.__early_arrived_data
                 if self.__recover_run and not self.__recover_first_epoch_done:
                     fetched_data = list(
                         filter(
-                            lambda x: hash(x)
+                            lambda x: x.ids[0]
                             not in self.__recover_info.hash_vals_to_ignore,
                             fetched_data,
                         )
                     )
 
-                seqlens = [x.metadata["seqlens"][0] for x in fetched_data]
+                self.__early_arrived_data = []
+                data_loaded = []
+                for x in fetched_data:
+                    if x.ids[0] in self.__data_storage:
+                        self.__early_arrived_data.append(x)
+                    else:
+                        self.__data_storage[x.ids[0]] = x
+                        data_loaded.append(x)
+
                 res = data_api.DataBatchMeta(
                     dp_rank=self._dp_rank,
-                    seqlens=seqlens,
-                    keys=list(self.__cur_sample.keys()),
+                    meta_sample=data_api.SequenceSample.gather(data_loaded).meta(),
                     epoch=self.__dataset_epoch,
                     is_final_batch=(
                         self.__dataset_batch_counter == len(self.__dataloader) - 1
                     ),
-                    hash_vals=[hash(x) for x in fetched_data],
                 )
-                self.__fetched_sample_cache += fetched_data
                 self.__cur_sample = None
-            elif request.handle_name == "store":
-                buffer_indices = request.data
-                assert len(buffer_indices) == len(self.__fetched_sample_cache), (
-                    len(buffer_indices),
-                    len(self.__fetched_sample_cache),
-                )
-                for buf_idx, x in zip(buffer_indices, self.__fetched_sample_cache):
-                    for k, v in x.items():
-                        assert v.device == torch.device("cpu")
-                        self.__data_owner_storage[buf_idx][k] = v
-                self.__fetched_sample_cache.clear()
             elif request.handle_name == "spec":
                 res = self.__dataset_n_seqs
             elif request.handle_name == "clear_data_cache":
                 with cuda_tmarked("clear_data_cache", CUDATimeMarkType.misc):
-                    buf_indices = request.data
-                    for buf_idx in buf_indices:
-                        if buf_idx in self.__data_owner_storage:
-                            del self.__data_owner_storage[buf_idx]
-                        if buf_idx in self.__data_receive_cache:
-                            del self.__data_receive_cache[buf_idx]
-                        if buf_idx in self.__data_sent_worker_indices:
-                            del self.__data_sent_worker_indices[buf_idx]
-                        if buf_idx in self.__data_received_worker_indices:
-                            del self.__data_received_worker_indices[buf_idx]
+                    ids = request.data
+                    for _id in ids:
+                        if _id in self.__data_storage:
+                            del self.__data_storage[_id]
+                        if _id in self.__data_sent_worker_indices:
+                            del self.__data_sent_worker_indices[_id]
+                        if _id in self.__data_received_worker_indices:
+                            del self.__data_received_worker_indices[_id]
                     if (
                         self.config.cuda_cache_cleanliness
                         and self.__clear_cache_frequency.check()
@@ -644,30 +633,36 @@ class ModelWorker(worker_base.Worker):
     def __handle_model_function_calls(
         self, request: request_reply_stream.Payload, data: Any
     ):
+        # Check that the model is instantiated and is not empty.
         assert not self.__model_is_handle[
             request.handler.model_name
         ], request.handler.model_name
+
         input_queue = self.__compute_input_queues[request.handler.model_name][
             request.handle_name
         ]
-        data, buffer_indices, seqlens = input_queue.get_nowait()
-        data: namedarray.NamedArray
-        data.register_metadata(seqlens=seqlens)
+        data = input_queue.get_nowait()
         if request.handle_name == "inference":
-            res = self._interface.inference(self._model, data)  # -> NamedArray
+            res = self._interface.inference(self._model, data)  # -> SequenceSample
         elif request.handle_name == "train_step":
             res = self._interface.train_step(self._model, data)  # -> Dict
         elif request.handle_name == "generate":
-            res = self._interface.generate(self._model, data)  # -> NamedArray
+            res = self._interface.generate(self._model, data)  # -> SequenceSample
+        else:
+            raise NotImplementedError(f"Unknown MFC type: {request.handle_name}.")
 
-        if res is not None and isinstance(res, namedarray.NamedArray):
-            new_res = {}
-            for k, v in res.items():
-                new_res[k] = v
-            new_res = namedarray.from_dict(new_res)
-            new_res.register_metadata(**res.metadata)
-            res = new_res, buffer_indices, seqlens
+        # Store data into storage.
+        if self._is_dp_head and isinstance(res, data_api.SequenceSample):
+            for x in res.unpack():
+                # The input data must exist in the storage, otherwise
+                # the model function call will not run.
+                self.__data_storage[x.ids[0]].update_(x)
 
+        # Only return meta data back to the master worker.
+        if isinstance(res, data_api.SequenceSample):
+            res = res.meta()
+
+        # Log GPU utilization and memory statistics.
         utilization = pynvml.nvmlDeviceGetUtilizationRates(self.__nvml_handle)
         memory_info = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle)
         total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
@@ -683,11 +678,10 @@ class ModelWorker(worker_base.Worker):
 
     @cuda_tmark("data_transfer", CUDATimeMarkType.comm)
     def __data_transfer_among_workers(self, hook_data: Dict[str, Any]):
-
+        meta_sample = hook_data["meta_sample"]
         comm_plan = data_transfer_comm.derive_data_transfer_plan(
             keys=hook_data["keys"],
-            global_buffer_indices=hook_data["buffer_indices"],
-            global_seqlens=hook_data["seqlens"],
+            global_ids=meta_sample.ids,
             consumer_name=hook_data["target"],
             consumer_mapping=hook_data["target_mapping"],
             producer_names=hook_data["producer_names"],
@@ -695,191 +689,30 @@ class ModelWorker(worker_base.Worker):
             data_transfer_info=self.__data_transfer_info,
         )
 
-        data = dict()
-        for step in comm_plan:
-            if (
-                isinstance(step, data_transfer_comm.DataTransferReceiverStep)
-                and step.rank == dist.get_rank()
-            ):
-                if isinstance(self.__unwrapped_models[hook_data["target"]], ReaLModel):
-                    vocab_size = self.__unwrapped_models[
-                        hook_data["target"]
-                    ].config.vocab_size
-                else:
-                    vocab_size = None
-                buf_indices = step.buf_indices
-                seqlens = step.seqlens
-                if step.src == dist.get_rank():
-                    for buf_idx in buf_indices:
-                        self.__data_owner_storage[buf_idx][step.key] = (
-                            self.__data_owner_storage[buf_idx][step.key].to(
-                                self.__device
-                            )
-                        )
-                    vs = torch.cat(
-                        [
-                            self.__data_owner_storage[buf_idx][step.key]
-                            for buf_idx in buf_indices
-                        ],
-                        dim=0,
-                    )
-                else:
-                    all_sent_dst_ranks = [
-                        self.__data_received_worker_indices[buf_idx][step.key]
-                        for buf_idx in buf_indices
-                    ]
-                    if all(
-                        set(step.dst_ranks).issubset(set(sent_dst_ranks))
-                        for sent_dst_ranks in all_sent_dst_ranks
-                    ):
-                        vs = torch.cat(
-                            [
-                                self.__data_receive_cache[buf_idx][step.key]
-                                for buf_idx in buf_indices
-                            ],
-                            dim=0,
-                        )
-                    else:
-                        total_len = 0
-                        for seqlen in seqlens:
-                            shape = data_api.get_shape_from_key_and_seqlen(
-                                step.key, seqlen, vocab_size
-                            )
-                            total_len += int(np.prod(shape))
-                        dtype = data_api.get_dtype_from_key(step.key)
-                        buf = torch.zeros(
-                            (total_len,),
-                            dtype=dtype,
-                            device=torch.cuda.current_device(),
-                        )
-                        # print(f"{dist.get_rank()} recv {step.key} from {step.src} with shape {buf.shape}")
-                        dist.broadcast(buf, src=step.src, group=step.group)
-                        vs = buf.clone().view(-1, *shape[1:])
-                        for buf_idx in buf_indices:
-                            self.__data_received_worker_indices[buf_idx][
-                                step.key
-                            ].union(step.dst_ranks)
-                offset = 0
-                for seqlen, buf_idx in zip(seqlens, buf_indices):
-                    shape = data_api.get_shape_from_key_and_seqlen(
-                        step.key, seqlen, vocab_size
-                    )
-                    v = vs[offset : offset + shape[0]]
-                    offset += shape[0]
-                    data[(buf_idx, step.key)] = (v, seqlen)
-                    if (
-                        step.key not in self.__data_owner_storage[buf_idx]
-                        and step.key not in self.__data_receive_cache[buf_idx]
-                    ):
-                        self.__data_receive_cache[buf_idx][step.key] = v
+        data_transfer_comm.run_data_transfer(
+            comm_plan=comm_plan,
+            meta_samples={x.ids[0]: x for x in meta_sample.unpack()},
+            storage=self.__data_storage,
+            sent_worker_idx_table=self.__data_sent_worker_indices,
+            received_worker_idx_table=self.__data_received_worker_indices,
+        )
 
-            if (
-                isinstance(step, data_transfer_comm.DataTransferSenderStep)
-                and step.rank == dist.get_rank()
-            ):
-                buf_indices = step.buf_indices
-                all_sent_dst_ranks = [
-                    self.__data_sent_worker_indices[buf_idx][step.key]
-                    for buf_idx in buf_indices
+        if hook_data["target"] in self.__models:
+            with constants.model_scope(hook_data["target"]):
+                local_ids = [
+                    meta_sample.ids[i]
+                    for i in hook_data["target_mapping"][self._dp_rank]
                 ]
-                if all(
-                    set(step.dst_ranks).issubset(set(sent_dst_ranks))
-                    for sent_dst_ranks in all_sent_dst_ranks
-                ):
-                    pass
-                else:
-                    for buf_idx in buf_indices:
-                        self.__data_owner_storage[buf_idx][step.key] = (
-                            self.__data_owner_storage[buf_idx][step.key].to(
-                                self.__device
-                            )
-                        )
-                    vs = torch.cat(
-                        [
-                            self.__data_owner_storage[buf_idx][step.key]
-                            for buf_idx in buf_indices
-                        ],
-                        dim=0,
-                    )
-                    if vs.dtype != data_api.get_dtype_from_key(step.key):
-                        raise ValueError(
-                            f"Infered dtype of {step.key} ({data_api.get_dtype_from_key(step.key)})"
-                            f" is not equal to the actual dtype ({vs.dtype}). "
-                            "Is it correctly set in the dataset implementation?"
-                        )
-                    # print(f"{dist.get_rank()} send {step.key} to {step.dst_ranks} with shape {vs.shape}")
-                    dist.broadcast(vs, src=step.rank, group=step.group)
-                    for buf_idx in buf_indices:
-                        self.__data_sent_worker_indices[buf_idx][step.key].union(
-                            step.dst_ranks
-                        )
-
-        if len(data) > 0:
-            local_buffer_indices = sorted(
-                list(set([buf_idx for buf_idx, _ in data.keys()]))
+            r = data_api.SequenceSample.gather(
+                [self.__data_storage[_id] for _id in local_ids],
+                keys=meta_sample.keys,
             )
-            local_keys = list(set([key for _, key in data.keys()]))
-
-            local_seqlens = []
-            for buf_idx in local_buffer_indices:
-                local_seqlens.append(data[(buf_idx, local_keys[0])][1])
-
-            _data = []
-            for buf_idx in local_buffer_indices:
-                d = {}
-                for k in local_keys:
-                    v, seqlen = data[(buf_idx, k)]
-                    d[k] = v
-                x = namedarray.from_dict(d)
-                x.register_metadata(seqlens=[seqlen])
-                _data.append(x)
-            r = data_api.gather_sequences(_data)
             self.__compute_input_queues[hook_data["target"]][
                 hook_data["handle_name"]
-            ].put_nowait(
-                (
-                    r,
-                    local_buffer_indices,
-                    local_seqlens,
-                )
-            )
-
-    def __post_one_response(self, request: request_reply_stream.Payload, res):
-        if isinstance(res, tuple) and isinstance(res[0], namedarray.NamedArray):
-            res, buffer_indices, seqlens = res
-            reply = request_reply_stream.Payload(
-                handler="master",
-                request_id=request.request_id,
-                handle_name=request.handle_name,
-                data={
-                    "keys": list(res.keys()),
-                    "seqlens": res.metadata["seqlens"],
-                    "buffer_indices": list(buffer_indices),
-                },
-            )
-        else:
-            reply = request_reply_stream.Payload(
-                handler="master",
-                request_id=request.request_id,
-                handle_name=request.handle_name,
-                data=res,
-            )
-
-        self.__stream.post(reply)
-        # logger.info(f"handle_name {request.handle_name} Posted req id = {request.request_id}")
-
-        if isinstance(request.handler, system_api.ModelShardID) and isinstance(
-            res, namedarray.NamedArray
-        ):
-            with constants.model_scope(request.handler.model_name):
-                if self._is_dp_head:
-                    xs = data_api.split_sequences(res)
-                    for buffer_idx, x in zip(buffer_indices, xs):
-                        for k, v in x.items():
-                            self.__data_owner_storage[buffer_idx][k] = v
+            ].put_nowait(r)
 
     @cuda_tmark("post_response", CUDATimeMarkType.misc)
-    def __maybe_post_responses(self):
+    def maybe_post_responses(self):
         ready_to_post = []
         try:
             request, res = self.__reply_queue.get_nowait()
@@ -890,7 +723,14 @@ class ModelWorker(worker_base.Worker):
         batch_size = sample_size = 0
         for request, res in ready_to_post:
             request: request_reply_stream.Payload
-            self.__post_one_response(request, res)
+            reply = request_reply_stream.Payload(
+                handler="master",
+                request_id=request.request_id,
+                handle_name=request.handle_name,
+                data=res,
+            )
+            self.__stream.post(reply)
+            # logger.info(f"handle_name {request.handle_name} Posted req id = {request.request_id}")
             sample_size += self.__request_sample_size.pop(request.request_id)
             batch_size += 1
         return worker_base.PollResult(sample_count=sample_size, batch_count=batch_size)
@@ -913,7 +753,7 @@ class ModelWorker(worker_base.Worker):
             return
 
     @cuda_tmark("receive_request", CUDATimeMarkType.misc)
-    def __maybe_receive_requests(self):
+    def maybe_receive_requests(self):
         for _ in range(8):
             self.__maybe_receive_one_request()
 
@@ -937,10 +777,10 @@ class ModelWorker(worker_base.Worker):
             self.__dist_env_resolved = True
 
         if self.__has_dataset:
-            self.__prefetch_from_dataset()
+            self.prefetch_from_dataset()
 
         st = time.monotonic()
-        self.__maybe_receive_requests()
+        self.maybe_receive_requests()
 
         # NOTE: We ensure that all model workers have the same set of requests
         # at any time through a TCP-like protocol, i.e., req -> ack -> syn -> resp.
@@ -951,15 +791,15 @@ class ModelWorker(worker_base.Worker):
         # are handled in different but intersected sets of model workers.
         # E.g., If we have a request A and a request B, the execution order will be
         # A.pre_hook -> B.pre_hook -> A -> B -> A.post_hook -> B.post_hook.
-        self.__handle_all_pre_hooks()
+        self.handle_all_pre_hooks()
         for _ in range(16):
             try:
                 request, data, handled, res = self.__request_queue.get_nowait()
-                self.__model_poll_step(request, data, handled, res)
+                self.model_poll_step(request, data, handled, res)
             except queue.Empty:
                 break
 
-        r = self.__maybe_post_responses()
+        r = self.maybe_post_responses()
 
         t = time.monotonic() - st
         self.__total_time += t

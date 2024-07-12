@@ -8,6 +8,7 @@ import numpy as np
 
 import realhf.api.core.dfg as dfg
 import realhf.base.logging as logging
+from realhf.api.core.data_api import SequenceSample
 
 logger = logging.getLogger("buffer")
 
@@ -46,11 +47,7 @@ class BufferFull(Exception):
 class _ReplayEntry:
     reuses_left: int
     receive_time: float
-    # We don't save data explicitly, but store metadata.
-    # We can know shape and dtype from seqlen and key.
-    keys: List[str]
-    seqlen: int
-    hash_val: int
+    sample: SequenceSample
 
 
 class _TensorDictSequenceBuffer:
@@ -67,56 +64,35 @@ class _TensorDictSequenceBuffer:
         self.__storage: List[_ReplayEntry] = [None for _ in range(max_size)]
 
         # Some states of the storage. Read/Write applied to them should be locked.
-        self.__seqlens = np.zeros(max_size, dtype=np.int32)
-        self.__hash_vals = np.zeros(max_size, dtype=np.int64)
         self.__has_keys = np.zeros((max_size, len(keys)), dtype=bool)
 
         self.__keys = keys
         self.__reuses = reuses
 
-    def _update_seqlen(self, indices: int):
-        self.__seqlens[indices] = [self.__storage[idx].seqlen for idx in indices]
-
-    def _get_seqlen(self, indices: int) -> np.ndarray:
-        return self.__seqlens[indices]
-
-    def _update_hash_val(self, indices: int):
-        self.__hash_vals[indices] = [self.__storage[idx].hash_val for idx in indices]
-
-    def _get_hash_val(self, indices: int) -> np.ndarray:
-        return self.__hash_vals[indices]
-
     def _update_has_keys(self, indices: List[int]):
         for idx in indices:
-            self.__has_keys[idx] = [k in self.__storage[idx].keys for k in self.__keys]
+            self.__has_keys[idx] = [
+                k in self.__storage[idx].sample.keys for k in self.__keys
+            ]
 
     def _get_has_keys(self, indices):
         return self.__has_keys[indices, :]
 
-    def put_batch(self, indices: List[int], xs: List[Tuple[List[str], int, int]]):
+    def put_batch(self, indices: List[int], xs: List[SequenceSample]):
         assert len(indices) == len(xs)
         # Can be parallelized.
         for idx, x in zip(indices, xs):
-            keys, seqlen, hash_val = x
             self.__storage[idx] = _ReplayEntry(
                 reuses_left=self.__reuses,
                 receive_time=time.time(),
-                keys=copy.deepcopy(keys),
-                seqlen=seqlen,
-                hash_val=hash_val,
+                sample=x,
             )
 
-    def amend_batch(self, indices: List[int], new_datas: List[Tuple[List[str], int]]):
-        assert len(indices) == len(new_datas)
+    def amend_batch(self, indices: List[int], xs: List[SequenceSample]):
+        assert len(indices) == len(xs)
         # Can be parallelized.
-        for idx, new_data in zip(indices, new_datas):
-            new_keys, new_seqlen = new_data
-            assert len(set(new_keys).intersection(self.__storage[idx].keys)) == 0, (
-                new_keys,
-                self.__storage[idx].keys,
-            )
-            self.__storage[idx].keys += new_keys
-            self.__storage[idx].seqlen = new_seqlen
+        for idx, x in zip(indices, xs):
+            self.__storage[idx].sample.update_(x)
 
     def get_batch(self, indices: List[int]) -> List[_ReplayEntry]:
         # Can be parallelized.
@@ -132,18 +108,9 @@ class _TensorDictSequenceBuffer:
         for idx in indices:
             r = self.__storage[idx]
             self.__storage[idx] = None
-            self.__seqlens[idx] = 0
-            self.__hash_vals[idx] = 0
             self.__has_keys[idx] = False
             res.append(r)
         return res
-
-
-@dataclass
-class SequenceSample:
-    indices: List[int]
-    seqlens: List[int]
-    hash_vals: List[int]
 
 
 class AsyncIOSequenceBuffer:
@@ -169,8 +136,9 @@ class AsyncIOSequenceBuffer:
         self._is_being_read = np.zeros(max_size, dtype=bool)
         self._is_idle = np.zeros(max_size, dtype=bool)
         self._is_empty = np.ones(max_size, dtype=bool)
+
         self._buf_size = 0
-        self._n_tokens = 0
+
         # We allow concurrent amenders and readers.
         self._n_amenders = np.zeros(max_size, dtype=int)
         self._n_readers = np.zeros(max_size, dtype=int)
@@ -220,12 +188,15 @@ class AsyncIOSequenceBuffer:
         assert (self._is_empty[:, None] * self._ready_for_rpcs).sum() == 0
         assert (self._is_empty[:, None] * self._completed_rpc).sum() == 0
 
-    async def put_batch(self, samples: List[Tuple[List[str], int, int]]):
+    async def put_batch(self, samples: List[SequenceSample]):
         async with self._lock:
             self._assert_valid_indicator()
             n = len(samples)
+
+            # Find the last contiguous empty block to write.
             indices = np.where(self._is_empty)[0]
             indices = np.arange(*_extract_intervals(indices)[-1])[:n]
+
             if len(indices) < n:
                 raise BufferFull("Please set a larger buffer size")
             self._is_empty[indices] = False
@@ -235,8 +206,6 @@ class AsyncIOSequenceBuffer:
 
         async with self._lock:
             self.__buffer._update_has_keys(indices)
-            self.__buffer._update_seqlen(indices)
-            self.__buffer._update_hash_val(indices)
 
             has_keys = self.__buffer._get_has_keys(indices)  # [bs, #keys]
             rpc_key_mask = self._rpc_key_mask  # [#keys, #rpcs]
@@ -248,7 +217,6 @@ class AsyncIOSequenceBuffer:
             self._is_idle[indices] = True
 
             self._buf_size += len(samples)
-            self._n_tokens += self.__buffer._get_seqlen(indices).sum()
             if self._buf_size >= 0.95 * self.__max_size:
                 logger.warning(
                     f"Buffer is 95% full. The current buffer size is {self._buf_size} "
@@ -259,9 +227,7 @@ class AsyncIOSequenceBuffer:
             self._load_data_requested = False
         return indices
 
-    async def amend_batch(
-        self, indices: List[int], new_datas: List[Tuple[List[str], int, int]]
-    ):
+    async def amend_batch(self, indices: List[int], samples: List[SequenceSample]):
         async with self._lock:
             await self._lock.wait_for(
                 lambda: (
@@ -272,13 +238,11 @@ class AsyncIOSequenceBuffer:
             self._is_idle[indices] = False
             self._is_being_amended[indices] = True
             self._n_amenders[indices] += 1
-        self.__buffer.amend_batch(indices, new_datas)
+
+        self.__buffer.amend_batch(indices, samples)
+
         async with self._lock:
-            self._n_tokens -= self.__buffer._get_seqlen(indices).sum()
             self.__buffer._update_has_keys(indices)
-            self.__buffer._update_seqlen(indices)
-            self.__buffer._update_hash_val(indices)
-            self._n_tokens += self.__buffer._get_seqlen(indices).sum()
 
             has_keys = self.__buffer._get_has_keys(indices)  # [bs, #keys]
             rpc_key_mask = self._rpc_key_mask  # [#keys, #rpcs]
@@ -304,7 +268,12 @@ class AsyncIOSequenceBuffer:
                 pass
             self._load_data_requested = True
 
-    async def get_batch_for_rpc(self, rpc: dfg.MFCDef) -> SequenceSample:
+    async def get_batch_for_rpc(
+        self, rpc: dfg.MFCDef
+    ) -> Tuple[List[int], SequenceSample]:
+        logger.info(
+            f"MFC {rpc.name} is waiting for its input keys: {rpc.input_keys}..."
+        )
         rpc_idx = self._rpc_names.index(rpc.name)
 
         def _can_do_rpc() -> bool:
@@ -332,6 +301,7 @@ class AsyncIOSequenceBuffer:
             while not _can_do_rpc():
                 await self._lock.wait()
 
+            logger.info(f"Input keys ({rpc.input_keys}) for MFC {rpc.name} are ready!")
             self._assert_valid_indicator()
 
             ready_indices = np.nonzero(
@@ -339,12 +309,8 @@ class AsyncIOSequenceBuffer:
                 & self._ready_for_rpcs[:, rpc_idx]
                 & ~self._completed_rpc[:, rpc_idx]
             )[0]
-            seqlens = self.__buffer._get_seqlen(ready_indices)
-            hash_vals = self.__buffer._get_hash_val(ready_indices)
 
             indices = ready_indices[: rpc.n_seqs]
-            seqlens = seqlens[: rpc.n_seqs]
-            hash_vals = hash_vals[: rpc.n_seqs]
 
             self._is_idle[indices] = False
             self._is_being_read[indices] = True
@@ -356,7 +322,6 @@ class AsyncIOSequenceBuffer:
             idx for idx, entry in zip(indices, entries) if entry.reuses_left == 0
         ]
         # The following call is safe because no more RPC will write to popped data.
-        pop_tokens = self.__buffer._get_seqlen(pop_indices).sum()
         if len(pop_indices) > 0:
             self.__buffer.pop_batch(pop_indices)
 
@@ -373,8 +338,9 @@ class AsyncIOSequenceBuffer:
             self._completed_rpc[pop_indices] = False
             self._ready_for_rpcs[pop_indices] = False
             self._buf_size -= len(pop_indices)
-            self._n_tokens -= pop_tokens
 
             if self._is_idle[indices].any():
                 self._lock.notify(len(self._rpc_names))
-        return SequenceSample(indices=indices, seqlens=seqlens, hash_vals=hash_vals)
+        return indices, SequenceSample.gather(
+            [e.sample for e in entries], keys=rpc.input_keys
+        )

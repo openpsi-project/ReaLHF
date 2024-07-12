@@ -1,18 +1,20 @@
-import argparse
 import dataclasses
-from typing import Dict, List, Optional
 
 import colorama
 import torch
 import transformers
 
-from realhf.api.core import config as config_api
-from realhf.api.core import dfg, model_api, system_api
+from realhf.api.core import model_api
+from realhf.api.core.config import (
+    ModelAbstraction,
+    ModelBackendAbstraction,
+    ModelInterfaceAbstraction,
+)
+from realhf.api.core.data_api import SequenceSample
 from realhf.api.core.system_api import ExperimentConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.apps.quickstart import main
 from realhf.base import logging
-from realhf.base.namedarray import NamedArray
 from realhf.experiments.common.ppo_exp import PPOConfig
 
 logger = logging.getLogger("Sentiment PPO example")
@@ -22,30 +24,27 @@ logger = logging.getLogger("Sentiment PPO example")
 class SentimentScoringInterface(model_api.ModelInterface):
 
     def __post_init__(self):
-        super().__post_init__()
+        path = "/path/to/model"
         self.score_model = (
-            transformers.AutoModelForSequenceClassification.from_pretrained(
-                "/path/to/score_model"
-            ).cuda()
+            transformers.AutoModelForSequenceClassification.from_pretrained(path).cuda()
         )
         self.score_model.eval()
 
-        self.score_tokenizer = transformers.AutoTokenizer.from_pretrained(
-            "/path/to/score_model"
-        )
+        self.score_tokenizer = transformers.AutoTokenizer.from_pretrained(path)
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
-        packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        seqlens_cpu: List[int] = data.metadata["seqlens"]
-        max_seqlen = max(seqlens_cpu)
-        bs = len(seqlens_cpu)
-        device = packed_input_ids.device
+    def inference(
+        self, model: model_api.Model, input_: SequenceSample
+    ) -> SequenceSample:
+        device = model.device
+        packed_input_ids: torch.Tensor = input_.data["packed_input_ids"]
+        seqlens_cpu = torch.cat(input_.seqlens["packed_input_ids"])
+        max_seqlen = int(max(seqlens_cpu))
+        bs = input_.bs
 
         # Build attention mask.
         _ind = torch.arange(max_seqlen, dtype=torch.long, device=device)
-        _seqlens = torch.tensor(seqlens_cpu, dtype=torch.long, device=device)
-        attention_mask = _ind.unsqueeze(0) < _seqlens.unsqueeze(1)
+        attention_mask = _ind.unsqueeze(0) < seqlens_cpu.cuda().unsqueeze(1)
 
         # Pad input_ids.
         input_ids = torch.full(
@@ -81,8 +80,11 @@ class SentimentScoringInterface(model_api.ModelInterface):
         #     )
         # #####################################################
 
-        res = NamedArray(scores=scores)
-        res.register_metadata(**data.metadata)
+        res = SequenceSample.from_default(
+            ids=input_.ids,
+            seqlens=[1 for _ in range(bs)],
+            data=dict(rewards=scores),
+        )
         return res
 
 
@@ -106,13 +108,13 @@ class MyPPOConfig(PPOConfig):
         for mw in cfg.model_worker:
             for s in mw.shards:
                 if s.id.model_name.role == "reward":
-                    s.model = config_api.Model(
+                    s.model = ModelAbstraction(
                         "tokenizer",
                         args=dict(
                             tokenizer_path=self.rew.path,
                         ),
                     )
-                    s.backend = config_api.ModelBackend("null")
+                    s.backend = ModelBackendAbstraction("null")
 
         # Change the model function call implementation.
         idx = 0
@@ -121,9 +123,7 @@ class MyPPOConfig(PPOConfig):
                 break
             idx += 1
         inf_reward_rpc = cfg.model_rpcs[idx]
-        inf_reward_rpc.interface_impl = config_api.ModelInterfaceAbstraction(
-            "sentiment_scoring"
-        )
+        inf_reward_rpc.interface_impl = ModelInterfaceAbstraction("sentiment_scoring")
         inf_reward_rpc.post_hooks = []
 
         return cfg

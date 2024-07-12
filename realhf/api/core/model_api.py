@@ -15,7 +15,7 @@ from realhf.api.core.config import (
     ModelName,
     ModelWrapperAbstraction,
 )
-from realhf.base.namedarray import NamedArray
+from realhf.api.core.data_api import SequenceSample, load_hf_tokenizer
 
 logger = logging.getLogger("model_api")
 
@@ -189,22 +189,6 @@ class ReaLModelConfig:
             self.head_dim = self.hidden_dim // self.n_q_heads
 
 
-def load_hf_tokenizer(
-    model_name_or_path: str,
-    fast_tokenizer=True,
-    padding_side: Optional[str] = None,
-) -> transformers.PreTrainedTokenizerFast:
-    kwargs = {}
-    if padding_side is not None:
-        kwargs["padding_side"] = padding_side
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
-        model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
-    )
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-    return tokenizer
-
-
 @dataclasses.dataclass
 class ModelVersion:
     epoch: int = 0
@@ -219,10 +203,51 @@ class FinetuneSpec:
     steps_per_epoch: int
 
 
+class PipelinableEngine(abc.ABC):
+    @abc.abstractmethod
+    def train_batch(
+        self,
+        input_: SequenceSample,
+        loss_fn: Callable,
+        version_steps: int,
+        num_micro_batches: Optional[int] = None,
+    ):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def eval_batch(
+        self,
+        input_: SequenceSample,
+        loss_fn: Callable,
+        num_micro_batches: Optional[int] = None,
+    ):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def forward(
+        self,
+        input_: SequenceSample,
+        num_micro_batches: Optional[int] = None,
+    ):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def generate(
+        self,
+        input_: SequenceSample,
+        tokenizer: transformers.PreTrainedTokenizerFast,
+        gconfig: GenerationHyperparameters = dataclasses.field(
+            default_factory=GenerationHyperparameters
+        ),
+        num_micro_batches: Optional[int] = None,
+    ):
+        raise NotImplementedError()
+
+
 @dataclasses.dataclass
 class Model:
     name: ModelName
-    module: torch.nn.Module
+    module: PipelinableEngine | torch.nn.Module
     tokenizer: transformers.PreTrainedTokenizerFast
     device: Union[str, torch.device]
     dtype: Optional[torch.dtype] = None
@@ -284,13 +309,13 @@ class ModelInterface(abc.ABC):
     ) -> Dict:
         return {}
 
-    def inference(self, model: Model, data: NamedArray) -> NamedArray:
+    def inference(self, model: Model, data: SequenceSample) -> SequenceSample:
         raise NotImplementedError()
 
-    def generate(self, model: Model, data: NamedArray) -> NamedArray:
+    def generate(self, model: Model, data: SequenceSample) -> SequenceSample:
         raise NotImplementedError()
 
-    def train_step(self, model: Model, data: NamedArray) -> Dict:
+    def train_step(self, model: Model, data: SequenceSample) -> Dict:
         raise NotImplementedError()
 
 

@@ -33,10 +33,7 @@ def compute_critic_loss(
     prompt_mask: torch.Tensor,
     **kwargs,
 ) -> torch.Tensor:
-    from realhf.impl.model.utils.functional import (
-        build_shift_one_indices,
-        gather_packed_shifted_log_probs,
-    )
+    from realhf.impl.model.utils.functional import build_shift_one_indices
 
     shift_one_indices = build_shift_one_indices(logits, cu_seqlens)
     prompt_mask = prompt_mask[shift_one_indices]

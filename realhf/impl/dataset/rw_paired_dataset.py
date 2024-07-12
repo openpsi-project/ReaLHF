@@ -7,7 +7,6 @@ import torch
 import torch.utils.data
 
 from realhf.api.core import data_api
-from realhf.base.namedarray import NamedArray
 
 
 class RewardModelingPairedDataset(torch.utils.data.Dataset):
@@ -42,6 +41,7 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
         prompts = [x["prompt"] for x in data]
+        self.ids = [x["id"] for x in data]
 
         pos_answers = [
             [x["prompt"] + c + tokenizer.eos_token for c in x["pos_answers"]]
@@ -96,8 +96,8 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
             )
             offset += g
 
-        self.pos_answer_tokens: List[List[int]] = pos_answer_tokens
-        self.neg_answer_tokens: List[List[int]] = neg_answer_tokens
+        self.pos_answer_tokens: List[Dict[str, List[int]]] = pos_answer_tokens
+        self.neg_answer_tokens: List[Dict[str, List[int]]] = neg_answer_tokens
         assert (
             len(self.prompt_tokens["input_ids"])
             == len(self.pos_answer_tokens)
@@ -112,43 +112,46 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         return len(self.pos_answer_tokens)
 
     def __getitem__(self, idx):
+        # Sample a piece of data composed of a single prompt
+        # and a group of pos-neg answer pairs.
+
         prompt_len = self.prompt_tokens["length"][idx]
         n_pairs_this_prompt = len(self.pos_answer_tokens[idx]["input_ids"])
+        # Randomly select a maximum number of `self.max_pairs_per_prompt` pairs for this prompt
         group_size = min(self.max_pairs_per_prompt, n_pairs_this_prompt)
         pair_indices = self.rng.choice(n_pairs_this_prompt, group_size, replace=False)
 
         packed_input_ids = []
+        input_lens = []
         for i in pair_indices:
             packed_input_ids += self.pos_answer_tokens[idx]["input_ids"][i]
             packed_input_ids += self.neg_answer_tokens[idx]["input_ids"][i]
+            input_lens += [len(self.pos_answer_tokens[idx]["input_ids"][i])]
+            input_lens += [len(self.neg_answer_tokens[idx]["input_ids"][i])]
 
-        pos_input_lens = [
-            len(self.pos_answer_tokens[idx]["input_ids"][i]) for i in pair_indices
-        ]
-        neg_input_lens = [
-            len(self.neg_answer_tokens[idx]["input_ids"][i]) for i in pair_indices
-        ]
-
-        input_lens = [x + y for x, y in zip(pos_input_lens, neg_input_lens)]
-        assert sum(input_lens) == len(packed_input_ids)
-
-        x = NamedArray(
+        data = dict(
             packed_input_ids=torch.tensor(packed_input_ids, dtype=torch.long),
-            pos_input_lens=torch.tensor(pos_input_lens, dtype=torch.int32),
-            group_factor=torch.tensor(
-                [1 / group_size for _ in range(group_size)], dtype=torch.float32
+            prompt_lens=torch.tensor([prompt_len], dtype=torch.int32),
+        )
+
+        x = data_api.SequenceSample(
+            keys=["packed_input_ids", "prompt_lens"],
+            data=data,
+            dtypes=dict(
+                packed_input_ids=torch.long,
+                prompt_lens=torch.int32,
             ),
-            prompt_lens=torch.tensor(
-                [prompt_len for _ in range(group_size)], dtype=torch.int32
+            trailing_shapes=dict(
+                packed_input_ids=(),
+                prompt_lens=(),
+            ),
+            ids=[self.ids[idx]],
+            seqlens=dict(
+                packed_input_ids=[torch.tensor(input_lens, dtype=torch.int32)],
+                prompt_lens=[torch.tensor([1], dtype=torch.int32)],
             ),
         )
-        assert (
-            x["pos_input_lens"].shape
-            == x["group_factor"].shape
-            == x["prompt_lens"].shape
-        )
-        assert x["pos_input_lens"].shape[0] == len(input_lens)
-        x.register_metadata(seqlens=input_lens)
+
         return x
 
 
