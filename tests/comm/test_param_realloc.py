@@ -512,12 +512,12 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
     not torch.cuda.is_available() or torch.cuda.device_count() < 8,
     reason="This test requires at least 8 GPUs to run.",
 )
-@pytest.mark.parametrize("model_family_name", ["gpt2"])
-@pytest.mark.parametrize("is_critic", [False])
-@pytest.mark.parametrize("from_pp_dp_mp", [(4, 1, 1)])
-@pytest.mark.parametrize("to_pp_dp_mp", [(2, 2, 2)])
-@pytest.mark.parametrize("from_sequence_parallel", [False])
-@pytest.mark.parametrize("to_sequence_parallel", [False])
+@pytest.mark.parametrize("model_family_name", ["llama", "gpt2"])
+@pytest.mark.parametrize("is_critic", [False, True])
+@pytest.mark.parametrize("from_pp_dp_mp", parallelism)
+@pytest.mark.parametrize("to_pp_dp_mp", parallelism)
+@pytest.mark.parametrize("from_sequence_parallel", [False, True])
+@pytest.mark.parametrize("to_sequence_parallel", [False, True])
 @pytest.mark.parametrize("skip_saveload", [False])
 @pytest.mark.gpu
 @pytest.mark.distributed
@@ -531,6 +531,10 @@ def test_param_realloc(
     to_sequence_parallel: bool,
     skip_saveload: bool,
 ):
+    if model_family_name == "gpt2" and (from_pp_dp_mp[-1] > 1 or to_pp_dp_mp[-1] > 1):
+        # Since the vocabulary size of gpt2 is odd,
+        # it does not support tensor model parallelism.
+        return
     if from_sequence_parallel and from_pp_dp_mp[-1] == 1:
         return
     if to_sequence_parallel and to_pp_dp_mp[-1] == 1:
