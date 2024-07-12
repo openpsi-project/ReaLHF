@@ -79,11 +79,8 @@ class PromptOnlyDatasetConfig:
     :type max_prompt_len: int
     :param train_bs_n_seqs: Number of prompts in each batch.
     :type train_bs_n_seqs: int
-    :param pad_to_max_length: Whether to pad prompts to the maximum length.
-    :type pad_to_max_length: bool
     """
 
     path: str = ""
     max_prompt_len: int = 256
     train_bs_n_seqs: int = 256
-    pad_to_max_length: bool = False

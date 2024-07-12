@@ -121,9 +121,9 @@ def test_prompt_answer_dataset(dataset_and_tokenizer, max_length: int):
 
 @pytest.mark.parametrize("dataset_and_tokenizer", [(1000, 128, 512, 3)], indirect=True)
 @pytest.mark.parametrize("max_length", [128, 256, 1024])
-@pytest.mark.parametrize("pad_to_max_length", [True, False])
 def test_prompt_only_dataset(
-    dataset_and_tokenizer, max_length: int, pad_to_max_length: bool
+    dataset_and_tokenizer,
+    max_length: int,
 ):
     # NOTE: import all dataset implementations
     import realhf.impl.dataset
@@ -134,7 +134,6 @@ def test_prompt_only_dataset(
         args=dict(
             max_length=max_length,
             dataset_builder=lambda: raw_dataset,
-            pad_to_max_length=pad_to_max_length,
         ),
     )
     _validate_dataset(cfg, tokenizer)
