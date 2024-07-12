@@ -55,61 +55,6 @@ def copy_tensor_model_parallel_attributes(destination_tensor, source_tensor):
         maybe_copy(attribute)
 
 
-def _initialize_affine_weight_gpu(weight, init_method, partition_dim, stride=1):
-    """Initialize affine weight for model parallel on GPU."""
-
-    set_tensor_model_parallel_attributes(
-        tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
-    )
-
-    # with get_cuda_rng_tracker().fork():
-    init_method(weight)
-
-
-def _initialize_affine_weight_cpu(
-    weight,
-    output_size,
-    input_size,
-    per_partition_size,
-    partition_dim,
-    init_method,
-    stride=1,
-    return_master_weight=False,
-    *,
-    params_dtype=torch.float32,
-):
-    """Initialize affine weight for model parallel.
-
-    Build the master weight on all processes and scatter
-    the relevant chunk."""
-
-    set_tensor_model_parallel_attributes(
-        tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
-    )
-
-    # Initialize master weight
-    master_weight = torch.empty(
-        output_size, input_size, dtype=torch.float, requires_grad=False
-    )
-    init_method(master_weight)
-    master_weight = master_weight.to(dtype=params_dtype)
-
-    # Split and copy
-    per_partition_per_stride_size = divide(per_partition_size, stride)
-    weight_list = torch.split(
-        master_weight, per_partition_per_stride_size, dim=partition_dim
-    )
-    rank = model_parallel_rank()
-    world_size = model_parallel_world_size()
-    my_weight_list = weight_list[rank::world_size]
-
-    with torch.no_grad():
-        torch.cat(my_weight_list, dim=partition_dim, out=weight)
-    if return_master_weight:
-        return master_weight
-    return None
-
-
 def ensure_divisibility(numerator, denominator):
     """Ensure that numerator is divisible by the denominator."""
     assert numerator % denominator == 0, "{} is not divisible by {}".format(

@@ -1,9 +1,11 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 
 import math
+from typing import Optional
 
 import torch
-from megatron.core import parallel_state
+
+# from megatron.core import parallel_state
 
 
 def switch_load_balancing_loss_func(
@@ -98,6 +100,15 @@ def get_capacity(
     if min_capacity is not None and capacity < min_capacity:
         capacity = min_capacity
     return capacity
+
+
+def custom_histc(input, bins, min, max):
+    """A CPU compatible version of torch.histc."""
+    if input.device == torch.device("cpu"):
+        float_input = input.to(torch.float)
+        return torch.histc(float_input, bins=bins, min=min, max=max)
+    else:
+        return torch.histc(input, bins=bins, min=min, max=max)
 
 
 class MoEAuxLossAutoScaler(torch.autograd.Function):
@@ -287,7 +298,7 @@ def unpermute_with_padded_tokens(
 def topk_softmax_with_capacity(
     logits: torch.Tensor,
     topk: int,
-    capacity_factor: float = None,
+    capacity_factor: Optional[float] = None,
     pad_to_capacity: bool = False,
     drop_policy: str = "probs",
 ):
@@ -317,7 +328,7 @@ def topk_softmax_with_capacity(
 
     if capacity_factor is None:
         # TopK without capacity
-        tokens_per_expert = torch.histc(
+        tokens_per_expert = custom_histc(
             top_indices, bins=num_experts, min=0, max=num_experts
         )
         return probs, top_indices, tokens_per_expert
@@ -376,37 +387,42 @@ def save_to_aux_losses_tracker(
         layer_number (int): Layer index of the loss.
         num_layers (int): The number of total layers.
     """
+    # FIXME
+    pass
     # Skip aux loss logging if layer_number is None.
-    if layer_number is None:
-        return
+    # if layer_number is None:
+    #     return
 
-    if name not in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
-        parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name] = torch.zeros(
-            num_layers, device=loss.device
-        )
-    parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name][
-        layer_number - 1
-    ] += loss.detach()
+    # if name not in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
+    #     parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name] = torch.zeros(
+    #         num_layers, device=loss.device
+    #     )
+    # parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name][
+    #     layer_number - 1
+    # ] += loss.detach()
 
 
 def clear_aux_losses_tracker():
     """Clear the auxiliary losses."""
-    for name in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
-        parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name].zero_()
+    # for name in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
+    #     parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name].zero_()
+    pass
 
 
 def get_aux_losses_tracker():
     """Return the auxiliary losses."""
-    return parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER
+    # return parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER
+    pass
 
 
 def aggregate_aux_losses_tracker_across_pipeline_parallel():
     """Sum aux losses across PP."""
-    for name in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
-        loss = parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name]
-        torch.distributed.all_reduce(
-            loss, group=parallel_state.get_pipeline_model_parallel_group()
-        )
+    # for name in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
+    #     loss = parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name]
+    #     torch.distributed.all_reduce(
+    #         loss, group=parallel_state.get_pipeline_model_parallel_group()
+    #     )
+    pass
 
 
 def track_moe_metrics(

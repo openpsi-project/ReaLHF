@@ -536,9 +536,13 @@ class ReaLModel(nn.Module):
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
         new_state_dict = {}
         for k, v in state_dict.items():
-            name = k.split(".", 1)[1]
-            global_idx = int(k.split(".")[0])
-            new_state_dict[f"layers.{global_idx - self.layer_idx_start}.{name}"] = v
+            try:
+                name = k.split(".", 1)[1]
+                global_idx = int(k.split(".")[0])
+                new_state_dict[f"layers.{global_idx - self.layer_idx_start}.{name}"] = v
+            except ValueError as e:
+                print(k)
+                raise e
         return super().load_state_dict(
             new_state_dict,
             strict=strict,

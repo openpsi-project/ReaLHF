@@ -23,21 +23,15 @@ def new_or_get_group(ranks: List[int], backend=None):
     return GLOBAL_PROCESS_GROUP_REGISTRY[key]
 
 
-class PipeDataModelProcessCoord(NamedTuple):
+class ProcessCoord(NamedTuple):
     pipe: int
     data: int
     model: int
 
 
-class PipeDataProcessCoord(NamedTuple):
-    pipe: int
-    data: int
-
-
 # Explicitly define these class to allow pickling.
 PROCESS_COORD_REGISTRY = {
-    "pipe#data#model": PipeDataModelProcessCoord,
-    "pipe#data": PipeDataProcessCoord,
+    "pipe#data#model": ProcessCoord,
 }
 
 
@@ -289,13 +283,17 @@ class PipeModelDataParallelTopology(ProcessTopology):
         num_dp: int,
         sequence_parallel: bool,
         gradient_checkpointing: bool,
+        num_ep: Optional[int] = 1,
         max_prompt_len: Optional[int] = None,
     ):
+        # TODO: maybe abandon deepspeed implementation of topology and grid
+        # only leave attributes in ParallelGrid to make deepspeed engine happy?
         super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
 
         self.sequence_parallel = sequence_parallel
         self.gradient_checkpointing = gradient_checkpointing
         self.max_prompt_len = max_prompt_len
+        self.num_ep = num_ep
 
 
 class ParallelGrid:
@@ -455,6 +453,8 @@ class ParallelGrid:
             if self.global_rank in ranks:
                 self.tp_dp_proc_group = proc_group
 
+        # create expert parallel group
+
     def get_stage_id(self):
         if self.global_rank == -1:
             return -1
@@ -576,7 +576,7 @@ class FakeGrid:
         self.pipe_parallel_size = max(self._topo.get_dim("pipe"), 1)
         self.model_parallel_size = max(self._topo.get_dim("model"), 1)
 
-        self.coord: PipeDataModelProcessCoord = self._topo.get_coord(self.rank)
+        self.coord: ProcessCoord = self._topo.get_coord(self.rank)
         self.dp_id = self.coord.data
         self.pp_id = self.coord.pipe
         self.mp_id = self.coord.model

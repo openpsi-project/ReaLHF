@@ -19,7 +19,8 @@ logger = logging.getLogger("tests.test_generate")
 # NOTE: To run test for a new model class, add a new entry to MODEL_CLASS_TO_PATH
 # with the model class name as the key and the path to the model weights as the value.
 MODEL_CLASS_TO_PATH = {
-    "llama": "/lustre/public/pretrained_model_weights/Llama-2-7b-hf",
+    # "llama": "/lustre/public/pretrained_model_weights/Llama-2-7b-hf",
+    "mixtral": "/lustre/public/pretrained_model_weights/Mixtral-8x7B-v0.1"
 }
 _available_model_classes = []
 for k, v in MODEL_CLASS_TO_PATH.items():
@@ -343,9 +344,9 @@ real_pp_cudagraph = GenerateTestParams(
 @pytest.mark.parametrize(
     "test_params1,test_params2,seq_acc_threshold,token_acc_threshold",
     [
-        # (real_simple, huggingface, 0.8, 0.8),
+        (real_simple, huggingface, 0.8, 0.8),
         (real_simple, real_cudagraph, 1.0, 1.0),
-        # (real_simple, real_3d_parallel, 0.8, 0.8),
+        (real_simple, real_3d_parallel, 0.8, 0.8),
         # (real_mp, real_mp_cudagraph, 0.8, 0.8),
         # (real_dp, real_dp_cudagraph, 1.0, 1.0),
         # (real_pp, real_pp_cudagraph, 1.0, 1.0),

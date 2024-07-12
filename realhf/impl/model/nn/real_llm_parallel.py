@@ -16,12 +16,12 @@ COLUMN_LINEAR_KEYS = [
     ".attn.c_attn.k_attn",
     ".attn.c_attn.v_attn",
     ".mlp.c_fc",
-    ".mlp.gate_proj",
-    ".mlp.up_proj",
+    ".gate_proj",
+    ".up_proj",
 ]  # dim=0 + partition bias
 ROW_LINEAR_KEYS = [
     ".attn.c_proj",
-    ".mlp.down_proj",
+    ".down_proj",
     ".mlp.c_proj",
 ]  # dim=1 + no partition bias
 
@@ -264,6 +264,9 @@ def get_real_model_param_shape(
             return (config.hidden_dim,)
         else:
             raise NotImplementedError(f"unkown shape of key {k}.")
+    elif ".mlp.router" in k:
+        # mp does not partition router weights
+        return (config.num_experts, config.hidden_dim)
     else:
         raise NotImplementedError(f"unkown shape of key {k}.")
 

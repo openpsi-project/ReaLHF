@@ -1,139 +1,93 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
-
-from abc import ABC, abstractmethod
+# adopted from megatron
+from typing import Optional, Union
 
 import torch
-from megatron.core import parallel_state, tensor_parallel
-from megatron.core.transformer.mlp import MLPSubmodules
-from megatron.core.transformer.module import MegatronModule
-from megatron.core.transformer.moe.experts import GroupedMLP, SequentialMLP
-from megatron.core.transformer.moe.router import TopKRouter
-from megatron.core.transformer.moe.token_dispatcher import (
+import torch.nn as nn
+
+import realhf.base.constants as constants
+from realhf.api.core.model_api import ReaLModelConfig
+from realhf.impl.model.modules.mlp import GemmaRMSNorm, LlamaRMSNorm
+from realhf.impl.model.modules.moe.experts import GroupedMLP, SequentialMLP
+from realhf.impl.model.modules.moe.router import TopKRouter
+from realhf.impl.model.modules.moe.token_dispatcher import (
     MoEAllGatherTokenDispatcher,
     MoEAlltoAllTokenDispatcher,
 )
-from megatron.core.transformer.transformer_config import TransformerConfig
 
 
-class BaseMoELayer(MegatronModule, ABC):
-    """Base class for a mixture of experts layer.
-
-    Args:
-        config (TransformerConfig): Configuration object for the transformer model.
-    """
-
-    def __init__(self, config: TransformerConfig, layer_number: int = None):
-        super(BaseMoELayer, self).__init__(config)
-        self.config = config
-        self.expert_parallel_size = (
-            parallel_state.get_expert_model_parallel_world_size()
-        )
-        assert (
-            self.expert_parallel_size > 0
-        ), "Expected non-negative expert parallel size"
-
-        if self.config.moe_extended_tp:
-            self.num_local_experts = self.config.num_moe_experts
-            local_expert_indices_offset = 0
-        else:
-            assert self.config.num_moe_experts % self.expert_parallel_size == 0
-            self.num_local_experts = (
-                self.config.num_moe_experts // self.expert_parallel_size
-            )
-            local_expert_indices_offset = (
-                parallel_state.get_expert_model_parallel_rank() * self.num_local_experts
-            )
-
-        self.local_expert_indices = [
-            local_expert_indices_offset + i for i in range(self.num_local_experts)
-        ]
-        assert all(
-            map(lambda x: x < self.config.num_moe_experts, self.local_expert_indices)
-        )
-        self.router = None
-        self.experts = None
-        self.token_dispatcher = None
-        self.layer_number = layer_number
-
-    @abstractmethod
-    def forward(self, hidden_states):
-        pass
-
-    def set_layer_number(self, layer_number: int):
-        self.layer_number = layer_number
-        self.router.set_layer_number(layer_number)
-
-
-class MoELayer(torch.nn.Module):
-    """Mixture of experts Layer **currently only supports no token dropping**.
-
-    Args:
-        BaseMoELayer (MegatronModule): Base class for MoE layers
-    """
+class LayerNormMoELayer(torch.nn.Module):
+    """Mixture of experts Layer **currently only supports no token dropping**."""
 
     def __init__(
         self,
-        config: TransformerConfig,
-        submodules: MLPSubmodules = None,
-        layer_number: int = None,
+        config: ReaLModelConfig,
+        use_grouped_gemm: bool,
+        layer_idx: int,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
     ):
-        self.submodules = submodules
-        super(BaseMoELayer, self).__init__(config)
+        super(LayerNormMoELayer, self).__init__()
+
         self.config = config
-        self.expert_parallel_size = (
-            parallel_state.get_expert_model_parallel_world_size()
-        )
+        self.dtype = dtype
+        self.device = device
+        self.expert_parallel_size = constants.expert_parallel_world_size()
         assert (
             self.expert_parallel_size > 0
         ), "Expected non-negative expert parallel size"
 
-        if self.config.moe_extended_tp:
-            self.num_local_experts = self.config.num_moe_experts
-            local_expert_indices_offset = 0
-        else:
-            assert self.config.num_moe_experts % self.expert_parallel_size == 0
-            self.num_local_experts = (
-                self.config.num_moe_experts // self.expert_parallel_size
-            )
-            local_expert_indices_offset = (
-                parallel_state.get_expert_model_parallel_rank() * self.num_local_experts
-            )
+        assert self.config.num_experts % self.expert_parallel_size == 0
+        self.num_local_experts = self.config.num_experts // self.expert_parallel_size
+        local_expert_indices_offset = (
+            constants.expert_parallel_rank() * self.num_local_experts
+        )
 
         self.local_expert_indices = [
             local_expert_indices_offset + i for i in range(self.num_local_experts)
         ]
         assert all(
-            map(lambda x: x < self.config.num_moe_experts, self.local_expert_indices)
+            map(lambda x: x < self.config.num_experts, self.local_expert_indices)
         )
-        self.layer_number = layer_number
+        self.layer_idx = layer_idx
 
-        self.router = TopKRouter(config=self.config)
-        if self.config.moe_grouped_gemm:
-            self.experts = GroupedMLP(self.num_local_experts, self.config)
-        else:
-            assert isinstance(self.submodules, MLPSubmodules)
-            self.experts = SequentialMLP(
-                self.num_local_experts, self.config, self.submodules
+        if config.layer_norm_type is None:
+            layer_norm_fn = nn.LayerNorm
+        elif config.layer_norm_type == "rms":
+            layer_norm_fn = LlamaRMSNorm
+        elif config.layer_norm_type == "gemma":
+            layer_norm_fn = GemmaRMSNorm
+        self.ln = layer_norm_fn(
+            config.hidden_dim, eps=config.layer_norm_epsilon, dtype=dtype, device=device
+        )
+
+        self.router = TopKRouter(config.hidden_dim, config=self.config)
+        if use_grouped_gemm:
+            self.experts = GroupedMLP(
+                self.num_local_experts, self.config, dtype=dtype, device=device
             )
-        if config.moe_token_dispatcher_type == "allgather":
+        else:
+            self.experts = SequentialMLP(
+                self.num_local_experts, self.config, dtype=dtype, device=device
+            )
+        if self.config.token_dispatcher_type == "allgather":
             self.token_dispatcher = MoEAllGatherTokenDispatcher(
                 self.num_local_experts, self.local_expert_indices, config=self.config
             )
-        elif config.moe_token_dispatcher_type == "alltoall":
+        elif config.token_dispatcher_type == "alltoall":
             self.token_dispatcher = MoEAlltoAllTokenDispatcher(
                 self.num_local_experts, self.local_expert_indices, config=self.config
             )
         else:
             raise ValueError(
-                f"Unsupported token dispatcher type: {config.moe_token_dispatcher_type}"
+                f"Unsupported token dispatcher type: {self.config.token_dispatcher_type}"
             )
-        self.moe_layer_recompute = config.moe_layer_recompute
 
     def forward(self, hidden_states: torch.Tensor):
         if (
             self.training
-            and self.config.tensor_model_parallel_size > 1
-            and not self.config.sequence_parallel
+            and constants.model_parallel_world_size() > 1
+            and not constants.sequence_parallel()
         ):
             raise ValueError(
                 "During training, performance may degrade if MoE and tensor parallelism"
@@ -152,11 +106,6 @@ class MoELayer(torch.nn.Module):
             )
             return output, mlp_bias
 
-        if self.moe_layer_recompute:
-            output, mlp_bias = tensor_parallel.checkpoint(
-                custom_forward, False, hidden_states
-            )
-        else:
-            output, mlp_bias = custom_forward(hidden_states)
-
-        return output, mlp_bias
+        hidden_states = self.ln(hidden_states)
+        output, mlp_bias = custom_forward(hidden_states)
+        return output

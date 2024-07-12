@@ -388,29 +388,29 @@ def data_parallel_group():
     return grid().get_data_parallel_group()
 
 
-# TODO
+# FIXME
 def expert_parallel_group():
-    return grid().get_expert_parallel_group()
+    return self_group()
 
 
 def expert_parallel_rank() -> int:
-    return grid().get_expert_parallel_rank()
+    return 0
 
 
 def expert_parallel_world_size() -> int:
-    return grid().get_expert_parallel_world_size()
+    return 1
 
 
 def expert_and_model_parallel_group():
-    return grid().get_expert_and_model_parallel_group()
+    return model_parallel_group()
 
 
 def expert_and_model_parallel_rank() -> int:
-    return grid().get_expert_and_model_parallel_rank()
+    return model_parallel_rank()
 
 
 def expert_and_model_parallel_world_size() -> int:
-    return grid().get_expert_and_model_parallel_world_size()
+    return model_parallel_world_size()
 
 
 def set_fake_mp_world_size(world_size):

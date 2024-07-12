@@ -1,4 +1,5 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+# adopted from megatron
 
 from abc import abstractmethod
 from typing import List, Optional, Tuple
@@ -7,19 +8,20 @@ import torch
 
 import realhf.base.constants as constants
 import realhf.impl.model.parallelism.model_parallel.mappings as mappings
-from realhf.impl.model.utils.moe import moe_gather, moe_scatter, permute, unpermute
+from realhf.api.core.model_api import ReaLModelConfig
+from realhf.impl.model.utils.moe import (
+    custom_histc,
+    moe_gather,
+    moe_scatter,
+    permute,
+    unpermute,
+)
 
 
 class MoETokenDispatcher:
     """
     MoE Token Dispatcher
     """
-
-    def __init__(self) -> None:
-        """
-        Initialize the MoE Token Dispatcher.
-        """
-        pass
 
     @abstractmethod
     def token_permutation(
@@ -68,20 +70,20 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
         self,
         num_local_experts: int,
         local_expert_indices: List[int],
-        top_k: int,
-        add_bias_linear: bool,
+        config: ReaLModelConfig,
+        add_bias_linear: bool = False,
     ) -> None:
         """
         Initialize the zero token dropping router.
         """
-        super().__init__()
+        self.config = config
         self.num_local_experts = num_local_experts
         assert self.num_local_experts > 0, "Expected at least one expert"
         self.local_expert_indices = local_expert_indices
         assert (
             len(self.local_expert_indices) > 0
         ), "Expected at least one local expert index"
-        self.router_topk = top_k
+        self.router_topk = config.moe_top_k
         self.add_bias = add_bias_linear
 
         # self.local_probs: probs of global token assignment to local experts.
@@ -173,7 +175,7 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
         with torch.no_grad():
             # The indices of local_indices that give its sorted order along dim 0.
             self.indices = torch.argsort(local_indices, dim=0)
-            tokens_per_expert = torch.histc(
+            tokens_per_expert = custom_histc(
                 local_indices,
                 bins=self.num_local_experts,
                 min=self.local_expert_indices[0],
@@ -246,10 +248,8 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
                 self.global_local_map is not None
             ), "global_local_map is necessary for `AllGather`."
             ep_group_size = constants.expert_and_model_parallel_world_size()
-            # hidden_shape: [SeqLen/TP, MBS, HiddenSize], glboal_num_tokens = SeqLen/TP*MBS*(TP*EP)
-            global_num_tokens = (
-                self.hidden_shape[0] * self.hidden_shape[1] * ep_group_size
-            )
+            # hidden_shape: [SeqLen*BS/TP, HiddenSize], glboal_num_tokens = SeqLen/TP*BS*(TP*EP)
+            global_num_tokens = self.hidden_shape[0] * ep_group_size
             global_hidden_shape = [global_num_tokens, hidden_states.shape[-1]]
             assert self.global_local_map.shape == unpermuted_local_hidden.shape
             unpermuted_global_hidden = moe_scatter.apply(
@@ -276,12 +276,12 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
                 )
         else:
             if self.router_topk > 1:
-                global_num_tokens = self.hidden_shape[0] * self.hidden_shape[1]
+                global_num_tokens = self.hidden_shape[0]
                 global_hidden_shape = [global_num_tokens, hidden_states.shape[-1]]
                 unpermuted_global_hidden = torch.zeros(
                     global_hidden_shape,
                     dtype=hidden_states.dtype,
-                    device=torch.cuda.current_device(),
+                    device=unpermuted_local_hidden.device,
                 )
                 output_total = unpermuted_global_hidden.scatter_add(
                     0, self.global_local_map, unpermuted_local_hidden
@@ -315,11 +315,8 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
         self,
         num_local_experts: int,
         local_expert_indices: List[int],
-        top_k: int,
-        add_bias_linear: bool,
-        num_moe_experts: int,
-        capacity_factor: float = None,
-        pad_to_capacity: bool = False,
+        config: ReaLModelConfig,
+        add_bias_linear: bool = False,
     ) -> None:
         """
         Initialize the AlltoAll token dispatcher.
@@ -329,31 +326,31 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
             local_expert_indices (List[int]): Indices of local experts on the current device.
             config (TransformerConfig): Configuration for the transformer model.
         """
-        super().__init__()
+        self.config = config
         self.hidden_shape = None
         self.num_input_tokens = None
         self.num_local_experts = num_local_experts
-        self.num_experts = num_moe_experts
+        self.num_experts = self.config.num_experts
         assert self.num_local_experts > 0, "Expected at least one expert"
         self.local_expert_indices = local_expert_indices
         assert (
             len(self.local_expert_indices) == self.num_local_experts
         ), "Invalid local expert indices"
-        self.router_topk = top_k
+        self.router_topk = self.config.moe_top_k
         self.add_bias = add_bias_linear
         self.ep_size = constants.expert_parallel_world_size()
         self.probs = None
         self.input_splits = None
         self.output_splits = None
         self.num_global_tokens_per_local_expert = None
-        self.num_moe_experts = num_moe_experts
+        self.num_moe_experts = self.config.num_experts
 
         # Token drop and padding.
         # We need to keep track of the token num if we drop tokens without padding them.
         self.num_out_tokens = None
         # Drop and pad the input to capacity.
-        self.capacity_factor = capacity_factor
-        self.drop_and_pad = pad_to_capacity
+        self.capacity_factor = self.config.capacity_factor
+        self.drop_and_pad = self.config.pad_to_capacity
         if self.drop_and_pad:
             assert self.capacity_factor is not None
         self.capacity = None
@@ -370,7 +367,7 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
         Returns:
             torch.Tensor: Tensor containing the number of tokens assigned to local expert.
         """
-        num_local_tokens_per_expert = torch.histc(
+        num_local_tokens_per_expert = custom_histc(
             indices, bins=self.num_experts, min=0, max=self.num_experts
         )
         # num_local_tokens_per_expert: [num_experts]

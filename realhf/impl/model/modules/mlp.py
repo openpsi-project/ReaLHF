@@ -306,8 +306,10 @@ class LlamaLayerNormMLP(nn.Module):
         hidden_dim: int,
         intermediate_dim: int,
         activation_function: str,
-        layer_norm_epsilon: float,
-        layer_norm_type: str,
+        # layer norm
+        use_layer_norm: bool = True,
+        layer_norm_epsilon: float = 1e-5,
+        layer_norm_type: str = "rms",
         # parallelism
         model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         gradient_accumulation_fusion: bool = False,
@@ -331,17 +333,19 @@ class LlamaLayerNormMLP(nn.Module):
             dtype = torch.float16
         self.hidden_size = hidden_dim
         self.intermediate_size = intermediate_dim
+        self.use_layer_norm = use_layer_norm
 
-        if layer_norm_type == "rms":
-            self.ln = LlamaRMSNorm(
-                hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device
-            )
-        elif layer_norm_type == "gemma":
-            self.ln = GemmaRMSNorm(
-                hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device
-            )
-        else:
-            raise NotImplementedError()
+        if self.use_layer_norm:
+            if layer_norm_type == "rms":
+                self.ln = LlamaRMSNorm(
+                    hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device
+                )
+            elif layer_norm_type == "gemma":
+                self.ln = GemmaRMSNorm(
+                    hidden_dim, eps=layer_norm_epsilon, dtype=dtype, device=device
+                )
+            else:
+                raise NotImplementedError()
 
         self.model_parallel = model_parallel
         if not model_parallel:
@@ -396,7 +400,8 @@ class LlamaLayerNormMLP(nn.Module):
         self.act_fn = get_activation_fn(activation_function)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.ln(x)
+        if self.use_layer_norm:
+            x = self.ln(x)
         if not self.model_parallel:
             return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         else:
@@ -502,8 +507,10 @@ if constants.use_te_impl():
         hidden_dim: int,
         intermediate_dim: int,
         activation_function: str,
-        layer_norm_epsilon: float,
-        layer_norm_type: str,
+        # layer norm
+        use_layer_norm: bool = True,
+        layer_norm_epsilon: float = 1e-5,
+        layer_norm_type: str = "rms",
         # parallelism
         model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
         gradient_accumulation_fusion: bool = False,
@@ -512,6 +519,7 @@ if constants.use_te_impl():
         device: Optional[Union[str, torch.device]] = None,
     ):
         assert layer_norm_type == "rms"
+        assert use_layer_norm
         assert activation_function == "silu"
         return _TELayerNormMLP(
             hidden_size=hidden_dim,

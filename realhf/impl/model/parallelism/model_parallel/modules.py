@@ -14,6 +14,7 @@ from torch.cuda.amp import custom_bwd, custom_fwd
 from torch.nn.parameter import Parameter
 
 from realhf.base import constants
+from realhf.impl.model.utils.random import _initialize_affine_weight_gpu
 
 from .mappings import (
     copy_to_tensor_model_parallel_region,
@@ -23,12 +24,7 @@ from .mappings import (
     reduce_scatter_to_sequence_parallel_region,
     scatter_to_tensor_model_parallel_region,
 )
-from .utils import (
-    VocabUtility,
-    _initialize_affine_weight_gpu,
-    divide,
-    set_tensor_model_parallel_attributes,
-)
+from .utils import VocabUtility, divide, set_tensor_model_parallel_attributes
 
 _grad_accum_fusion_available = True
 try:

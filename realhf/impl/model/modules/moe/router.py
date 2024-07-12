@@ -8,6 +8,7 @@ import torch
 import torch.nn.init as init
 
 import realhf.base.constants as constants
+from realhf.api.core.model_api import ReaLModelConfig
 from realhf.impl.model.parallelism.model_parallel.mappings import (
     gather_from_sequence_parallel_region,
 )
@@ -31,7 +32,7 @@ class Router(ABC, torch.nn.Module):
     def __init__(
         self,
         hidden_dim: int,
-        num_moe_experts: int,
+        config: ReaLModelConfig,
         init_method: Callable = init.xavier_normal_,
     ) -> None:
         """
@@ -41,15 +42,17 @@ class Router(ABC, torch.nn.Module):
             config (TransformerConfig): Configuration object for the Transformer model.
         """
         super().__init__()
-        self.num_experts = num_moe_experts
+        self.config = config
+        self.num_experts = self.config.num_experts
         self.moe_aux_loss_func = None
         self.layer_number = None
         self.use_sequence_parallel = constants.sequence_parallel()
 
         # Initialize the gate weights.
-        self.weight = torch.nn.Parameter(torch.empty((num_moe_experts, hidden_dim)))
-        with get_cuda_rng_tracker().fork(get_data_parallel_rng_tracker_name()):
-            init_method(self.weight)
+        self.weight = torch.nn.Parameter(torch.empty((self.num_experts, hidden_dim)))
+        # FIXME:
+        # with get_cuda_rng_tracker().fork(get_data_parallel_rng_tracker_name()):
+        init_method(self.weight)
 
     def gating(self, input: torch.Tensor):
         """Forward pass of the router gate.
@@ -92,17 +95,8 @@ class TopKRouter(Router):
     def __init__(
         self,
         hidden_dim: int,
-        num_experts: int,
+        config: ReaLModelConfig,
         init_method: Callable = init.xavier_normal_,
-        top_k: int = 2,
-        routing_type: str = "aux_loss",
-        aux_loss_coeff: float = 1e-3,
-        token_dispatcher_type: str = "allgather",
-        capacity_factor: float = None,
-        pad_to_capacity: bool = False,
-        token_drop_policy: str = "probs",
-        z_loss_coeff: int = 0,
-        input_jitter_eps: float = 0.0,
         layer_idx: int = 0,  # FIXME
         num_layers: int = 1,  # FIXME
     ) -> None:
@@ -111,17 +105,8 @@ class TopKRouter(Router):
         Args:
             config (TransformerConfig): The configuration for the transformer model.
         """
-        super().__init__(hidden_dim, num_experts, init_method)
-        self.topk = top_k
-        self.routing_type = routing_type
+        super().__init__(hidden_dim, config, init_method)
         self.input_jitter = None
-        self.moe_aux_loss_coeff = aux_loss_coeff
-        self.token_dispatcher_type = token_dispatcher_type
-        self.capacity_factor = capacity_factor
-        self.pad_to_capacity = pad_to_capacity
-        self.token_drop_policy = token_drop_policy
-        self.z_loss_coeff = z_loss_coeff
-        self.input_jitter_eps = input_jitter_eps
         self.layer_idx = layer_idx
         self.num_layers = num_layers
 
@@ -136,7 +121,7 @@ class TopKRouter(Router):
         """
 
         def _sinkhorn_activation(logits):
-            if self.topk == 1:
+            if self.config.moe_top_k == 1:
                 logits = torch.sigmoid(logits)
             else:  # k > 1
                 logits = torch.softmax(logits, dim=-1, dtype=torch.float32).type_as(
@@ -149,12 +134,12 @@ class TopKRouter(Router):
                 norm_logits = sinkhorn(
                     logits.to(dtype=torch.float32)
                 )  # explicit fp32 conversion for stability
-                _, indices = torch.topk(norm_logits, k=self.topk, dim=1)
+                _, indices = torch.topk(norm_logits, k=self.config.moe_top_k, dim=1)
             logits = _sinkhorn_activation(logits)
             scores = torch.gather(logits, 1, indices)
         else:
             logits = _sinkhorn_activation(logits)
-            scores, indices = torch.topk(logits, k=self.topk, dim=1)
+            scores, indices = torch.topk(logits, k=self.config.moe_top_k, dim=1)
         return scores, indices
 
     def aux_loss_load_balancing(self, logits: torch.Tensor):
@@ -169,10 +154,10 @@ class TopKRouter(Router):
         """
         probs, indices, tokens_per_expert = topk_softmax_with_capacity(
             logits,
-            self.topk,
-            capacity_factor=self.capacity_factor,
-            pad_to_capacity=self.pad_to_capacity,
-            drop_policy=self.token_drop_policy,
+            self.config.moe_top_k,
+            capacity_factor=self.config.capacity_factor,
+            pad_to_capacity=self.config.pad_to_capacity,
+            drop_policy=self.config.token_drop_policy,
         )
 
         # Apply load balancing loss
@@ -198,12 +183,12 @@ class TopKRouter(Router):
         Returns:
             torch.Tensor: The activation tensor with the attached gradient function.
         """
-        moe_aux_loss_coeff = self.moe_aux_loss_coeff
+        moe_aux_loss_coeff = self.config.aux_loss_coeff
         scale_for_logging = 1.0
         sequence_partition_group = None
-        if self.token_dispatcher_type == "allgather":
+        if self.config.token_dispatcher_type == "allgather":
             sequence_partition_group = constants.model_parallel_group()
-        elif self.token_dispatcher_type == "alltoall":
+        elif self.config.token_dispatcher_type == "alltoall":
             moe_aux_loss_coeff /= constants.model_parallel_world_size()
 
         if sequence_partition_group is not None:
@@ -212,16 +197,17 @@ class TopKRouter(Router):
         aux_loss = switch_load_balancing_loss_func(
             probs,
             num_local_tokens_per_expert,
-            self.topk,
+            self.config.moe_top_k,
             moe_aux_loss_coeff,
             sequence_partition_group=sequence_partition_group,
         )
-        save_to_aux_losses_tracker(
-            "load_balancing_loss",
-            aux_loss / moe_aux_loss_coeff * scale_for_logging,
-            self.layer_number,
-            self.num_layers,
-        )
+        # FIXME
+        # save_to_aux_losses_tracker(
+        #     "load_balancing_loss",
+        #     aux_loss / moe_aux_loss_coeff * scale_for_logging,
+        #     self.layer_number,
+        #     self.num_layers,
+        # )
         activation = MoEAuxLossAutoScaler.apply(activation, aux_loss)
         return activation
 
@@ -235,16 +221,19 @@ class TopKRouter(Router):
         Returns:
             torch.Tensor: The logits after applying the z-loss.
         """
-        if self.z_loss_coeff is not None:
-            moe_z_loss_coeff = self.z_loss_coeff / constants.model_parallel_world_size()
+        if self.config.z_loss_coeff is not None:
+            moe_z_loss_coeff = (
+                self.config.z_loss_coeff / constants.model_parallel_world_size()
+            )
             z_loss = z_loss_func(logits, moe_z_loss_coeff)
             logits = MoEAuxLossAutoScaler.apply(logits, z_loss)
-            save_to_aux_losses_tracker(
-                "z_loss",
-                z_loss / moe_z_loss_coeff,
-                self.layer_number,
-                self.num_layers,
-            )
+            # FIXME
+            # save_to_aux_losses_tracker(
+            #     "z_loss",
+            #     z_loss / moe_z_loss_coeff,
+            #     self.layer_number,
+            #     self.num_layers,
+            # )
         return logits
 
     def apply_input_jitter(self, input: torch.Tensor):
@@ -257,16 +246,16 @@ class TopKRouter(Router):
         Returns:
             Tensor: Jittered input.
         """
-        if self.input_jitter_eps is not None:
-            eps = self.input_jitter_eps
+        if self.config.input_jitter_eps is not None:
+            eps = self.config.input_jitter_eps
             if self.input_jitter is None:
                 self.input_jitter = torch.distributions.uniform.Uniform(
                     torch.tensor(1.0 - eps, device=input.device),
                     torch.tensor(1.0 + eps, device=input.device),
                 ).rsample
-            return input * self.input_jitter(input.shape)
-        else:
-            return input
+
+            input = (input * self.input_jitter(input.shape)).to(input.dtype)
+        return input
 
     def routing(self, logits: torch.Tensor):
         """Top-k routing function
@@ -285,26 +274,28 @@ class TopKRouter(Router):
 
         if (
             constants.model_parallel_world_size() > 1
-            and self.token_dispatcher_type == "alltoall"
+            and self.config.token_dispatcher_type == "alltoall"
         ):
             # Gather the logits from the TP region
             logits = gather_from_sequence_parallel_region(logits)
 
-        if self.routing_type == "sinkhorn":
+        if self.config.routing_type == "sinkhorn":
             scores, indices = self.sinkhorn_load_balancing(logits)
-        elif self.routing_type == "aux_loss":
+        elif self.config.routing_type == "aux_loss":
             scores, indices = self.aux_loss_load_balancing(logits)
-        elif self.routing_type == "none":
+        elif self.config.routing_type == "none":
             # A naive top-k routing without load balancing
             scores, indices, _ = topk_softmax_with_capacity(
                 logits,
-                self.topk,
-                capacity_factor=self.capacity_factor,
-                pad_to_capacity=self.pad_to_capacity,
-                drop_policy=self.token_drop_policy,
+                self.config.moe_top_k,
+                capacity_factor=self.config.capacity_factor,
+                pad_to_capacity=self.config.pad_to_capacity,
+                drop_policy=self.config.token_drop_policy,
             )
         else:
-            raise ValueError(f"Unsupported MoE routing type: {self.routing_type}")
+            raise ValueError(
+                f"Unsupported MoE routing type: {self.config.routing_type}"
+            )
 
         return scores, indices
 
@@ -316,12 +307,9 @@ class TopKRouter(Router):
             input (torch.Tensor): Input tensor.
         """
         self.hidden = input.shape[-1]
-
         # Apply input jitter
         input = self.apply_input_jitter(input)
         logits = self.gating(input)
         logits = logits.view(-1, self.num_experts)
-
         scores, indices = self.routing(logits)
-
         return scores, indices
