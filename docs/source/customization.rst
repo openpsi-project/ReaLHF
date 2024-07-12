@@ -208,14 +208,9 @@ First, we need to implement a new model interface class for our customized use:
             # For IMDB, 0 is negative and 1 is positive. We record the logits of positive.
             scores = logits[..., -1].contiguous().float()
 
-            res = SequenceSample(
-                keys=["rewards"],
-                trailing_shapes=dict(rewards=()),
-                dtypes=dict(rewards=torch.float32),
+            res = SequenceSample.from_default(
                 ids=input_.ids,
-                seqlens=dict(
-                    rewards=[torch.tensor([1], dtype=torch.int32) for _ in range(bs)]
-                ),
+                seqlens=[1 for _ in range(bs)],
                 data=dict(rewards=scores),
             )
             return res

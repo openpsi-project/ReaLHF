@@ -280,6 +280,7 @@ class PPOConfig(CommonExperimentConfig):
             "ppo_critic",
             args=copy.deepcopy(self.ppo_kwargs),
         )
+        critic_interface.args.pop("eps_clip")
         rw_interface = ModelInterfaceAbstraction(
             "paired_rw",
             args=dict(
@@ -314,7 +315,7 @@ class PPOConfig(CommonExperimentConfig):
             interface_impl=rw_interface,
             model_type=self.rew.type,
             model_path=self.rew.path,
-            input_keys=["packed_seq"],
+            input_keys=["packed_input_ids"],
             output_keys=["rewards"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
@@ -343,7 +344,7 @@ class PPOConfig(CommonExperimentConfig):
             interface_impl=critic_interface,
             model_type=self.critic.type,
             model_path=self.critic.path,
-            input_keys=["packed_seq", "seq_no_eos_mask"],
+            input_keys=["packed_input_ids", "seq_no_eos_mask"],
             output_keys=["values"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
@@ -380,7 +381,7 @@ class PPOConfig(CommonExperimentConfig):
             model_type=self.critic.type,
             model_path=self.critic.path,
             input_keys=[
-                "packed_seq",
+                "packed_input_ids",
                 "packed_logprobs",
                 "packed_ref_logprobs",
                 "rewards",

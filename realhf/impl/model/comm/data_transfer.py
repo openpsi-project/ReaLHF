@@ -221,19 +221,11 @@ def run_data_transfer(
                         device=torch.cuda.current_device(),
                     )
                     dist.broadcast(buf, src=step.src, group=step.group)
-                    # print(
-                    #     f"{dist.get_rank()} recv {step.key} from {step.src} with shape {buf.shape}",
-                    #     flush=True,
-                    # )
                     for _id in ids:
                         received_worker_idx_table[_id][step.key].union(step.dst_ranks)
 
                     # Split the received data and put it into the storage.
                     offset = 0
-                    # print(
-                    #     f"{dist.get_rank()} update {step.key} into ids {ids}",
-                    #     flush=True,
-                    # )
                     for _id in ids:
                         seqlens = meta_samples[_id].seqlens[step.key]
                         assert len(seqlens) == 1
@@ -272,10 +264,6 @@ def run_data_transfer(
                     [storage[_id].data[step.key] for _id in step.ids],
                     dim=0,
                 )
-                # print(
-                #     f"{dist.get_rank()} send {step.key} to {step.dst_ranks} with shape {vs.shape}",
-                #     flush=True,
-                # )
                 dist.broadcast(vs, src=step.rank, group=step.group)
                 for _id in step.ids:
                     sent_worker_idx_table[_id][step.key].union(step.dst_ranks)

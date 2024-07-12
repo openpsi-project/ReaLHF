@@ -23,12 +23,9 @@ class GenerationInterface(model_api.ModelInterface):
 
         # Remap the key `packed_prompts` to `packed_input_ids`,
         # because the pipe runner only recognizes `packed_input_ids`.
-        x = SequenceSample(
-            keys=["packed_input_ids"],
-            trailing_shapes=dict(packed_input_ids=()),
-            dtypes=dict(packed_input_ids=torch.long),
+        x = SequenceSample.from_default(
             ids=input_.ids,
-            seqlens=dict(packed_input_ids=input_.seqlens["packed_prompts"]),
+            seqlens=input_.seqlens["packed_prompts"],
             data=dict(packed_input_ids=input_.data["packed_prompts"]),
         )
 

@@ -47,33 +47,9 @@ def _make_sample_single_sequence(bs, data_with_none=False):
         prompt_mask=prompt_mask,
     )
     ids = [uuid.uuid4() for _ in range(bs)]
-    trailing_shapes = dict(
-        input_ids=(),
-        rewards=(),
-        logprobs=(),
-        logits_mask=(vocab_size,),
-        prompt_mask=(),
-    )
-    dtypes = dict(
-        input_ids=torch.long,
-        rewards=torch.float,
-        logprobs=torch.float,
-        logits_mask=torch.bool,
-        prompt_mask=torch.bool,
-    )
-    seqlens = dict(
-        input_ids=slens,
-        rewards=[torch.tensor([1]).int() for _ in range(bs)],
-        logprobs=[x - 1 for x in slens],
-        logits_mask=slens,
-        prompt_mask=slens,
-    )
-    return SequenceSample(
-        keys=keys,
+    return SequenceSample.from_default(
         ids=ids,
-        seqlens=seqlens,
-        trailing_shapes=trailing_shapes,
-        dtypes=dtypes,
+        seqlens=slens,
         data=data,
         metadata=dict(a=1, b="abc"),
     )

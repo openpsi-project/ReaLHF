@@ -267,15 +267,8 @@ def make_random_packed_batches(
     n_seqs = batch_size * n_batches
     seqs = random_sample(batch_size * n_batches, seq_len, vocab_size, seed).view(-1)
     seqs = seqs[n_seqs * dp_rank // dp_size : n_seqs * (dp_rank + 1) // dp_size]
-    x = SequenceSample(
-        keys=["packed_prompts"],
-        dtypes=dict(packed_prompts=torch.long),
-        trailing_shapes=dict(packed_prompts=()),
-        seqlens=dict(
-            packed_prompts=[
-                torch.tensor([seq_len], dtype=torch.int32) for _ in range(seqs.shape[0])
-            ]
-        ),
+    x = SequenceSample.from_default(
+        seqlens=[seq_len for _ in range(seqs.shape[0])],
         data=dict(packed_prompts=seqs.view(-1)),
         ids=list(range(seqs.shape[0])),
     )
