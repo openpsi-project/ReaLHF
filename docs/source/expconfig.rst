@@ -67,9 +67,6 @@ Dataset Configurations
 -----------------------
 
 ``SequenceSample`` is an object we use in model function calls.
-It is inherited from the previous SRL project.
-
-Users can regard it as a nested dictionary of arrays, except that indexing a ``SequenceSample`` results in *slicing every hosted arrays* (again, we don't use this feature in this project).
 
 .. autoclass:: realhf.SequenceSample
     :members:
