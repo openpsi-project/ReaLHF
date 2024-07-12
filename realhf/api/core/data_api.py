@@ -1,7 +1,4 @@
-import collections
 import dataclasses
-import functools
-import inspect
 import json
 import os
 import random
@@ -27,6 +24,9 @@ import numpy as np
 import torch
 import torch.utils.data
 import transformers
+
+# NOTE: We only use pandatic dataclasses for SequenceSample
+# such that it will perform automatic checks.
 from pydantic import Field
 from pydantic import dataclasses as pdclasses
 from pydantic import field_validator, model_validator
@@ -98,7 +98,7 @@ class SequenceSample:
 
     seqlens: Dict[str, List[torch.Tensor]]
 
-    data: Optional[Dict[str, torch.Tensor]] = None
+    data: Optional[Dict[str, torch.Tensor | None]] = None
 
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -186,6 +186,8 @@ class SequenceSample:
             for k, lens_list in self.seqlens.items()
         }
         for k, v in self.data.items():
+            if v is None:
+                continue
             if v.shape != (acc_seqlen[k], *self.trailing_shapes[k]):
                 raise ValueError(
                     f"Key: {k}, Data shape {v.shape} does not match "
@@ -198,6 +200,8 @@ class SequenceSample:
         if self.data is None:
             return self
         for k, v in self.data.items():
+            if v is None:
+                continue
             if v.dtype != self.dtypes[k]:
                 raise ValueError(
                     f"Data dtype {v.dtype} "
@@ -219,7 +223,14 @@ class SequenceSample:
 
         seqlens = {k: sum([s.seqlens[k] for s in samples], []) for k in keys}
         if samples[0].data is not None:
-            data = {k: torch.cat([s.data[k] for s in samples], dim=0) for k in keys}
+            data = {
+                k: (
+                    torch.cat([s.data[k] for s in samples], dim=0)
+                    if samples[0].data[k] is not None
+                    else None
+                )
+                for k in keys
+            }
         else:
             assert all(s.data is None for s in samples)
             data = None
@@ -268,7 +279,11 @@ class SequenceSample:
             }
             if self.data is not None:
                 new_data = {
-                    k: v[data_offset[k] : _data_len[k] + data_offset[k]]
+                    k: (
+                        v[data_offset[k] : _data_len[k] + data_offset[k]]
+                        if v is not None
+                        else None
+                    )
                     for k, v in self.data.items()
                 }
             else:
@@ -304,7 +319,9 @@ class SequenceSample:
     def cuda(self):
         if self.data is None:
             return self
-        self.data = {k: v.cuda() for k, v in self.data.items()}
+        self.data = {
+            k: v.cuda() if v is not None else None for k, v in self.data.items()
+        }
         return self
 
     @property
@@ -340,6 +357,10 @@ class DataBatchMeta:
     meta_sample: SequenceSample
     epoch: int
     is_final_batch: bool
+
+    def __post_init__(self):
+        if self.meta_sample.data is not None:
+            raise ValueError("meta_sample should not contain any data.")
 
 
 @dataclasses.dataclass
@@ -403,11 +424,6 @@ ALL_DATASET_CLASSES = {}
 def register_dataset(name, dataset_cls):
     assert name not in ALL_DATASET_CLASSES
     assert "/" not in name
-    # call_arg_names = list(inspect.signature(dataset_cls).parameters.keys())
-    # if 'util' not in call_arg_names:
-    #     raise KeyError(
-    #         f"'util' must be one of the arguments in __init__, which is an instance of DatasetUtility. "
-    #         f"Existing arguments: {call_arg_names}.")
     ALL_DATASET_CLASSES[name] = dataset_cls
 
 

@@ -1,6 +1,7 @@
 import dataclasses
 import itertools
 import random
+import uuid
 from typing import *
 
 import pytest
@@ -13,7 +14,7 @@ def flatten_list(l: List[List]):
     return list(itertools.chain(*l))
 
 
-def _make_sample_single_sequence(bs):
+def _make_sample_single_sequence(bs, data_with_none=False):
     keys = [
         "input_ids",
         "rewards",
@@ -26,9 +27,15 @@ def _make_sample_single_sequence(bs):
     input_ids = torch.cat([torch.randint(0, 150, (slen,)) for slen in slens])
     rewards = torch.cat([torch.randn(1) for _ in range(bs)])
     logprobs = torch.cat([torch.randn(slen - 1) for slen in slens])
-    logits_mask = torch.cat(
-        [torch.randint(0, 2, (slen, vocab_size), dtype=torch.bool) for slen in slens]
-    )
+    if not data_with_none:
+        logits_mask = torch.cat(
+            [
+                torch.randint(0, 2, (slen, vocab_size), dtype=torch.bool)
+                for slen in slens
+            ]
+        )
+    else:
+        logits_mask = None
     prompt_mask = torch.cat(
         [torch.randint(0, 2, (slen,), dtype=torch.bool) for slen in slens]
     )
@@ -39,7 +46,7 @@ def _make_sample_single_sequence(bs):
         logits_mask=logits_mask,
         prompt_mask=prompt_mask,
     )
-    ids = list(range(bs))
+    ids = [uuid.uuid4() for _ in range(bs)]
     trailing_shapes = dict(
         input_ids=(),
         rewards=(),
@@ -68,7 +75,6 @@ def _make_sample_single_sequence(bs):
         trailing_shapes=trailing_shapes,
         dtypes=dtypes,
         data=data,
-        buf_indices=ids,
         metadata=dict(a=1, b="abc"),
     )
 
@@ -91,7 +97,7 @@ def _make_sample_multiple_sequence(bs):
         group_factor=group_factor,
         seqlogprobs=seqlogprobs,
     )
-    ids = list(range(bs))
+    ids = [uuid.uuid4() for _ in range(bs)]
     trailing_shapes = dict(
         input_ids=(),
         group_factor=(),
@@ -114,7 +120,6 @@ def _make_sample_multiple_sequence(bs):
         trailing_shapes=trailing_shapes,
         dtypes=dtypes,
         data=data,
-        buf_indices=ids,
         metadata=dict(a=1, b="abc"),
     )
 
@@ -141,7 +146,7 @@ def _make_sample_single_prompt_multi_response(bs):
         seq=seq,
         prompt_mask=prompt_mask,
     )
-    ids = list(range(bs))
+    ids = [uuid.uuid4() for _ in range(bs)]
     trailing_shapes = dict(
         prompt=(),
         seq=(),
@@ -164,7 +169,6 @@ def _make_sample_single_prompt_multi_response(bs):
         trailing_shapes=trailing_shapes,
         dtypes=dtypes,
         data=data,
-        buf_indices=ids,
     )
 
 
@@ -188,12 +192,18 @@ def recursive_assert_equal(x1, x2):
         assert x1 == x2
 
 
-@pytest.mark.parametrize("sample_type", ["single", "pair", "multi_sample"])
+@pytest.mark.parametrize(
+    "sample_type", ["single", "single_with_none", "pair", "multi_sample"]
+)
 @pytest.mark.parametrize("dp", [1, 2, 3, 4, 8, 15, 16])
 def test_gather_split(sample_type: str, dp: int):
     batch_sizes = [random.randint(1, 10) for _ in range(dp)]
     if sample_type == "single":
         samples = [_make_sample_single_sequence(bs) for bs in batch_sizes]
+    elif sample_type == "single_with_none":
+        samples = [
+            _make_sample_single_sequence(bs, data_with_none=True) for bs in batch_sizes
+        ]
     elif sample_type == "pair":
         samples = [_make_sample_multiple_sequence(bs) for bs in batch_sizes]
     elif sample_type == "multi_sample":
