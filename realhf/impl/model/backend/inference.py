@@ -30,6 +30,8 @@ class PipelinableInferenceEngine:
     def _log_trainable_params(self):
         model_parameters = filter(lambda p: p.requires_grad, self.module.parameters())
         num_params = sum([p.numel() for p in model_parameters])
+        if num_params == 0:
+            return
         shared_params = 0
         if self.module.shared_embedding_or_output_weight() is not None:
             shared_params = self.module.shared_embedding_or_output_weight().numel()
