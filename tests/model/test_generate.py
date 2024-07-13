@@ -20,6 +20,7 @@ logger = logging.getLogger("tests.test_generate")
 # with the model class name as the key and the path to the model weights as the value.
 MODEL_CLASS_TO_PATH = {
     "llama": "/lustre/public/pretrained_model_weights/Llama-2-7b-hf",
+    "gpt2": "/lustre/public/pretrained_model_weights/gpt2",
 }
 _available_model_classes = []
 for k, v in MODEL_CLASS_TO_PATH.items():
@@ -224,9 +225,10 @@ def real_model_generate(
         )
         results = []
         for i, data_batch in enumerate(data_batches):
+            data_batch = data_batch.cuda()
             logger.info(
                 f"Batch {i} rank {constants.parallelism_rank()} "
-                f"prompt shape {data_batch.data['packed_prompts'].shape}"
+                f"prompt shape {data_batch.data['packed_input_ids'].shape}"
             )
             st = time.monotonic()
             res = model.generate(
