@@ -134,10 +134,6 @@ class MFCDef:
         self._post_hooks.append(h)
 
     @property
-    def max_min_flow_seqs(self) -> int:
-        return self._G.graph["max_min_flow_seqs"][self.name]
-
-    @property
     def is_src(self):
         return len(list(self._G.predecessors(self.name))) == 0
 
@@ -160,6 +156,11 @@ class MFCDef:
     @property
     def children(self) -> List["MFCDef"]:
         return [self._G.nodes[x]["object"] for x in self._G.successors(self.name)]
+
+    def all_successors(self) -> List["MFCDef"]:
+        names = list(nx.dfs_preorder_nodes(self._G, self.name))
+        names.remove(self.name)
+        return [self._G.nodes[x]["object"] for x in names]
 
     @property
     def is_dst_of_model_role(self):
@@ -258,12 +259,5 @@ def build_graph(
     _G.graph["data_consumers"] = {
         k: [v.model_name for v in vs] for k, vs in data_consumers.items()
     }
-
-    max_min_flow_seqs = {}
-    for node in nodes:
-        max_min_flow_seqs[node.name] = max(
-            [r.n_seqs for r in nodes if r.role == node.role]
-        )
-    _G.graph["max_min_flow_seqs"] = max_min_flow_seqs
 
     return _G

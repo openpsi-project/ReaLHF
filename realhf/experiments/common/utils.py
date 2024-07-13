@@ -35,16 +35,10 @@ def get_topo(
 
 
 def get_world_size(parallel: ParallelismConfig) -> int:
-    return (
-        parallel.model_parallel_size
-        * parallel.pipeline_parallel_size
-        * parallel.data_parallel_size
-    )
+    return parallel.model_parallel_size * parallel.pipeline_parallel_size * parallel.data_parallel_size
 
 
-def make_train_backend_config(
-    model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig
-):
+def make_train_backend_config(model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig):
     if model_cfg.backend == "deepspeed":
         return ModelBackendAbstraction(
             "deepspeed",
@@ -105,9 +99,7 @@ def make_train_backend_config(
         raise NotImplementedError(f"Backend {model_cfg.backend} is not supported.")
 
 
-def make_inf_backend_config(
-    model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig
-):
+def make_inf_backend_config(model_cfg: ModelTrainEvalConfig, parallel_cfg: ParallelismConfig):
     return ModelBackendAbstraction("inference")
 
 
@@ -122,8 +114,22 @@ def make_model_config(cfg: ModelTrainEvalConfig):
     )
 
 
-def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
+def resolve_replica_ids(rpc_allocs: List[RPCAllocation]):
     role_cnt = collections.defaultdict(int)
+    first_device_mesh = dict()
+    first_parallel = dict()
+    for alloc in rpc_allocs:
+        rpc = alloc.rpc
+        if rpc.role not in first_device_mesh:
+            first_device_mesh[rpc.role] = alloc.device_mesh
+            first_parallel[rpc.role] = alloc.parallel
+            continue
+        if alloc.device_mesh != first_device_mesh[rpc.role] or alloc.parallel != first_parallel[rpc.role]:
+            role_cnt[rpc.role] += 1
+            rpc.model_name = ModelName(rpc.role, role_cnt[rpc.role])
+
+
+def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
     role_interface_types = collections.defaultdict(set)
     for rpc_alloc in rpc_allocs:
         role_interface_types[rpc_alloc.rpc.role].add(rpc_alloc.rpc.interface_type)
@@ -141,13 +147,10 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                     continue
                 if parallel == other.parallel and device_mesh == other.device_mesh:
                     continue
-                other.rpc.model_name = ModelName(rpc.role, role_cnt[rpc.role] + 1)
-                role_cnt[rpc.role] += 1
                 other.rpc.add_pre_hook(SyncParamHook(source=rpc.model_name))
                 other.rpc.add_post_hook(SyncParamHook(target=rpc.model_name))
                 logger.info(
-                    f"Add param sync hooks between "
-                    f"{rpc.name} and {other.rpc.name} for role {rpc.role}"
+                    f"Add param sync hooks between " f"{rpc.name} and {other.rpc.name} for role {rpc.role}"
                 )
 
         # add offload hooks for inference and generate rpcs

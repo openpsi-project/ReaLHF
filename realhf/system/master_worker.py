@@ -498,7 +498,7 @@ async def model_rpc_request_func(
         # Ensure that parent RPCs will not be over-consumed.
         while any(
             this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.n_seqs
-            for c in rpc.children
+            for c in rpc.all_successors()
         ):
             await asyncio.sleep(0.1)
 
@@ -1096,8 +1096,7 @@ class MasterWorker(worker_base.Worker):
             model_ft_specs = [ft_spec] * topo.world_size()
 
             # Reallocate parameters if necessary.
-            if model_name.role in _initialized_roles:
-                assert model_name in _param_recevers
+            if model_name.role in _initialized_roles and model_name in _param_recevers:
                 _param_realloc_src = _param_senders[_param_recevers.index(model_name)]
                 _request_parameter_sync(
                     stream=self.__stream,
@@ -1120,7 +1119,7 @@ class MasterWorker(worker_base.Worker):
             event_loop.run_until_complete(asyncio.gather(_task))[0]
 
             # Reallocate parameters back.
-            if model_name.role in _initialized_roles:
+            if model_name.role in _initialized_roles and model_name in _param_recevers:
                 # Reversely sync parameters
                 _request_parameter_sync(
                     stream=self.__stream,

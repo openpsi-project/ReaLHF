@@ -260,7 +260,7 @@ def run_data_transfer(
                 # If not, we fetch the data from the storage and send it to all destinations.
                 for _id in step.ids:
                     storage[_id].data[step.key] = storage[_id].data[step.key].cuda()
-                vs = vs = torch.cat(
+                vs = torch.cat(
                     [storage[_id].data[step.key] for _id in step.ids],
                     dim=0,
                 )

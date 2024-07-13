@@ -354,8 +354,10 @@ class SequenceSample:
     def _resolve_seqlen_from_key(key, seqlens: List[int]) -> List[torch.Tensor]:
         if key in [
             "seq_no_eos_mask",
+            "greedy_seq_no_eos_mask",
             "loss_mask",
             "rewards",
+            "greedy_rewards",
         ]:
             return [torch.tensor([1], dtype=torch.int32) for _ in seqlens]
         elif key in [
@@ -365,7 +367,9 @@ class SequenceSample:
             "packed_logits_mask",
             "logits_mask",
             "prompt_mask",
+            "greedy_prompt_mask",
             "packed_input_ids",
+            "greedy_packed_input_ids",
             "values",
             "packed_prompts",
         ]:
