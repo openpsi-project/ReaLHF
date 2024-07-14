@@ -37,10 +37,12 @@ python3 -m realhf.apps.quickstart reinforce \
     mode=$MODE \
     experiment_name=$EXP_NAME \
     trial_name=$TRIAL_NAME \
-    exp_ctrl.total_train_epochs=2 \
+    exp_ctrl.total_train_epochs=8 \
     exp_ctrl.save_freq_steps=null \
     actor.type._class=$MODEL_FAMILY \
     actor.path=$SFT_MODEL_PATH \
+    actor.optimizer.lr=1e-4 \
+    actor.optimizer.lr_scheduler_type=constant \
     rew.type._class=$MODEL_FAMILY \
     rew.type.is_critic=True \
     rew.path=$RW_MODEL_PATH \
@@ -49,7 +51,7 @@ python3 -m realhf.apps.quickstart reinforce \
     dataset.train_bs_n_seqs=512 \
     gen.max_new_tokens=512 \
     gen.min_new_tokens=512 \
-    gen.top_p=1.0 gen.top_k=10000 \
+    gen.top_p=0.9 gen.top_k=5000 \
     allocation_mode=manual \
     n_nodes=1 \
     nodelist=\'NODE01\' \

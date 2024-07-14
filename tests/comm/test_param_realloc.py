@@ -252,6 +252,7 @@ class ParamRedistributer:
 
     def _redist(self, m1, m2, n1, n2):
         from realhf.impl.model.comm.param_realloc import is_trainable
+
         if m1 is None and m2 is None:
             return
         with constants.model_scope(n1):
@@ -319,12 +320,12 @@ def _test_para_realloc(
 ):
     # os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
     from realhf.impl.model.backend.megatron import ReaLMegatronEngine
-    from realhf.impl.model.interface.sft_interface import compute_packed_sft_loss
     from realhf.impl.model.comm.param_realloc import set_trainable
+    from realhf.impl.model.interface.sft_interface import compute_packed_sft_loss
 
     from_model_name = ModelName("param_realloc_test", 0)
     to_model_name = ModelName("param_realloc_test", 1)
-    
+
     set_trainable(from_model_name, True)
     set_trainable(to_model_name, False)
 

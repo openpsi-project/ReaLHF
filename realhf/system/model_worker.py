@@ -444,9 +444,14 @@ class ModelWorker(worker_base.Worker):
                 if to_model_name in self.__unwrapped_models:
                     logger.info(f"to model error: {to_model_name}")
                 raise e
-            if from_model_name in self.__models and not param_realloc_comm.is_trainable(from_model_name):
+            if (
+                from_model_name in self.__models
+                and not param_realloc_comm.is_trainable(from_model_name)
+            ):
                 self.__model_is_handle[from_model_name] = True
-            if to_model_name in self.__models and param_realloc_comm.is_trainable(from_model_name):
+            if to_model_name in self.__models and param_realloc_comm.is_trainable(
+                from_model_name
+            ):
                 self.__unwrapped_models[to_model_name].patch_reparallelization(
                     (new_layers, new_param)
                 )

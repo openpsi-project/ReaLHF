@@ -43,7 +43,6 @@ def is_trainable(model_name: ModelName) -> bool:
     return _TRAINABLE[model_name]
 
 
-
 @dataclasses.dataclass(unsafe_hash=True)
 class ParamReallocPair:
     src: ModelName

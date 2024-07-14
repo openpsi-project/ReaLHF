@@ -30,22 +30,34 @@ logger = logging.getLogger("REINFORCE exp", "colored")
 class ReinforceConfig(CommonExperimentConfig):
     """Reinforce experiment configuration."""
 
-    actor: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
+    actor: ModelTrainEvalConfig = dataclasses.field(
+        default_factory=ModelTrainEvalConfig
+    )
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
     # for manual allocation only
     actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
     greedy_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
     sample_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    greedy_rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    sample_rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    greedy_rew_inf: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
+    sample_rew_inf: AllocationConfig = dataclasses.field(
+        default_factory=AllocationConfig
+    )
 
-    dataset: PromptOnlyDatasetConfig = dataclasses.field(default_factory=PromptOnlyDatasetConfig)
+    dataset: PromptOnlyDatasetConfig = dataclasses.field(
+        default_factory=PromptOnlyDatasetConfig
+    )
 
-    gen: GenerationHyperparameters = dataclasses.field(default_factory=GenerationHyperparameters)
+    gen: GenerationHyperparameters = dataclasses.field(
+        default_factory=GenerationHyperparameters
+    )
 
     reward_output_scaling: float = 1.0
     reward_output_bias: float = 0.0
+    discount: float = 0.99
+    adv_norm: bool = True
 
     def __post_init__(self):
 
@@ -73,7 +85,11 @@ class ReinforceConfig(CommonExperimentConfig):
         # interfaces
         actor_sample_interface = ModelInterfaceAbstraction(
             "reinforce",
-            args=dict(generation_config=self.gen),
+            args=dict(
+                generation_config=self.gen,
+                discount=self.discount,
+                adv_norm=self.adv_norm,
+            ),
         )
         actor_greedy_interface = copy.deepcopy(actor_sample_interface)
         actor_greedy_interface.args["force_greedy"] = True

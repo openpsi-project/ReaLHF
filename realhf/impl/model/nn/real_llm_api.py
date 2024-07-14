@@ -655,9 +655,7 @@ class ReaLModel(nn.Module):
         # We simply store the layer handles and fetch them when converting back.
         with constants.model_scope(from_model_name):
             from_model_ranks = constants.parallelism_group_ranks()
-        if (
-            not is_trainable(from_model_name)
-        ):
+        if not is_trainable(from_model_name):
             if torch.distributed.get_rank() in from_model_ranks:
                 dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
                 for p in self.layers.parameters():
