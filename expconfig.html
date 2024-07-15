@@ -785,7 +785,7 @@ Sequences longer than this will be truncated.</p></li>
 
 <dl class="py class">
 <dt class="sig sig-object py" id="realhf.PromptOnlyDatasetConfig">
-<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">PromptOnlyDatasetConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_prompt_len</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">train_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pad_to_max_length</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.PromptOnlyDatasetConfig" title="Link to this definition">¶</a></dt>
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">PromptOnlyDatasetConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_prompt_len</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">train_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.PromptOnlyDatasetConfig" title="Link to this definition">¶</a></dt>
 <dd><p>Datasets used for PPO RLHF.</p>
 <p>The raw data must be a json or jsonl file, where each piece of data is a dictionary
 with a single key called <cite>prompt</cite>, which is a string.</p>
@@ -796,127 +796,22 @@ with a single key called <cite>prompt</cite>, which is a string.</p>
 <li><p><strong>max_prompt_len</strong> (<em>int</em>) – Maximum prompt length.
 Prompts longer than this will be truncated.</p></li>
 <li><p><strong>train_bs_n_seqs</strong> (<em>int</em>) – Number of prompts in each batch.</p></li>
-<li><p><strong>pad_to_max_length</strong> (<em>bool</em>) – Whether to pad prompts to the maximum length.</p></li>
 </ul>
 </dd>
 </dl>
 </dd></dl>
 
 </section>
-<section id="namedarray">
-<h2><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code><a class="headerlink" href="#namedarray" title="Link to this heading">¶</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code> is an object we use in model function calls.
-It is inherited from the previous SRL project.</p>
-<p>Named array extends plain arrays/tensors in the following ways.</p>
-<ol class="arabic simple">
-<li><p>NamedArray aggregates multiple arrays, possibly of different shapes.</p></li>
-<li><p>Each array is given a name, providing a user-friendly way of indexing to the corresponding data.</p></li>
-<li><p>NamedArrays can be nested. (Although it should <em>not</em> be nested in this system.)</p></li>
-<li><p>NamedArray can store metadata such as sequence lengths, which is useful for padding and masking without causing CUDA synchronization.</p></li>
-</ol>
-<p>Users can regard it as a nested dictionary of arrays, except that indexing a <code class="docutils literal notranslate"><span class="pre">NamedArray</span></code> results in <em>slicing every hosted arrays</em> (again, we don’t use this feature in this project).</p>
+<section id="sequencesample">
+<h2><code class="docutils literal notranslate"><span class="pre">SequenceSample</span></code><a class="headerlink" href="#sequencesample" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">SequenceSample</span></code> is an object we use in model function calls.</p>
 <dl class="py class">
-<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray">
-<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.base.namedarray.</span></span><span class="sig-name descname"><span class="pre">NamedArray</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray" title="Link to this definition">¶</a></dt>
-<dd><p>A class acting like a dict that holds torch tensors as values.</p>
-<p>NamedArray supports dict-like unpacking and string indexing, and exposes integer slicing reads
-and writes applied to all contained objects, which must share
-indexing (__getitem__) behavior (e.g. numpy arrays or torch tensors).</p>
-<p>NamedArray also supports metadata, which is useful for recording sequence lengths.</p>
-<p>Example:</p>
-<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">class</span> <span class="nc">Point</span><span class="p">(</span><span class="n">NamedArray</span><span class="p">):</span>
-<span class="gp">... </span>    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
-<span class="gp">... </span>        <span class="n">x</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
-<span class="gp">... </span>        <span class="n">y</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
-<span class="gp">... </span>        <span class="p">):</span>
-<span class="gp">... </span>        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="n">y</span><span class="p">)</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="o">=</span><span class="n">Point</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span><span class="mi">2</span><span class="p">]),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">3</span><span class="p">,</span><span class="mi">4</span><span class="p">]))</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span>
-<span class="go">Point(x=array([1, 2]), y=array([3, 4]))</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
-<span class="go">Point(x=array([1]), y=array([3]))</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-<span class="go">Point(x=1, y=3)</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="o">.</span><span class="n">x</span>
-<span class="go">array([1, 2])</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[</span><span class="s1">&#39;y&#39;</span><span class="p">]</span>
-<span class="go">array([3, 4])</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span>
-<span class="go">Point(x=array([0, 2]), y=array([0, 4]))</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">Point</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">p</span>
-<span class="go">Point(x=array([5, 2]), y=array([5, 4]))</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="s1">&#39;x&#39;</span> <span class="ow">in</span> <span class="n">p</span>
-<span class="go">True</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="nb">list</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
-<span class="go">[&#39;x&#39;, &#39;y&#39;]</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="nb">list</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
-<span class="go">[array([5, 2]), array([5, 4])]</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-<span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
-<span class="gp">...</span>
-<span class="go">x [5 2]</span>
-<span class="go">y [5 4]</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">foo</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
-<span class="gp">... </span>    <span class="nb">print</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<span class="gp">...</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">foo</span><span class="p">(</span><span class="o">**</span><span class="n">p</span><span class="p">)</span>
-<span class="go">[5 2] [5 4]</span>
-</pre></div>
-</div>
-<dl class="py method">
-<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.clear_metadata">
-<span class="sig-name descname"><span class="pre">clear_metadata</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.clear_metadata" title="Link to this definition">¶</a></dt>
-<dd><p>Clear all metadata recorded in this object.</p>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.items">
-<span class="sig-name descname"><span class="pre">items</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.items" title="Link to this definition">¶</a></dt>
-<dd><p>Iterate over ordered (field_name, value) pairs like a dict.</p>
-</dd></dl>
-
-<dl class="py property">
-<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.metadata">
-<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">metadata</span></span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.metadata" title="Link to this definition">¶</a></dt>
-<dd><p>Return the metadata of the NamedArray object.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Returns<span class="colon">:</span></dt>
-<dd class="field-odd"><p>A dict-like metadata of the NamedArray object.</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>MappingProxyType</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.pop_metadata">
-<span class="sig-name descname"><span class="pre">pop_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.pop_metadata" title="Link to this definition">¶</a></dt>
-<dd><p>Clear a single metadata entry named “key”.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>key</strong> (<em>str</em>) – The key to be removed.</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The value of the removed key.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>Any</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="realhf.base.namedarray.NamedArray.register_metadata">
-<span class="sig-name descname"><span class="pre">register_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.base.namedarray.NamedArray.register_metadata" title="Link to this definition">¶</a></dt>
-<dd><p>Register metadata to the NamedArray object.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>kwargs</strong> (<em>Dict</em>) – Metadata to be registered.</p>
-</dd>
-</dl>
+<dt class="sig sig-object py" id="realhf.SequenceSample">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">SequenceSample</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="pre">keys:</span> <span class="pre">~typing.Set[str],</span> <span class="pre">trailing_shapes:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~torch.Size</span> <span class="pre">|</span> <span class="pre">~typing.Tuple</span> <span class="pre">|</span> <span class="pre">None],</span> <span class="pre">dtypes:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~torch.dtype</span> <span class="pre">|</span> <span class="pre">None],</span> <span class="pre">ids:</span> <span class="pre">~typing.List[~typing.Hashable],</span> <span class="pre">seqlens:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~typing.List[~torch.Tensor]],</span> <span class="pre">data:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~torch.Tensor</span> <span class="pre">|</span> <span class="pre">None]</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None,</span> <span class="pre">metadata:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~typing.Any]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SequenceSample" title="Link to this definition">¶</a></dt>
+<dd><dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.meta">
+<span class="sig-name descname"><span class="pre">meta</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></span><a class="headerlink" href="#realhf.SequenceSample.meta" title="Link to this definition">¶</a></dt>
+<dd><p>Create a new SequenceSample that does not contain any data.</p>
 </dd></dl>
 
 </dd></dl>
@@ -926,7 +821,7 @@ indexing (__getitem__) behavior (e.g. numpy arrays or torch tensors).</p>
 <h2>Dataflow Graph<a class="headerlink" href="#dataflow-graph" title="Link to this heading">¶</a></h2>
 <dl class="py class">
 <dt class="sig sig-object py" id="realhf.MFCDef">
-<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">MFCDef</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name:</span> <span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_seqs:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interface_type:</span> <span class="pre">~realhf.api.core.config.ModelInterfaceType</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interface_impl:</span> <span class="pre">~realhf.api.core.config.ModelInterfaceAbstraction</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_name:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.config.ModelName</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_keys:</span> <span class="pre">~typing.Tuple</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_keys:</span> <span class="pre">~typing.Tuple</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">balanced_dp:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_return_value:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_type:</span> <span class="pre">~typing.Any</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.config.ModelFamily</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_path:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_G:</span> <span class="pre">~networkx.classes.digraph.DiGraph</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_pre_hooks:</span> <span class="pre">~typing.List[~realhf.api.core.dfg.OffloadHook</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.dfg.SyncParamHook]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_post_hooks:</span> <span class="pre">~typing.List[~realhf.api.core.dfg.OffloadHook</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.dfg.SyncParamHook]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.MFCDef" title="Link to this definition">¶</a></dt>
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">MFCDef</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name:</span> <span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_seqs:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interface_type:</span> <span class="pre">~realhf.api.core.config.ModelInterfaceType</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interface_impl:</span> <span class="pre">~realhf.api.core.config.ModelInterfaceAbstraction</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_name:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.config.ModelName</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_keys:</span> <span class="pre">~typing.Tuple</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_key_remap:</span> <span class="pre">~typing.Dict[str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_keys:</span> <span class="pre">~typing.Tuple</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_key_remap:</span> <span class="pre">~typing.Dict[str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">balanced_dp:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_return_value:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_type:</span> <span class="pre">~typing.Any</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.config.ModelFamily</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_path:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_G:</span> <span class="pre">~networkx.classes.digraph.DiGraph</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_pre_hooks:</span> <span class="pre">~typing.List[~realhf.api.core.dfg.OffloadHook</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.dfg.SyncParamHook]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_post_hooks:</span> <span class="pre">~typing.List[~realhf.api.core.dfg.OffloadHook</span> <span class="pre">|</span> <span class="pre">~realhf.api.core.dfg.SyncParamHook]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.MFCDef" title="Link to this definition">¶</a></dt>
 <dd><p>A model function call (MFC) object used by the workers.</p>
 <p>MFC is the abbreviation of Model Function Call.
 This object serves as the user interface for developing
@@ -947,6 +842,12 @@ when running the this node.</p></li>
 corresponding to an unique LLM. The user-provided model name
 can just be a string. The replica ID will be resolved in ReaL.</p></li>
 <li><p><strong>input_keys</strong> (<em>Tuple</em>) – Input data keys, used to resolve dependencies.</p></li>
+<li><p><strong>output_keys</strong> (<em>Tuple</em>) – Output data keys, used to resolve dependencies.</p></li>
+<li><p><strong>input_key_remap</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em>) – Remap input keys to let the interface implementation
+recognize them. Keys are <code class="docutils literal notranslate"><span class="pre">input_keys</span></code> and values are the identifiers known to the
+interface. We use remap to keep our interface code clean.</p></li>
+<li><p><strong>output_key_remap</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em>) – Remap output keys to let MFC recognize them.
+Keys are identifiers known to the interface and values are <code class="docutils literal notranslate"><span class="pre">output_keys</span></code>.</p></li>
 <li><p><strong>balanced_dp</strong> (<em>bool</em>) – Whether to balance the data parallelism such that
 each DP rank will get exactly n_seqs // dp_size sequences.
 If set to False, ReaL will do partition according to the number of tokens.
@@ -1007,13 +908,9 @@ Can be omited if the search engine is not used.</p></li>
 <li><a class="reference internal" href="#realhf.PromptOnlyDatasetConfig"><code class="docutils literal notranslate"><span class="pre">PromptOnlyDatasetConfig</span></code></a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#namedarray"><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code></a><ul>
-<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray"><code class="docutils literal notranslate"><span class="pre">NamedArray</span></code></a><ul>
-<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.clear_metadata"><code class="docutils literal notranslate"><span class="pre">NamedArray.clear_metadata()</span></code></a></li>
-<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.items"><code class="docutils literal notranslate"><span class="pre">NamedArray.items()</span></code></a></li>
-<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.metadata"><code class="docutils literal notranslate"><span class="pre">NamedArray.metadata</span></code></a></li>
-<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.pop_metadata"><code class="docutils literal notranslate"><span class="pre">NamedArray.pop_metadata()</span></code></a></li>
-<li><a class="reference internal" href="#realhf.base.namedarray.NamedArray.register_metadata"><code class="docutils literal notranslate"><span class="pre">NamedArray.register_metadata()</span></code></a></li>
+<li><a class="reference internal" href="#sequencesample"><code class="docutils literal notranslate"><span class="pre">SequenceSample</span></code></a><ul>
+<li><a class="reference internal" href="#realhf.SequenceSample"><code class="docutils literal notranslate"><span class="pre">SequenceSample</span></code></a><ul>
+<li><a class="reference internal" href="#realhf.SequenceSample.meta"><code class="docutils literal notranslate"><span class="pre">SequenceSample.meta()</span></code></a></li>
 </ul>
 </li>
 </ul>
