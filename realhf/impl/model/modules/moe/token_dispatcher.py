@@ -44,7 +44,6 @@ class MoETokenDispatcher:
     def token_unpermutation(
         self,
         hidden_states: torch.Tensor,
-        bias: torch.Tensor = None,
     ):
         """
         Reverse the token permutation to restore the original order.
@@ -54,9 +53,8 @@ class MoETokenDispatcher:
             bias (torch.Tensor, optional): Bias tensor (not supported).
 
         Returns:
-            Tuple[torch.Tensor, Optional[torch.Tensor]]:
+            torch.Tensor:
                 - Unpermuted token embeddings in the original order.
-                - None (bias is not supported).
         """
         raise NotImplementedError("Restore function not implemented.")
 
@@ -200,8 +198,7 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
     def token_unpermutation(
         self,
         hidden_states: torch.Tensor,
-        bias: torch.Tensor = None,
-    ):
+    ) -> torch.Tensor:
         """
         Reverse process of `dispatch()` which permutes the ouput of local
         experts locallay and across expert parallel rank into the original order to
@@ -228,17 +225,7 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
         if self.router_topk > 1:
             unpermuted_local_hidden = unpermuted_local_hidden * scores.view(-1, 1)
 
-        unpermuted_local_bias = None
-        if self.add_bias:
-            assert bias is not None
-            unpermuted_local_bias = torch.zeros_like(hidden_states)
-            assert self.indices.shape == bias.shape
-            unpermuted_local_bias = unpermuted_local_bias.scatter(0, self.indices, bias)
-            if self.router_topk > 1:
-                unpermuted_local_bias = unpermuted_local_bias * scores.view(-1, 1)
-
         output_total = unpermuted_local_hidden
-        output_bias_total = unpermuted_local_bias
 
         # Unpermute the tokens across expert parallel devices.
         if (constants.model_parallel_world_size() > 1) or (
@@ -258,22 +245,6 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
             output_total = mappings.reduce_scatter_to_sequence_parallel_region_from_moe(
                 unpermuted_global_hidden
             )
-            if self.add_bias:
-                # Unpermute the bias across expert parallel devices.
-                unpermuted_global_bias = torch.zeros_like(unpermuted_global_hidden)
-                unpermuted_global_bias = unpermuted_global_bias.scatter_add(
-                    0, self.global_local_map, unpermuted_local_bias
-                )
-                output_bias_total = (
-                    mappings.reduce_scatter_to_sequence_parallel_region_from_moe(
-                        unpermuted_global_bias
-                    )
-                )
-                # bias is duplicated across tensor parallelism ranks;
-                # reduce scatter reduces bias across tensor parallel_ranks
-                output_bias_total = (
-                    output_bias_total / constants.model_parallel_world_size()
-                )
         else:
             if self.router_topk > 1:
                 global_num_tokens = self.hidden_shape[0]
@@ -286,24 +257,12 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
                 output_total = unpermuted_global_hidden.scatter_add(
                     0, self.global_local_map, unpermuted_local_hidden
                 )
-                if self.add_bias:
-                    unpermuted_global_bias = torch.zeros_like(unpermuted_global_hidden)
-                    output_bias_total = unpermuted_global_bias.scatter_add(
-                        0, self.global_local_map, unpermuted_local_bias
-                    )
 
         if self.router_topk == 1:
             output_total = output_total * scores
         output_total = output_total.view(self.hidden_shape)
-        if self.add_bias:
-            assert output_bias_total is not None
-            if self.router_topk == 1:
-                output_bias_total = output_bias_total * scores
-            output_bias_total = output_bias_total.view(self.hidden_shape)
-        else:
-            output_bias_total = None
 
-        return output_total, output_bias_total
+        return output_total
 
 
 class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
@@ -520,8 +479,7 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
     def token_unpermutation(
         self,
         hidden_states: torch.Tensor,
-        bias: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> torch.Tensor:
         """
         Reverse the token permutation to restore the original order.
 
@@ -534,7 +492,6 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
                 - Unpermuted token embeddings in the original order.
                 - None (bias is not supported).
         """
-        assert bias is None, "Bias is not supported in MoEAlltoAllTokenDispatcher"
 
         # Perform tensor parallel Reduce-Scatter
         # hidden_states: [SEQL, H] -> [SEQL, H/TP]
@@ -585,4 +542,4 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
 
         # Reshape the output tensor
         output = output.view(self.hidden_shape)
-        return output, None
+        return output

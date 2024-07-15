@@ -409,6 +409,7 @@ class LlamaLayerNormMLP(nn.Module):
             _async_grad_allreduce = self.gate_proj.async_tensor_model_parallel_allreduce
             _sequence_parallel = constants.sequence_parallel()
             _is_w_parallel = [True, True]
+
             gate, upproj = merged_linear_with_grad_accumulation_and_async_allreduce(
                 x,
                 _gradient_accumulation_fusion,

@@ -70,6 +70,7 @@ class LayerNormMoELayer(torch.nn.Module):
             self.experts = SequentialMLP(
                 self.num_local_experts, self.config, dtype=dtype, device=device
             )
+
         if self.config.token_dispatcher_type == "allgather":
             self.token_dispatcher = MoEAllGatherTokenDispatcher(
                 self.num_local_experts, self.local_expert_indices, config=self.config
@@ -100,12 +101,12 @@ class LayerNormMoELayer(torch.nn.Module):
             (dispatched_input, tokens_per_expert) = (
                 self.token_dispatcher.token_permutation(hidden_states, probs, indices)
             )
-            expert_output, mlp_bias = self.experts(dispatched_input, tokens_per_expert)
-            output, mlp_bias = self.token_dispatcher.token_unpermutation(
-                expert_output, mlp_bias
+            expert_output = self.experts(dispatched_input, tokens_per_expert)
+            output = self.token_dispatcher.token_unpermutation(
+                expert_output,
             )
-            return output, mlp_bias
+            return output
 
         hidden_states = self.ln(hidden_states)
-        output, mlp_bias = custom_forward(hidden_states)
+        output = custom_forward(hidden_states)
         return output
