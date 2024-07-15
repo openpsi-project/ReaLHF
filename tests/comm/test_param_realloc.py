@@ -12,6 +12,7 @@ import torch
 import torch.distributed as dist
 
 from realhf.api.core.config import ModelFamily, ModelName, ModelShardID
+from realhf.api.core.data_api import SequenceSample
 from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
 from realhf.base import constants, logging, topology
 from realhf.base.testing import (
@@ -28,13 +29,12 @@ if TYPE_CHECKING:
 
 def compute_critic_loss(
     logits: torch.Tensor,
-    packed_input_ids: torch.Tensor,
-    cu_seqlens: torch.Tensor,
-    prompt_mask: torch.Tensor,
-    **kwargs,
+    input_: SequenceSample,
 ) -> torch.Tensor:
     from realhf.impl.model.utils.functional import build_shift_one_indices
 
+    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
     shift_one_indices = build_shift_one_indices(logits, cu_seqlens)
     prompt_mask = prompt_mask[shift_one_indices]
     scores = logits.squeeze().float()[shift_one_indices]
@@ -397,15 +397,7 @@ def _test_para_realloc(
             vocab_size=vocab_size,
             dp_rank=0,
             dp_size=1,
-        )[0]
-        packed_input_ids = x["packed_prompts"].cuda()
-        dist.all_reduce(packed_input_ids, op=dist.ReduceOp.MAX)
-        input_lens = torch.tensor(x.metadata["seqlens"], dtype=torch.int, device="cuda")
-        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-        prompt_mask = torch.zeros_like(packed_input_ids, dtype=torch.bool)
-        assert torch.all(prompt_mask == 0)
-        input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-        seqlens_cpu = input_lens.cpu().numpy().tolist()
+        )[0].cuda()
 
         # Synchronize the initial parameters at the start of this iteration.
         if not skip_saveload:
@@ -440,11 +432,7 @@ def _test_para_realloc(
             _check_tied_embedding_weights(to_model_name, to_model)
             with constants.model_scope(to_model_name):
                 inf_engine.eval()
-                logits1 = inf_engine.forward(
-                    seqlens_cpu=seqlens_cpu,
-                    packed_input_ids=packed_input_ids,
-                    cu_seqlens=cu_seqlens,
-                )
+                logits1 = inf_engine.forward(input_=x)
 
         # Run redistribution backwards.
         redist.backward()
@@ -457,11 +445,7 @@ def _test_para_realloc(
             _check_tied_embedding_weights(to_model_name, to_model)
             with constants.model_scope(to_model_name):
                 inf_engine.eval()
-                logits2 = inf_engine.forward(
-                    seqlens_cpu=seqlens_cpu,
-                    packed_input_ids=packed_input_ids,
-                    cu_seqlens=cu_seqlens,
-                )
+                logits2 = inf_engine.forward(input_=x)
             if logits1 is not None:
                 assert torch.allclose(logits1, logits2)
         redist.backward()
@@ -483,10 +467,6 @@ def _test_para_realloc(
         if from_model is not None:
             for _ in range(2):
                 _check_tied_embedding_weights(from_model_name, from_model)
-                loss_fn_kwargs = dict(
-                    prompt_mask=prompt_mask,
-                    input_lens=input_lens,
-                )
                 train_engine.eval()
 
                 p = from_model.contiguous_param.clone().detach()
@@ -494,9 +474,7 @@ def _test_para_realloc(
                 with constants.model_scope(from_model_name):
                     train_engine: ReaLMegatronEngine
                     stats = train_engine.train_batch(
-                        seqlens_cpu=seqlens_cpu,
-                        packed_input_ids=packed_input_ids,
-                        cu_seqlens=cu_seqlens,
+                        input_=x,
                         loss_fn=(
                             compute_packed_sft_loss
                             if not is_critic
@@ -504,7 +482,6 @@ def _test_para_realloc(
                         ),
                         num_micro_batches=constants.pipe_parallel_world_size() * 2,
                         version_steps=i,
-                        **loss_fn_kwargs,
                     )
 
                 p_ = from_model.contiguous_param.clone().detach()
@@ -519,9 +496,7 @@ def _test_para_realloc(
             with constants.model_scope(to_model_name):
                 inf_engine.eval()
                 logits3 = inf_engine.forward(
-                    seqlens_cpu=seqlens_cpu,
-                    packed_input_ids=packed_input_ids,
-                    cu_seqlens=cu_seqlens,
+                    input_=x,
                 )
             if logits1 is not None:
                 assert not torch.allclose(logits1, logits3)
@@ -543,8 +518,8 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
 @pytest.mark.parametrize("to_pp_dp_mp", [(2, 2, 2)])
 @pytest.mark.parametrize("from_sequence_parallel", [False])
 @pytest.mark.parametrize("to_sequence_parallel", [False])
-@pytest.mark.parametrize("skip_saveload", [True])
-@pytest.mark.slow
+@pytest.mark.parametrize("skip_saveload", [False])
+@pytest.mark.gpu
 @pytest.mark.distributed
 def test_param_realloc(
     tmp_path: pathlib.Path,

@@ -63,6 +63,15 @@ class GenerationHyperparameters:
     num_samples: int = 1
     use_cuda_graph: bool = False
 
+    def __post_init__(self):
+        if self.temperature == 0.0:
+            self.greedy = True
+            self.temperature = 1.0
+        if self.top_p <= 0.0 or self.top_p > 1:
+            raise ValueError("top_p must be in (0.0, 1.0]")
+        if self.top_k <= 0:
+            raise ValueError("top_k must be a positive integer.")
+
 
 @dataclasses.dataclass
 class ReaLModelConfig:

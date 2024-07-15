@@ -18,6 +18,7 @@ from realhf.impl.model.utils.ppo_functional import (
 @pytest.mark.parametrize("bs", [2, 4])
 @pytest.mark.parametrize("gamma", [0.9, 1.0])
 @pytest.mark.parametrize("lam", [0.5, 1.0])
+@pytest.mark.gpu
 def test_gae1d_nolp_misalign(max_seqlen: int, bs: int, gamma: float, lam: float):
 
     seqlens = torch.randint(1, max_seqlen, (bs,), dtype=torch.int32, device="cuda")

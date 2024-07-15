@@ -20,6 +20,7 @@ logger = logging.getLogger("tests.test_generate")
 # with the model class name as the key and the path to the model weights as the value.
 MODEL_CLASS_TO_PATH = {
     "llama": "/lustre/public/pretrained_model_weights/Llama-2-7b-hf",
+    "gpt2": "/lustre/public/pretrained_model_weights/gpt2",
 }
 _available_model_classes = []
 for k, v in MODEL_CLASS_TO_PATH.items():
@@ -224,9 +225,10 @@ def real_model_generate(
         )
         results = []
         for i, data_batch in enumerate(data_batches):
+            data_batch = data_batch.cuda()
             logger.info(
                 f"Batch {i} rank {constants.parallelism_rank()} "
-                f"prompt shape {data_batch.data['packed_prompts'].shape}"
+                f"prompt shape {data_batch.data['packed_input_ids'].shape}"
             )
             st = time.monotonic()
             res = model.generate(
@@ -339,7 +341,7 @@ real_pp_cudagraph = GenerateTestParams(
         (real_3d_parallel, real_3d_parallel_cudagraph, 0.8, 0.8),
     ],
 )
-@pytest.mark.slow
+@pytest.mark.gpu
 @pytest.mark.distributed
 @pytest.mark.skipif(
     not torch.cuda.is_available() or len(_available_model_classes) == 0,
@@ -355,6 +357,18 @@ def test_generate_consistency(
     seq_acc_threshold: float,
     token_acc_threshold: float,
 ):
+    from realhf.impl.model.nn.real_llm_api import ReaLModel
+
+    mconfig = getattr(ReaLModel, f"config_from_{model_class}")(
+        model_path=model_path,
+        is_critic=False,
+    )
+    if (
+        mconfig.vocab_size % test_params1.parallel.model_parallel_size != 0
+        or mconfig.vocab_size % test_params2.parallel.model_parallel_size != 0
+    ):
+        return
+
     def launch_test(test_params: GenerateTestParams):
         func = (
             huggingface_model_generate

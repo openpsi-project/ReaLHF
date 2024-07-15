@@ -47,30 +47,25 @@ def setup_global_comm(
     worker_index: int,
     model_topos: Optional[Dict[str, topology.PipeModelDataParallelTopology]] = None,
     msid2mwid: Optional[Dict[ModelShardID, int]] = None,
-    world_size: Optional[int] = None,  # for testing only
-    global_rank: Optional[int] = None,  # for testing only
+    backend: str = "nccl",
 ) -> NCCLProcessGroupInfo:
-    assert (world_size is None) == (global_rank is None)
-    if world_size is None:
-        peers: List[int] = list(
-            sorted(
-                map(
-                    int,
-                    name_resolve.get_subtree(
-                        names.trainer_ddp_peer(
-                            expr_name,
-                            trial_name,
-                            gpu_utils.GLOBAL_PROCESS_GROUP_NAME,
-                        )
-                    ),
-                )
+    peers: List[int] = list(
+        sorted(
+            map(
+                int,
+                name_resolve.get_subtree(
+                    names.trainer_ddp_peer(
+                        expr_name,
+                        trial_name,
+                        gpu_utils.GLOBAL_PROCESS_GROUP_NAME,
+                    )
+                ),
             )
         )
-        assert len(peers) == len(
-            set(peers)
-        ), f"Duplicated trainer worker index. {peers}"
-        world_size = len(peers)
-        global_rank = peers.index(worker_index)
+    )
+    assert len(peers) == len(set(peers)), f"Duplicated trainer worker index. {peers}"
+    world_size = len(peers)
+    global_rank = peers.index(worker_index)
 
     mw_ranks = {}
     if model_topos is not None:
@@ -81,15 +76,19 @@ def setup_global_comm(
     if (
         "GPU_DEVICES_ISOLATED" not in os.environ
         and "RAY" not in os.environ["REAL_MODE"]
+        and torch.cuda.is_available()
     ):
         raise RuntimeError(
             "GPU devices not isolated in slurm or local mode. This should not happen."
         )
 
-    assert len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1, os.environ[
-        "CUDA_VISIBLE_DEVICES"
-    ]
-    local_gpu_id = int(os.environ["CUDA_VISIBLE_DEVICES"])
+    if torch.cuda.is_available():
+        assert len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")) == 1, os.environ[
+            "CUDA_VISIBLE_DEVICES"
+        ]
+        local_gpu_id = int(os.environ["CUDA_VISIBLE_DEVICES"])
+    else:
+        local_gpu_id = global_rank
 
     ddp_master_name = names.trainer_ddp_master(
         expr_name, trial_name, gpu_utils.GLOBAL_PROCESS_GROUP_NAME
@@ -112,9 +111,12 @@ def setup_global_comm(
         world_size=world_size,
         rank=global_rank,
         init_method=ddp_init_address,
-        backend="nccl",
+        backend=backend,
     )
-    torch.cuda.set_device(0)  # initialize CUDA here with only a single visible device
+    if torch.cuda.is_available():
+        torch.cuda.set_device(
+            0
+        )  # initialize CUDA here with only a single visible device
     # This environment variable is used by DeepSpeed.
     os.environ["LOCAL_RANK"] = "0"
 
@@ -124,12 +126,12 @@ def setup_global_comm(
 
     model_groups = {}
     for model_name, ranks in mw_ranks.items():
-        model_groups[model_name] = topology.new_or_get_group(ranks, backend="nccl")
+        model_groups[model_name] = topology.new_or_get_group(ranks, backend=backend)
         constants.set_parallelism_group(model_name, model_groups[model_name], ranks)
 
     self_group = None
     for i in range(world_size):
-        group = topology.new_or_get_group([i], backend="nccl")
+        group = topology.new_or_get_group([i], backend=backend)
         if i == global_rank:
             self_group = group
             constants.set_self_group(self_group)
