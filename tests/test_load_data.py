@@ -134,7 +134,6 @@ def test_prompt_only_dataset(
         args=dict(
             max_length=max_length,
             dataset_builder=lambda: raw_dataset,
-            pad_to_max_length=pad_to_max_length,
         ),
     )
     _validate_dataset(cfg, tokenizer)
