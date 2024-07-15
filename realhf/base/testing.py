@@ -24,6 +24,13 @@ MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
 _DEFAULT_TRIAL_NAME = "test"
 
+TESTING_MODEL_VOCAB_SIZE = 20
+TESTING_MODEL_N_POSITIONS = 40
+TESTING_MODEL_HIDDEN_SIZE = 16
+TESTING_MODEL_HEAD_DIM = 2
+TESTING_MODEL_N_LAYERS = 8
+TESTING_MODEL_N_HEADS = 8
+
 
 class StandaloneTestingProcess(mp.Process):
     """Aims for defining this class:

@@ -5,6 +5,14 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
+from realhf.base.testing import (
+    TESTING_MODEL_HEAD_DIM,
+    TESTING_MODEL_HIDDEN_SIZE,
+    TESTING_MODEL_N_HEADS,
+    TESTING_MODEL_N_LAYERS,
+    TESTING_MODEL_N_POSITIONS,
+    TESTING_MODEL_VOCAB_SIZE,
+)
 
 
 def sd_from_gpt2(state_dict: Dict, config: ReaLModelConfig) -> Dict:
@@ -194,12 +202,12 @@ def to_gpt2_config(config: ReaLModelConfig) -> transformers.GPT2Config:
 
 def make_real_config_gpt2() -> ReaLModelConfig:
     hf_config = transformers.GPT2Config(
-        vocab_size=160,
-        n_positions=200,
-        n_embd=128,
-        n_layer=8,
-        n_head=16,
-        n_inner=512,
+        vocab_size=TESTING_MODEL_VOCAB_SIZE,
+        n_positions=TESTING_MODEL_N_POSITIONS,
+        n_embd=TESTING_MODEL_HIDDEN_SIZE,
+        n_layer=TESTING_MODEL_N_LAYERS,
+        n_head=TESTING_MODEL_N_HEADS,
+        n_inner=TESTING_MODEL_HIDDEN_SIZE * 2,
         activation_function="gelu_new",
     )
     return convert_config_gpt2(hf_config)
