@@ -341,7 +341,7 @@ real_pp_cudagraph = GenerateTestParams(
         (real_3d_parallel, real_3d_parallel_cudagraph, 0.8, 0.8),
     ],
 )
-@pytest.mark.slow
+@pytest.mark.gpu
 @pytest.mark.distributed
 @pytest.mark.skipif(
     not torch.cuda.is_available() or len(_available_model_classes) == 0,

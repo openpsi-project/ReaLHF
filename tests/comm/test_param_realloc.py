@@ -519,7 +519,7 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
 @pytest.mark.parametrize("from_sequence_parallel", [False])
 @pytest.mark.parametrize("to_sequence_parallel", [False])
 @pytest.mark.parametrize("skip_saveload", [False])
-@pytest.mark.slow
+@pytest.mark.gpu
 @pytest.mark.distributed
 def test_param_realloc(
     tmp_path: pathlib.Path,
