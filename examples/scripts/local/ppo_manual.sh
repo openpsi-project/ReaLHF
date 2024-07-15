@@ -12,9 +12,9 @@ SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/$MODEL_FAMILY/defa
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw/$MODEL_FAMILY/default/epoch1epochstep15globalstep15/
 
 # Option 1: The experiment runs locally with subprocesses.
-# MODE=local
+MODE=local
 # Option 2: The experiment runs in a Ray cluster
-MODE=ray
+# MODE=ray
 # Option 3: The experiment runs in a SLURM + pyxis cluster
 # Using the slurm mode requires a cluster spec file
 # and setting CLUSTER_SPEC_PATH to the path of it.
@@ -48,6 +48,7 @@ TRIAL_NAME=$MODEL_FAMILY-$MODE-manual
 
 # The following command shows an example of manual allocation on two nodes,
 # but it can be modified according to the specific model and the available GPUs.
+unset CLUSTER_SPEC_PATH
 python3 -m realhf.apps.quickstart ppo \
     mode=$MODE \
     experiment_name=$EXP_NAME \
@@ -56,6 +57,9 @@ python3 -m realhf.apps.quickstart ppo \
     exp_ctrl.save_freq_steps=null \
     actor.type._class=$MODEL_FAMILY \
     actor.path=$SFT_MODEL_PATH \
+    actor.optimizer.lr_scheduler_type=constant \
+    actor.optimizer.lr=1e-4 \
+    actor.optimizer.warmup_steps_proportion=0.0 \
     critic.type._class=$MODEL_FAMILY \
     critic.type.is_critic=True \
     critic.path=$RW_MODEL_PATH \
@@ -76,16 +80,16 @@ python3 -m realhf.apps.quickstart ppo \
     ppo.reward_output_scaling=10.0 \
     ppo.adv_norm=True ppo.value_norm=True \
     allocation_mode=manual \
-    n_nodes=2 \
-    nodelist=\'NODE[01-02]\' \
+    n_nodes=1 \
+    nodelist=\'NODE01\' \
     actor_train.device_mesh=\'NODE01:0,1,2,3\' \
     actor_train.parallel.data_parallel_size=2 \
     actor_train.parallel.model_parallel_size=1 \
     actor_train.parallel.pipeline_parallel_size=2 \
-    actor_gen.device_mesh=\'NODE[01-02]\' \
+    actor_gen.device_mesh=\'NODE01:0,1,2,3,4,5,6,7\' \
     actor_gen.parallel.data_parallel_size=4 \
     actor_gen.parallel.model_parallel_size=1 \
-    actor_gen.parallel.pipeline_parallel_size=4 \
+    actor_gen.parallel.pipeline_parallel_size=2 \
     critic_train.device_mesh=\'NODE01:4,5,6,7\' \
     critic_train.parallel.data_parallel_size=2 \
     critic_train.parallel.model_parallel_size=1 \

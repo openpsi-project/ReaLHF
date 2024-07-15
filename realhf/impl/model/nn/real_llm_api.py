@@ -20,9 +20,7 @@ from realhf.impl.model.comm.param_realloc import (
     ReparallelizeSenderStep,
     ReparallelizeTraget,
     _derive_reparallelize_comm_plan,
-    fetch_trainable_params,
     is_trainable,
-    store_trainable_params,
 )
 from realhf.impl.model.nn.flatten_param import (
     recursive_getattr,
@@ -637,6 +635,7 @@ class ReaLModel(nn.Module):
         """Trigger the parameter realloaction from the source model to the target model."""
 
         assert not (is_trainable(from_model_name) and is_trainable(to_model_name))
+        assert is_trainable(from_model_name) or is_trainable(to_model_name)
 
         if (from_model_name, to_model_name) not in self._reparallelize_targets:
             self.build_reparallelization_plan(
@@ -656,26 +655,13 @@ class ReaLModel(nn.Module):
         # We simply store the layer handles and fetch them when converting back.
         with constants.model_scope(from_model_name):
             from_model_ranks = constants.parallelism_group_ranks()
-        with constants.model_scope(to_model_name):
-            to_model_ranks = constants.parallelism_group_ranks()
-        if (
-            is_trainable(from_model_name)
-            and torch.distributed.get_rank() in from_model_ranks
-        ):
-            store_trainable_params(
-                from_model_name, (self.layers, self.contiguous_param)
-            )
-        elif is_trainable(to_model_name):
-            if self.layers is not None:
+        if not is_trainable(from_model_name):
+            if torch.distributed.get_rank() in from_model_ranks:
+                dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
                 for p in self.layers.parameters():
-                    p.data = torch.tensor((), dtype=self.dtype, device=self.device)
-                del self.layers, self.contiguous_param
-                self.layers = self.contiguous_param = None
-            if torch.distributed.get_rank() in to_model_ranks:
-                layers, param = fetch_trainable_params(to_model_name)
-            else:
-                layers, param = None, None
-            return layers, param, 0.0
+                    p.data = dummy_tensor
+                self.contiguous_param = dummy_tensor
+            return None, None, 0.0
 
         # The following tensor holds the contiguous memory of incoming parameters
         # If this process is not a receiver, to_param_size is 0 and it's an empty tensor.
@@ -737,16 +723,6 @@ class ReaLModel(nn.Module):
                         step.param_intervals_cpu,
                     )
                     send_buf_specs.append(buf)
-                if step.remove and not is_trainable(from_model_name):
-                    for param_key in step.param_keys:
-                        layer_idx, k = param_key.split(".", 1)
-                        layer_idx = int(layer_idx)
-                        dummy_tensor = torch.tensor(
-                            (), dtype=self.dtype, device=self.device
-                        )
-                        recursive_getattr(
-                            self.layers[layer_idx - self.layer_idx_start], k
-                        ).data = dummy_tensor
 
         # Run boradcast!
         streams = [torch.cuda.Stream() for step in rtgt.comm_plan]
@@ -788,13 +764,13 @@ class ReaLModel(nn.Module):
             torch.cuda.current_stream().wait_event(e)
             set_intervals(**x)
 
-        # release the local GPU memory
-        self.contiguous_param = None
-        self.layers = None
         return rtgt.to_layers_handle, to_contiguous_param, comm_volume
 
     def patch_reparallelization(self, x):
         self.layers, self.contiguous_param = x
+        assert self.layers is not None
+        assert self.contiguous_param is not None
+        assert self.contiguous_param.shape[0] > 0
         for l in self.layers:
             for p in l.parameters():
                 p.requires_grad_()

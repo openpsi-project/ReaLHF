@@ -68,6 +68,7 @@ def test_get(n_intervals: int, dtype: torch.dtype, device: torch.device):
     "n_intervals", list(reversed([1, 10, 100, 1000, 2048, 4096, 10000, 100000]))
 )
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.gpu
 def test_set(n_intervals: int, dtype: torch.dtype):
     # NOTE: Since the set_intervals degenerate to the python implementation with CPU tensors,
     # We don't need to test it with CPU tensors.

@@ -12,9 +12,9 @@ SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/$MODEL_FAMILY-loca
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw/$MODEL_FAMILY-ray-manual/default/epoch1epochstep10globalstep10/
 
 # Option 1: The experiment runs locally with subprocesses.
-# MODE=local
+MODE=local
 # Option 2: The experiment runs in a Ray cluster
-MODE=ray
+# MODE=ray
 # Option 3: The experiment runs in a SLURM + pyxis cluster
 # Using the slurm mode requires a cluster spec file
 # and setting CLUSTER_SPEC_PATH to the path of it.

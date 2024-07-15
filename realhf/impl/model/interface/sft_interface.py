@@ -1,7 +1,5 @@
-import dataclasses
-from typing import Dict, List, Optional
+from typing import Dict
 
-import deepspeed
 import torch
 import torch.distributed as dist
 import torch.utils.data
@@ -9,7 +7,7 @@ import tqdm
 
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
-from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
+from realhf.api.core.data_api import SequenceSample
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.utils.functional import (
     build_shift_one_indices,
@@ -19,12 +17,13 @@ from realhf.impl.model.utils.functional import (
 
 def compute_packed_sft_loss(
     logits: torch.Tensor,
-    packed_input_ids: torch.Tensor,
-    cu_seqlens: torch.Tensor,
-    prompt_mask: torch.Tensor,
-    **kwargs,
+    input_: SequenceSample,
 ) -> torch.Tensor:
-    # **kwargs is used to ensure the correctness of invoking this function
+    packed_input_ids: torch.Tensor = input_.data["packed_input_ids"]
+    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+    prompt_mask = input_.data["prompt_mask"]
+
     shift_one_indices = build_shift_one_indices(logits, cu_seqlens)
     logprobs = gather_packed_shifted_log_probs(
         logits, cu_seqlens, packed_input_ids
@@ -86,36 +85,16 @@ def compute_packed_sft_loss(
 
 class SFTInterface(model_api.ModelInterface):
 
-    def train_step(self, model: model_api.Model, data: NamedArray) -> Dict:
-        data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_input_ids: torch.Tensor = data["packed_input_ids"]  # shape [tot_seqlen]
-        prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
-        module: deepspeed.DeepSpeedEngine = model.module
+    def train_step(self, model: model_api.Model, x: SequenceSample) -> Dict:
+        module = model.module
 
         module.train()
 
-        seqlens_cpu = data.metadata["seqlens"]
-        max_seqlen = max(seqlens_cpu)
-        cu_seqlens = torch.nn.functional.pad(
-            torch.tensor(seqlens_cpu, dtype=torch.int32, device=model.device).cumsum(0),
-            (1, 0),
-        )
-
-        loss_fn_kwargs = dict(
-            prompt_mask=prompt_mask,
-            input_lens=cu_seqlens[1:]
-            - cu_seqlens[
-                :-1
-            ],  # this is used to partition other loss_fn_kwargs into microbatches
-        )
         stat = module.train_batch(
-            seqlens_cpu=seqlens_cpu,
-            packed_input_ids=packed_input_ids,
-            cu_seqlens=cu_seqlens,
+            input_=x,
             loss_fn=compute_packed_sft_loss,
             num_micro_batches=constants.pipe_parallel_world_size() * 2,
             version_steps=model.version.global_step,
-            **loss_fn_kwargs,
         )
 
         model.inc_version()
@@ -151,34 +130,13 @@ class SFTInterface(model_api.ModelInterface):
         module.eval()
         losses = n_seqs = ppl = n_tokens = 0
 
-        for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
-            seqlens_cpu = data.metadata["seqlens"]
+        for step, x in enumerate(tqdm.tqdm(eval_dataloader)):
+            x: SequenceSample
 
-            data = recursive_apply(data, lambda x: x.to(device))
-            packed_input_ids: torch.Tensor = data[
-                "packed_input_ids"
-            ]  # shape [tot_seqlen]
-            prompt_mask: torch.BoolTensor = data["prompt_mask"]  # shape [tot_seqlen]
-
-            max_seqlen = max(seqlens_cpu)
-            cu_seqlens = torch.nn.functional.pad(
-                torch.tensor(
-                    seqlens_cpu, dtype=torch.int32, device=model_.device
-                ).cumsum(0),
-                (1, 0),
-            )
-
-            loss_fn_kwargs = dict(
-                prompt_mask=prompt_mask,
-                input_lens=cu_seqlens[1:] - cu_seqlens[:-1],
-            )
             stat = module.eval_batch(
-                seqlens_cpu=seqlens_cpu,
-                packed_input_ids=packed_input_ids,
-                cu_seqlens=cu_seqlens,
+                input_=x.cuda(),
                 loss_fn=compute_packed_sft_loss,
                 num_micro_batches=constants.pipe_parallel_world_size(),
-                **loss_fn_kwargs,
             )
 
             if stat:
@@ -196,27 +154,6 @@ class SFTInterface(model_api.ModelInterface):
                 n_seqs=int(n_seqs),
             )
         return res
-
-    @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> Dict:
-        device = model.device
-        module = model.module
-        module.eval()
-
-        data = recursive_apply(data, lambda x: x.to(device))
-        packed_input_ids: torch.Tensor = data["packed_input_ids"]
-        cu_seqlens: torch.Tensor = data["cu_seqlens"]
-        max_seqlen = int((cu_seqlens[1:] - cu_seqlens[:-1]).max())
-        seqlens_cpu = data.metadata["seqlens"]
-
-        logits = module.forward(
-            seqlens_cpu=seqlens_cpu,
-            packed_input_ids=packed_input_ids,
-            cu_seqlens=cu_seqlens,
-        )
-        x = from_dict(dict(logits=logits))
-        x.register_metadata(**data.medata)
-        return x
 
 
 model_api.register_interface("sft", SFTInterface)

@@ -33,7 +33,6 @@ from realhf.impl.model.nn.real_llm_parallel import (
 )
 
 _TRAINABLE: Dict[ModelName, bool] = {}
-_TRAINABLE_PARAM_CACHE: Dict[ModelName, Any] = {}
 
 
 def set_trainable(model_name: ModelName, trainable: bool):
@@ -42,15 +41,6 @@ def set_trainable(model_name: ModelName, trainable: bool):
 
 def is_trainable(model_name: ModelName) -> bool:
     return _TRAINABLE[model_name]
-
-
-def store_trainable_params(model_name: ModelName, trainable_params: Any):
-    assert model_name not in _TRAINABLE_PARAM_CACHE
-    _TRAINABLE_PARAM_CACHE[model_name] = trainable_params
-
-
-def fetch_trainable_params(model_name: ModelName) -> Any:
-    return _TRAINABLE_PARAM_CACHE.pop(model_name)
 
 
 @dataclasses.dataclass(unsafe_hash=True)

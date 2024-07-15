@@ -63,29 +63,13 @@ Dataset Configurations
 
 .. autoclass:: PromptOnlyDatasetConfig
 
-``NamedArray``
+``SequenceSample``
 -----------------------
 
-``NamedArray`` is an object we use in model function calls.
-It is inherited from the previous SRL project.
+``SequenceSample`` is an object we use in model function calls.
 
-Named array extends plain arrays/tensors in the following ways.
-
-1. NamedArray aggregates multiple arrays, possibly of different shapes.
-2. Each array is given a name, providing a user-friendly way of indexing to the corresponding data.
-3. NamedArrays can be nested. (Although it should *not* be nested in this system.)
-4. NamedArray can store metadata such as sequence lengths, which is useful for padding and masking without causing CUDA synchronization.
-
-Users can regard it as a nested dictionary of arrays, except that indexing a ``NamedArray`` results in *slicing every hosted arrays* (again, we don't use this feature in this project).
-
-.. autoclass:: realhf.base.namedarray.NamedArray
+.. autoclass:: realhf.SequenceSample
     :members:
-
-.. autofunction::realhf.base.namedarray.from_dict
-
-.. autofunction::realhf.base.namedarray.recursive_aggregate
-
-.. autofunction::realhf.base.namedarray.recursive_apply
 
 Dataflow Graph
 -----------------

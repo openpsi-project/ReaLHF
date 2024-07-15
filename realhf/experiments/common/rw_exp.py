@@ -72,7 +72,7 @@ class RWConfig(CommonExperimentConfig):
             interface_impl=interface,
             model_type=self.model.type,
             model_path=self.model.path,
-            input_keys=["packed_input_ids", "group_factor", "pos_input_lens"],
+            input_keys=["packed_input_ids"],
             log_return_value=True,
             n_seqs=self.dataset.train_bs_n_seqs,
         )

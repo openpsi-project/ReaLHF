@@ -40,6 +40,7 @@ from realhf.experiments.common.utils import (
     make_inf_backend_config,
     make_model_config,
     make_train_backend_config,
+    resolve_replica_ids,
     resolve_rpc_hooks,
 )
 from realhf.search_engine.search import search_rpc_allocations
@@ -375,6 +376,7 @@ class CommonExperimentConfig(Experiment):
             raise NotImplementedError()
 
         shard_counter = defaultdict(lambda: 0)
+        resolve_replica_ids(rpc_allocs)
         resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
 
         pprint.pprint(rpc_allocs)

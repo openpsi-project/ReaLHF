@@ -5,6 +5,15 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
+from realhf.base.testing import (
+    TESTING_MODEL_HEAD_DIM,
+    TESTING_MODEL_HIDDEN_SIZE,
+    TESTING_MODEL_INTERMEDIATE_SIZE,
+    TESTING_MODEL_N_HEADS,
+    TESTING_MODEL_N_LAYERS,
+    TESTING_MODEL_N_POSITIONS,
+    TESTING_MODEL_VOCAB_SIZE,
+)
 
 from .llama import (
     convert_state_dict_llama,
@@ -78,16 +87,16 @@ def gemma_config_maker() -> ReaLModelConfig:
     hf_config = transformers.GemmaConfig(
         attention_bias=False,
         hidden_act="gelu",
-        hidden_size=160,
-        intermediate_size=200,
-        max_position_embeddings=160,
-        num_attention_heads=8,
-        num_hidden_layers=8,
-        num_key_value_heads=8,
-        head_dim=32,
+        hidden_size=TESTING_MODEL_HIDDEN_SIZE,
+        intermediate_size=TESTING_MODEL_INTERMEDIATE_SIZE,
+        max_position_embeddings=TESTING_MODEL_N_POSITIONS,
+        num_attention_heads=TESTING_MODEL_N_HEADS,
+        num_hidden_layers=TESTING_MODEL_N_LAYERS,
+        num_key_value_heads=4,
+        head_dim=TESTING_MODEL_HEAD_DIM,
         rms_norm_eps=1e-06,
         rope_theta=10000.0,
-        vocab_size=200,
+        vocab_size=TESTING_MODEL_VOCAB_SIZE,
     )
     return convert_config_gemma(hf_config)
 

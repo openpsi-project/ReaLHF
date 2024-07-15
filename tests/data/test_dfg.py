@@ -133,7 +133,6 @@ def test_build_graph(tmp_path: pathlib.Path, rpcs: List[MFCDef]):
         res = dict(
             name=node.name,
             role=node.role,
-            max_min_flow_seqs=node.max_min_flow_seqs,
             is_src=node.is_src,
             is_dst=node.is_dst,
             data_producers=node.data_producers,
