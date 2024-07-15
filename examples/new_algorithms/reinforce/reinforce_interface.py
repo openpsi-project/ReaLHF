@@ -99,17 +99,9 @@ class ReinforceInterface(model_api.ModelInterface):
 
         module.eval()
 
-        # Remap the key `packed_prompts` to `packed_input_ids`,
-        # because the pipe runner only recognizes `packed_input_ids`.
-        x = SequenceSample.from_default(
-            ids=input_.ids,
-            seqlens=input_.seqlens["packed_prompts"],
-            data=dict(packed_input_ids=input_.data["packed_prompts"]),
-        )
-
         self.generation_config.greedy = self.force_greedy
         res = module.generate(
-            input_=x,
+            input_=input_,
             tokenizer=model.tokenizer,
             gconfig=self.generation_config,
         )
@@ -133,8 +125,10 @@ class ReinforceInterface(model_api.ModelInterface):
             seq_lengths,
             prompt_mask,
         ) = concat_prompt_to_generation_output(
-            packed_prompts=input_.data["packed_prompts"],
-            prompt_lengths=torch.cat(input_.seqlens["packed_prompts"]).to(model.device),
+            packed_prompts=input_.data["packed_input_ids"],
+            prompt_lengths=torch.cat(input_.seqlens["packed_input_ids"]).to(
+                model.device
+            ),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
             logits_mask=logits_mask,
@@ -149,8 +143,6 @@ class ReinforceInterface(model_api.ModelInterface):
             packed_input_ids=packed_input_ids,
             prompt_mask=prompt_mask,
         )
-        if self.force_greedy:
-            data = {f"greedy_{k}": v for k, v in data.items()}
 
         res = SequenceSample.from_default(
             ids=input_.ids,
@@ -244,54 +236,3 @@ class ReinforceInterface(model_api.ModelInterface):
             stats["advantage"] = stats["rewards"] - stats["baseline_rewards"]
 
         return dict(stats) if stats else {}
-
-
-@dataclasses.dataclass
-class ReinforceRewardInterface(model_api.ModelInterface):
-    output_scaling: float = 1.0
-    output_bias: float = 0.0
-    force_greedy: bool = False
-
-    @torch.no_grad()
-    def inference(
-        self, model: model_api.Model, input_: SequenceSample
-    ) -> SequenceSample:
-        module = model.module
-        module.eval()
-
-        if self.force_greedy:
-            input_ = SequenceSample.from_default(
-                ids=input_.ids,
-                data={k.replace("greedy_", ""): v for k, v in input_.data.items()},
-                seqlens=input_.seqlens["greedy_packed_input_ids"],
-            )
-
-        r = module.forward(input_=input_)
-        if r is None:
-            return
-        scores = r.float()
-
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"])
-        scores = scores.squeeze(-1)[input_lens.cumsum(0) - 1].float()  # [bs]
-        scores = (scores - self.output_bias) * self.output_scaling
-
-        ###################### logging ######################
-        # input_ids = [packed_input_ids[start:end] for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:])]
-        # seq_strs = model.tokenizer.batch_decode(input_ids,
-        #                                         clean_up_tokenization_spaces=False,
-        #                                         skip_special_tokens=True)
-        # for seq_str, score in zip(seq_strs, scores):
-        #     logger.info(
-        #         f"reward is {colorama.Fore.RED}{score.item()}{colorama.Style.RESET_ALL}, "
-        #         f"sequence is: {colorama.Fore.YELLOW + colorama.Style.DIM}{seq_str}{colorama.Style.RESET_ALL}"
-        #     )
-        #####################################################
-        ret_data = dict(rewards=scores)
-        if self.force_greedy:
-            ret_data = dict(greedy_rewards=scores)
-        res = SequenceSample.from_default(
-            ids=input_.ids,
-            seqlens=input_.seqlens["packed_input_ids"],
-            data=ret_data,
-        )
-        return res

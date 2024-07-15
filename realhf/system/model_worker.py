@@ -648,7 +648,14 @@ class ModelWorker(worker_base.Worker):
         input_queue = self.__compute_input_queues[request.handler.model_name][
             request.handle_name
         ]
-        data = input_queue.get_nowait()
+        rpc: dfg.MFCDef = next(
+            rpc for rpc in self.config.model_rpcs if rpc.name == request.data
+        )
+
+        data: data_api.SequenceSample = input_queue.get_nowait()
+        if rpc.input_key_remap:
+            data.remap_keys_(rpc.input_key_remap)
+
         if request.handle_name == "inference":
             res = self._interface.inference(self._model, data)  # -> SequenceSample
         elif request.handle_name == "train_step":
@@ -657,6 +664,9 @@ class ModelWorker(worker_base.Worker):
             res = self._interface.generate(self._model, data)  # -> SequenceSample
         else:
             raise NotImplementedError(f"Unknown MFC type: {request.handle_name}.")
+
+        if isinstance(res, data_api.SequenceSample) and rpc.output_key_remap:
+            res.remap_keys_(rpc.output_key_remap)
 
         # Store data into storage.
         if self._is_dp_head and isinstance(res, data_api.SequenceSample):

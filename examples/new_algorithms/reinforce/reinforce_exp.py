@@ -4,10 +4,7 @@ from typing import *
 
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
-from examples.new_algorithms.reinforce.reinforce_interface import (
-    ReinforceInterface,
-    ReinforceRewardInterface,
-)
+from examples.new_algorithms.reinforce.reinforce_interface import ReinforceInterface
 from realhf.api.core.config import (
     DatasetAbstraction,
     ModelInterfaceAbstraction,
@@ -97,14 +94,13 @@ class ReinforceConfig(CommonExperimentConfig):
         actor_greedy_interface.args["force_greedy"] = True
 
         rw_interface = ModelInterfaceAbstraction(
-            "reinforce_reward",
+            "paired_rw",
             args=dict(
                 output_scaling=self.reward_output_scaling,
                 output_bias=self.reward_output_bias,
+                enable_save=False,
             ),
         )
-        greedy_rw_interface = copy.deepcopy(rw_interface)
-        greedy_rw_interface.args["force_greedy"] = True
 
         sample_gen = MFCDef(
             name="sample_gen",
@@ -114,6 +110,7 @@ class ReinforceConfig(CommonExperimentConfig):
             model_path=self.actor.path,
             interface_impl=actor_sample_interface,
             input_keys=["packed_prompts"],
+            input_key_remap=dict(packed_prompts="packed_input_ids"),
             output_keys=[
                 "packed_input_ids",
                 "prompt_mask",
@@ -130,9 +127,11 @@ class ReinforceConfig(CommonExperimentConfig):
             model_path=self.actor.path,
             interface_impl=actor_greedy_interface,
             input_keys=["packed_prompts"],
+            input_key_remap=dict(packed_prompts="packed_input_ids"),
             output_keys=[
                 "greedy_packed_input_ids",
             ],
+            output_key_remap=dict(packed_input_ids="greedy_packed_input_ids"),
             balanced_dp=True,
             n_seqs=self.dataset.train_bs_n_seqs,
         )
@@ -152,11 +151,13 @@ class ReinforceConfig(CommonExperimentConfig):
             name="greedy_rw",
             model_name="reward",
             interface_type=ModelInterfaceType.INFERENCE,
-            interface_impl=greedy_rw_interface,
+            interface_impl=rw_interface,
             model_type=self.rew.type,
             model_path=self.rew.path,
             input_keys=["greedy_packed_input_ids"],
+            input_key_remap={"greedy_packed_input_ids": "packed_input_ids"},
             output_keys=["greedy_rewards"],
+            output_key_remap={"rewards": "greedy_rewards"},
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
@@ -216,7 +217,6 @@ class ReinforceConfig(CommonExperimentConfig):
         return self.dataset.max_prompt_len
 
 
-model_api.register_interface("reinforce_reward", ReinforceRewardInterface)
 model_api.register_interface("reinforce", ReinforceInterface)
 register_quickstart_exp("reinforce", ReinforceConfig)
 

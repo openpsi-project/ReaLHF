@@ -421,6 +421,17 @@ class SequenceSample:
             metadata=metadata if metadata is not None else {},
         )
 
+    def remap_keys_(self, remap: Dict[str, str]):
+        for k in self.keys:
+            if k in remap:
+                new_k = remap[k]
+                self.seqlens[new_k] = self.seqlens.pop(k)
+                self.trailing_shapes[new_k] = self.trailing_shapes.pop(k)
+                self.dtypes[new_k] = self.dtypes.pop(k)
+                if self.data is not None:
+                    self.data[new_k] = self.data.pop(k)
+        self.keys = set(remap.get(k, k) for k in self.keys)
+
 
 @dataclasses.dataclass
 class DataBatchMeta:

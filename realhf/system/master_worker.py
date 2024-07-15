@@ -390,6 +390,7 @@ async def scatter_tensor_to_mws(
             handle_name=rpc.interface_type.value,
             pre_hooks=["data_transfer"],
             pre_hook_data=[dt_data],
+            data=rpc.name,
         )
         for handler in handlers
     }
