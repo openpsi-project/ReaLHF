@@ -8,13 +8,6 @@ import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
-from realhf.impl.model.nn.real_llm_api import ReaLModel
-from realhf.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output
-from realhf.impl.model.utils.functional import (
-    gather_packed_shifted_log_probs,
-    masked_normalization,
-)
-from realhf.impl.model.utils.ppo_functional import get_packed_advantages_and_returns
 
 logger = logging.getLogger("Reinforce Interface")
 
@@ -23,6 +16,9 @@ def _reinforce_loss_from_model_outputs(
     logits: torch.FloatTensor,  # [tot_seqlen, vocab_size]
     input_: SequenceSample,
 ) -> Tuple[torch.FloatTensor, Dict]:
+    # NOTE: import here to avoid cuda initialization
+    from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
+
     packed_input_ids = input_.data["packed_input_ids"]
     seqlens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
     cu_seqlens = torch.nn.functional.pad(seqlens.cumsum(0), (1, 0)).int()
@@ -67,6 +63,7 @@ def _reinforce_loss_from_model_outputs(
 
 @dataclasses.dataclass
 class ReinforceInterface(model_api.ModelInterface):
+
     force_greedy: bool = False
     generation_config: model_api.GenerationHyperparameters = dataclasses.field(
         default_factory=model_api.GenerationHyperparameters
@@ -76,6 +73,9 @@ class ReinforceInterface(model_api.ModelInterface):
     adv_norm: bool = True
 
     def save(self, model: model_api.Model, save_dir: str):
+        # NOTE: import here to avoid cuda initialization
+        from realhf.impl.model.nn.real_llm_api import ReaLModel
+
         if not self.enable_save:
             return
         module = model.module
@@ -90,6 +90,11 @@ class ReinforceInterface(model_api.ModelInterface):
     def generate(
         self, model: model_api.Model, input_: SequenceSample
     ) -> SequenceSample:
+        # NOTE: import here to avoid cuda initialization
+        from realhf.impl.model.nn.real_llm_generate import (
+            concat_prompt_to_generation_output,
+        )
+
         module = model.module
 
         module.eval()
@@ -155,6 +160,12 @@ class ReinforceInterface(model_api.ModelInterface):
         return res
 
     def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+        # NOTE: import here to avoid cuda initialization
+        from realhf.impl.model.utils.functional import masked_normalization
+        from realhf.impl.model.utils.ppo_functional import (
+            get_packed_advantages_and_returns,
+        )
+
         module = model.module
         module.eval()
 
@@ -235,9 +246,6 @@ class ReinforceInterface(model_api.ModelInterface):
         return dict(stats) if stats else {}
 
 
-model_api.register_interface("reinforce", ReinforceInterface)
-
-
 @dataclasses.dataclass
 class ReinforceRewardInterface(model_api.ModelInterface):
     output_scaling: float = 1.0
@@ -287,6 +295,3 @@ class ReinforceRewardInterface(model_api.ModelInterface):
             data=ret_data,
         )
         return res
-
-
-model_api.register_interface("reinforce_reward", ReinforceRewardInterface)

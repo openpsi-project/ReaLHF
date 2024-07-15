@@ -1,11 +1,13 @@
 import copy
 import dataclasses
-import math
 from typing import *
 
-import numpy as np
-
+import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
+from examples.new_algorithms.reinforce.reinforce_interface import (
+    ReinforceInterface,
+    ReinforceRewardInterface,
+)
 from realhf.api.core.config import (
     DatasetAbstraction,
     ModelInterfaceAbstraction,
@@ -214,4 +216,12 @@ class ReinforceConfig(CommonExperimentConfig):
         return self.dataset.max_prompt_len
 
 
+model_api.register_interface("reinforce_reward", ReinforceRewardInterface)
+model_api.register_interface("reinforce", ReinforceInterface)
 register_quickstart_exp("reinforce", ReinforceConfig)
+
+if __name__ == "__main__":
+
+    from realhf.apps.quickstart import main
+
+    main()
