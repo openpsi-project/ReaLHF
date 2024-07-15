@@ -357,6 +357,18 @@ def test_generate_consistency(
     seq_acc_threshold: float,
     token_acc_threshold: float,
 ):
+    from realhf.impl.model.nn.real_llm_api import ReaLModel
+
+    mconfig = getattr(ReaLModel, f"config_from_{model_class}")(
+        model_path=model_path,
+        is_critic=False,
+    )
+    if (
+        mconfig.vocab_size % test_params1.parallel.model_parallel_size != 0
+        or mconfig.vocab_size % test_params2.parallel.model_parallel_size != 0
+    ):
+        return
+
     def launch_test(test_params: GenerateTestParams):
         func = (
             huggingface_model_generate
