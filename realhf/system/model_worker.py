@@ -238,8 +238,6 @@ class ModelWorker(worker_base.Worker):
                     for rpc in rpcs
                 ]
             )
-            if is_trainable_model:
-                assert len(rpcs) == 1
             param_realloc_comm.set_trainable(model_name_, is_trainable_model)
             constants.set_rank_mapping(model_name_, topo_, self.config.msid2mwid)
             grid = topology.ParallelGrid(
