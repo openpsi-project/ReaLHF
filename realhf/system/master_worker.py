@@ -66,7 +66,7 @@ class ExperimentComplete(Exception):
 
 
 def request_all(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[str],
     handle_type: str,
     datas: List,
@@ -115,7 +115,7 @@ def create_exact_match_pattern(string_list: List[Union[uuid.UUID, str]]) -> re.P
 
 
 async def _awaitable_response(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     pattern: re.Pattern | None,
 ) -> request_reply_stream.Payload:
     while True:
@@ -127,7 +127,7 @@ async def _awaitable_response(
 
 
 async def gather_all_replies(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     request_ids: List[str],
     verbose: bool = True,
 ) -> List:
@@ -146,7 +146,7 @@ async def gather_all_replies(
 
 
 async def group_rpc_blocked(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[Union[config_pkg.ModelShardID, str]],
     handle_type: str,
     datas: List,
@@ -160,7 +160,7 @@ async def group_rpc_blocked(
 
 
 def _request_parameter_sync(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     from_model_name: ModelName,
     to_model_name: ModelName,
@@ -361,7 +361,7 @@ def _attach_payloads_with_hooks(
 
 async def scatter_tensor_to_mws(
     rpc: dfg.MFCDef,
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | ReaLModelConfig],
@@ -452,7 +452,7 @@ async def model_rpc_request_func(
     rpc: dfg.MFCDef,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     src_rpc_model_name: ModelName,
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[ModelName, int]],
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
@@ -596,7 +596,7 @@ async def model_rpc_request_func(
 
 async def model_rpc_reply_func(
     rpc: dfg.MFCDef,
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     buffer: AsyncIOSequenceBuffer,
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
     ctrl: RPCCorountineControl,
@@ -679,7 +679,7 @@ async def load_data_func(
     src_rpc_model_name: str,
     buffer: AsyncIOSequenceBuffer,
     data_owner: Dict[Tuple[int, str], Tuple[ModelName, int]],
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     ctrl: RPCCorountineControl,
 ):
     while not ctrl.stop.is_set():
@@ -790,7 +790,7 @@ def _gather_stat(src: List[Dict]) -> Dict:
 
 
 async def model_eval_thread_func(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[config_pkg.ModelShardID],
     eval_queue: asyncio.Queue,
     stop_ctl: asyncio.Event,
@@ -807,7 +807,7 @@ async def model_eval_thread_func(
 
 
 async def model_save_thread_func(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[config_pkg.ModelShardID],
     model_save_root: str,
     save_queue: asyncio.Queue,
@@ -934,7 +934,7 @@ class MasterWorker(worker_base.Worker):
             n_subscribers=self.config.n_model_workers,
             handler_routing=handler_routing,
         )
-        self.__stream: request_reply_stream.NameResolvingRequstClient
+        self.__stream: request_reply_stream.NameResolvingRequestClient
 
         src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
         src_rpc_model_name = src_rpc.model_name
