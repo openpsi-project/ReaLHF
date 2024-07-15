@@ -5,6 +5,7 @@ from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
 from realhf.base.testing import (
     TESTING_MODEL_HEAD_DIM,
     TESTING_MODEL_HIDDEN_SIZE,
+    TESTING_MODEL_INTERMEDIATE_SIZE,
     TESTING_MODEL_N_HEADS,
     TESTING_MODEL_N_LAYERS,
     TESTING_MODEL_N_POSITIONS,
@@ -69,7 +70,7 @@ def get_real_config_mistral() -> ReaLModelConfig:
         vocab_size=TESTING_MODEL_VOCAB_SIZE,
         max_position_embeddings=TESTING_MODEL_N_POSITIONS,
         hidden_size=TESTING_MODEL_HIDDEN_SIZE,
-        intermediate_size=10,
+        intermediate_size=TESTING_MODEL_INTERMEDIATE_SIZE,
         num_hidden_layers=TESTING_MODEL_N_LAYERS,
         num_attention_heads=TESTING_MODEL_N_HEADS,
         num_key_value_heads=2,

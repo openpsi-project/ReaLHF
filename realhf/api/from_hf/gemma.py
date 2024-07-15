@@ -8,6 +8,7 @@ from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
 from realhf.base.testing import (
     TESTING_MODEL_HEAD_DIM,
     TESTING_MODEL_HIDDEN_SIZE,
+    TESTING_MODEL_INTERMEDIATE_SIZE,
     TESTING_MODEL_N_HEADS,
     TESTING_MODEL_N_LAYERS,
     TESTING_MODEL_N_POSITIONS,
@@ -87,7 +88,7 @@ def gemma_config_maker() -> ReaLModelConfig:
         attention_bias=False,
         hidden_act="gelu",
         hidden_size=TESTING_MODEL_HIDDEN_SIZE,
-        intermediate_size=10,
+        intermediate_size=TESTING_MODEL_INTERMEDIATE_SIZE,
         max_position_embeddings=TESTING_MODEL_N_POSITIONS,
         num_attention_heads=TESTING_MODEL_N_HEADS,
         num_hidden_layers=TESTING_MODEL_N_LAYERS,

@@ -8,6 +8,7 @@ from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
 from realhf.base.testing import (
     TESTING_MODEL_HEAD_DIM,
     TESTING_MODEL_HIDDEN_SIZE,
+    TESTING_MODEL_INTERMEDIATE_SIZE,
     TESTING_MODEL_N_HEADS,
     TESTING_MODEL_N_LAYERS,
     TESTING_MODEL_N_POSITIONS,
@@ -207,7 +208,7 @@ def make_real_config_gpt2() -> ReaLModelConfig:
         n_embd=TESTING_MODEL_HIDDEN_SIZE,
         n_layer=TESTING_MODEL_N_LAYERS,
         n_head=TESTING_MODEL_N_HEADS,
-        n_inner=TESTING_MODEL_HIDDEN_SIZE * 2,
+        n_inner=TESTING_MODEL_INTERMEDIATE_SIZE,
         activation_function="gelu_new",
     )
     return convert_config_gpt2(hf_config)
