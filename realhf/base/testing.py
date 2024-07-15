@@ -281,7 +281,10 @@ def make_random_packed_batches(
     seqs = seqs[n_seqs * dp_rank // dp_size : n_seqs * (dp_rank + 1) // dp_size]
     x = SequenceSample.from_default(
         seqlens=[seq_len for _ in range(seqs.shape[0])],
-        data=dict(packed_input_ids=seqs.view(-1)),
+        data=dict(
+            packed_input_ids=seqs.view(-1),
+            prompt_mask=torch.zeros_like(seqs.view(-1), dtype=torch.bool),
+        ),
         ids=list(range(seqs.shape[0])),
     )
     return x.split(n_batches)
