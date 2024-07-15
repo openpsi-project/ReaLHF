@@ -19,7 +19,7 @@ EXP_NAME=quickstart-sft
 TRIAL_NAME=$MODEL_FAMILY-$MODE-manual
 
 # We use the "manual" allocation mode here to manually specify the parallelism strategy,
-# which is pipeline=1, tensor-model=2, and data=4, using in total of 8 GPUs.
+# which is pipeline=2, tensor-model=2, and data=2, using in total of 8 GPUs.
 
 # The `sft` subcommand specifies that this is a supervised fine-tuning experiment.
 python3 -m realhf.apps.quickstart sft \
@@ -41,8 +41,8 @@ python3 -m realhf.apps.quickstart sft \
     dataset.train_bs_n_seqs=512 \
     dataset.valid_bs_n_seqs=512 \
     allocation_mode=manual \
-    n_nodes=2 \
+    n_nodes=4 \
     allocation.parallel.pipeline_parallel_size=2 \
-    allocation.parallel.model_parallel_size=2 \
+    allocation.parallel.model_parallel_size=4 \
     allocation.parallel.data_parallel_size=4 \
     allocation.parallel.use_sequence_parallel=True

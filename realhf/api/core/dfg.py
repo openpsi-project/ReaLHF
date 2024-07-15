@@ -59,6 +59,15 @@ class MFCDef:
     :type model_name: str or ModelName
     :param input_keys: Input data keys, used to resolve dependencies.
     :type input_keys: Tuple
+    :param output_keys: Output data keys, used to resolve dependencies.
+    :type output_keys: Tuple
+    :param input_key_remap: Remap input keys to let the interface implementation
+        recognize them. Keys are ``input_keys`` and values are the identifiers known to the
+        interface. We use remap to keep our interface code clean.
+    :type input_key_remap: Dict[str, str]
+    :param output_key_remap: Remap output keys to let MFC recognize them.
+        Keys are identifiers known to the interface and values are ``output_keys``.
+    :type output_key_remap: Dict[str, str]
     :param balanced_dp: Whether to balance the data parallelism such that
         each DP rank will get exactly n_seqs // dp_size sequences.
         If set to False, ReaL will do partition according to the number of tokens.
@@ -92,7 +101,9 @@ class MFCDef:
 
     # Input and output keys, used to resolve dependencies.
     input_keys: Tuple = dataclasses.field(default_factory=tuple)
+    input_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
     output_keys: Tuple = dataclasses.field(default_factory=tuple)
+    output_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
 
     balanced_dp: bool = False
     log_return_value: bool = False
@@ -134,10 +145,6 @@ class MFCDef:
         self._post_hooks.append(h)
 
     @property
-    def max_min_flow_seqs(self) -> int:
-        return self._G.graph["max_min_flow_seqs"][self.name]
-
-    @property
     def is_src(self):
         return len(list(self._G.predecessors(self.name))) == 0
 
@@ -160,6 +167,11 @@ class MFCDef:
     @property
     def children(self) -> List["MFCDef"]:
         return [self._G.nodes[x]["object"] for x in self._G.successors(self.name)]
+
+    def all_successors(self) -> List["MFCDef"]:
+        names = list(nx.dfs_preorder_nodes(self._G, self.name))
+        names.remove(self.name)
+        return [self._G.nodes[x]["object"] for x in names]
 
     @property
     def is_dst_of_model_role(self):
@@ -258,12 +270,5 @@ def build_graph(
     _G.graph["data_consumers"] = {
         k: [v.model_name for v in vs] for k, vs in data_consumers.items()
     }
-
-    max_min_flow_seqs = {}
-    for node in nodes:
-        max_min_flow_seqs[node.name] = max(
-            [r.n_seqs for r in nodes if r.role == node.role]
-        )
-    _G.graph["max_min_flow_seqs"] = max_min_flow_seqs
 
     return _G

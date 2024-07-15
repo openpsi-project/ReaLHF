@@ -113,7 +113,7 @@ class PairedRewardInterface(model_api.ModelInterface):
     @torch.no_grad()
     def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
 
-        module: deepspeed.DeepSpeedEngine = model.module
+        module = model.module
 
         module.eval()
 

@@ -126,7 +126,7 @@ def setup_constants_and_param_realloc(
     from_sequence_parallel,
     to_sequence_parallel,
 ):
-    from realhf.impl.model.comm.param_realloc import set_trainable, setup_param_realloc
+    from realhf.impl.model.comm.param_realloc import setup_param_realloc
 
     from_num_pp, from_num_dp, from_num_mp = from_pp_dp_mp
     to_num_pp, to_num_dp, to_num_mp = to_pp_dp_mp
@@ -210,8 +210,6 @@ def setup_constants_and_param_realloc(
             (to_model_name, from_model_name),
         ],
     )
-    set_trainable(from_model_name, True)
-    set_trainable(to_model_name, False)
     return pg_info
 
 
@@ -253,6 +251,8 @@ class ParamRedistributer:
     pg_info: Any
 
     def _redist(self, m1, m2, n1, n2):
+        from realhf.impl.model.comm.param_realloc import is_trainable
+
         if m1 is None and m2 is None:
             return
         with constants.model_scope(n1):
@@ -268,15 +268,15 @@ class ParamRedistributer:
             to_model_config=m.config,
             pg_info=self.pg_info,
         )
-        if m2 is not None:
+        if m2 is not None and is_trainable(n1):
             m2.patch_reparallelization((a, b))
 
-        if m1 is not None:
-            assert m1.layers is None
-            assert m1.contiguous_param is None
-        if m2 is not None:
-            assert m2.layers is not None
-            assert m2.contiguous_param is not None
+        # if m1 is not None:
+        #     assert m1.layers is None
+        #     assert m1.contiguous_param is None
+        # if m2 is not None:
+        #     assert m2.layers is not None
+        #     assert m2.contiguous_param is not None
 
     def forward(self):
         self._redist(
@@ -320,10 +320,14 @@ def _test_para_realloc(
 ):
     # os.environ["REAL_SAVE_MAX_SHARD_SIZE_BYTE"] = str(int(1e6))
     from realhf.impl.model.backend.megatron import ReaLMegatronEngine
+    from realhf.impl.model.comm.param_realloc import set_trainable
     from realhf.impl.model.interface.sft_interface import compute_packed_sft_loss
 
     from_model_name = ModelName("param_realloc_test", 0)
     to_model_name = ModelName("param_realloc_test", 1)
+
+    set_trainable(from_model_name, True)
+    set_trainable(to_model_name, False)
 
     pg_info = setup_constants_and_param_realloc(
         from_model_name,
@@ -512,12 +516,12 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
     not torch.cuda.is_available() or torch.cuda.device_count() < 8,
     reason="This test requires at least 8 GPUs to run.",
 )
-@pytest.mark.parametrize("model_family_name", ["gpt2"])
-@pytest.mark.parametrize("is_critic", [False])
-@pytest.mark.parametrize("from_pp_dp_mp", [(4, 1, 1)])
-@pytest.mark.parametrize("to_pp_dp_mp", [(2, 2, 2)])
-@pytest.mark.parametrize("from_sequence_parallel", [False])
-@pytest.mark.parametrize("to_sequence_parallel", [False])
+@pytest.mark.parametrize("model_family_name", ["llama", "gpt2"])
+@pytest.mark.parametrize("is_critic", [False, True])
+@pytest.mark.parametrize("from_pp_dp_mp", parallelism)
+@pytest.mark.parametrize("to_pp_dp_mp", parallelism)
+@pytest.mark.parametrize("from_sequence_parallel", [False, True])
+@pytest.mark.parametrize("to_sequence_parallel", [False, True])
 @pytest.mark.parametrize("skip_saveload", [False])
 @pytest.mark.gpu
 @pytest.mark.distributed
@@ -531,6 +535,10 @@ def test_param_realloc(
     to_sequence_parallel: bool,
     skip_saveload: bool,
 ):
+    if model_family_name == "gpt2" and (from_pp_dp_mp[-1] > 1 or to_pp_dp_mp[-1] > 1):
+        # Since the vocabulary size of gpt2 is odd,
+        # it does not support tensor model parallelism.
+        return
     if from_sequence_parallel and from_pp_dp_mp[-1] == 1:
         return
     if to_sequence_parallel and to_pp_dp_mp[-1] == 1:

@@ -55,7 +55,7 @@ class Payload:
             self.ack_reply_id = uuid.uuid4()
 
 
-class NameResolvingRequstClient:
+class NameResolvingRequestClient:
 
     def __init__(
         self,
@@ -277,8 +277,8 @@ def make_master_stream(
     worker_info: system_api.WorkerInformation,
     n_subscribers: int,
     handler_routing: Dict[str | system_api.ModelShardID, int],
-) -> NameResolvingRequstClient:
-    return NameResolvingRequstClient(
+) -> NameResolvingRequestClient:
+    return NameResolvingRequestClient(
         experiment_name=worker_info.experiment_name,
         trial_name=worker_info.trial_name,
         n_subscribers=n_subscribers,
