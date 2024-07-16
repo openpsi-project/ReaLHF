@@ -34,34 +34,6 @@ except ImportError:
 logger = logging.getLogger("FlattenParam")
 
 _FLAT_PARAM_INDICES_CACHE = {}
-_SET_INTERVAL_FN = {}
-_GET_INTERVAL_FN = {}
-
-
-def get_nvcc_cuda_version(cuda_dir: str) -> Version:
-    """Get the CUDA version from nvcc.
-
-    Adapted from https://github.com/NVIDIA/apex/blob/8b7a1ff183741dd8f9b87e7bafd04cfde99cea28/setup.py
-    """
-    nvcc_output = subprocess.check_output(
-        [cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True
-    )
-    output = nvcc_output.split()
-    release_idx = output.index("release") + 1
-    nvcc_cuda_version = parse(output[release_idx].split(",")[0])
-    return nvcc_cuda_version
-
-
-def _torch_dtype_to_cpp_dtype(dtype: torch.dtype) -> str:
-    if dtype == torch.float32:
-        return "float"
-    if dtype == torch.float64:
-        return "double"
-    if dtype == torch.float16:
-        return "at::Half"
-    if dtype == torch.bfloat16:
-        return "at::BFloat16"
-    raise ValueError(f"Unsupported dtype: {dtype}")
 
 
 @dataclasses.dataclass
@@ -88,104 +60,6 @@ def recursive_getattr(obj, attr_string):
     for attr in attrs:
         obj = getattr(obj, attr)
     return obj
-
-
-def _slice_interval_dispatch(N: int) -> Callable:
-    global _GET_INTERVAL_FN
-    if N in _GET_INTERVAL_FN:
-        return _GET_INTERVAL_FN[N]
-    src_path = os.path.join(
-        realhf.__path__[0], os.pardir, "csrc", "interval_op", "slice_interval.cpp"
-    )
-    with open(src_path, "r") as f:
-        src = f.read()
-    # NOTE: We embed the C++ binding code in python docstring because we want to dynamically compile
-    # for a specific template value N. This ensures the optimal performance.
-    lines = src.split("\n")
-    for i, line in enumerate(lines):
-        if "TORCH_EXTENSION_NAME" in line:
-            break
-    src = "\n".join(lines[:i])
-    src += f"""
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{
-  m.def("slice_intervals", &slice_intervals<{N}>, "Slice intervals of a 1D tensor");
-}}
-"""
-    ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
-    logger.info(f">>> Building slice interval extension with N={N}. <<<")
-    slice_fn = torch_cpp_ext.load_inline(
-        f"slice_intervals_{N}",
-        cpp_sources=[src],
-        extra_cflags=[
-            "-O3",
-            "-std=c++17",
-            f"-D_GLIBCXX_USE_CXX11_ABI={ABI}",
-            "-fopenmp",
-        ],
-        extra_ldflags=["-fopenmp"],
-        verbose=False,
-    ).slice_intervals
-    _GET_INTERVAL_FN[N] = slice_fn
-    return slice_fn
-
-
-def _set_interval_dispatch(N: int, torch_dtype: torch.dtype) -> Callable:
-    global _SET_INTERVAL_FN
-    dtype = _torch_dtype_to_cpp_dtype(torch_dtype)
-    if (N, dtype) in _SET_INTERVAL_FN:
-        return _SET_INTERVAL_FN[(N, dtype)]
-
-    src_path = os.path.join(
-        realhf.__path__[0], os.pardir, "csrc", "interval_op", "set_interval.cu"
-    )
-    with open(src_path, "r") as f:
-        src = f.read()
-    # NOTE: We embed the C++ binding code in python docstring because we want to dynamically compile
-    # for a specific template value N. This ensures the optimal performance.
-    lines = src.split("\n")
-    for i, line in enumerate(lines):
-        if "TORCH_EXTENSION_NAME" in line:
-            break
-    src = "\n".join(lines[:i])
-    src += f"""
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{
-  m.def("set_intervals", &set_intervals<{N}, {dtype}>, "Set intervals of a 1D tensor");
-}}
-"""
-    ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
-    NVCC_FLAGS = ["-O3", "-std=c++17", f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
-    nvcc_cuda_version = get_nvcc_cuda_version(torch_cpp_ext.CUDA_HOME)
-    # Use NVCC threads to parallelize the build.
-    if nvcc_cuda_version >= Version("11.2"):
-        nvcc_threads = int(os.getenv("NVCC_THREADS", 8))
-        num_threads = min(os.cpu_count(), nvcc_threads)
-        NVCC_FLAGS += ["--threads", str(num_threads)]
-
-    if nvcc_cuda_version >= Version("11.8"):
-        NVCC_FLAGS += ["-DENABLE_FP8_E5M2"]
-    NVCC_FLAGS += torch_cpp_ext.COMMON_NVCC_FLAGS
-    REMOVE_NVCC_FLAGS = [
-        "-D__CUDA_NO_HALF_OPERATORS__",
-        "-D__CUDA_NO_HALF_CONVERSIONS__",
-        "-D__CUDA_NO_BFLOAT16_CONVERSIONS__",
-        "-D__CUDA_NO_HALF2_OPERATORS__",
-    ]
-    for flag in REMOVE_NVCC_FLAGS:
-        with contextlib.suppress(ValueError):
-            torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
-    logger.info(
-        f">>> Building set interval extension with N={N} and dtype={dtype}. <<<"
-    )
-    set_fn = torch_cpp_ext.load_inline(
-        f"set_intervals_{N}_{str(torch_dtype).split('.')[1]}",
-        cpp_sources=[],
-        cuda_sources=[src],
-        extra_cuda_cflags=NVCC_FLAGS,
-        with_cuda=True,
-        verbose=False,
-    ).set_intervals
-    _SET_INTERVAL_FN[(N, dtype)] = set_fn
-    return set_fn
 
 
 def _slice_intervals_py(src: torch.Tensor, intervals: List[Tuple[int, int]]):
@@ -216,60 +90,100 @@ def _set_intervals_py(
     assert offset == src.shape[0]
 
 
+_SLICE_INTERVAL_EXT_WARNED = False
+_SET_INTERVAL_EXT_WARNED = False
+
+
 def slice_intervals(
     src: torch.Tensor,
-    intervals: List[Tuple[int, int]],
-    opt_level: int = 1,
+    intervals_cpu: List[Tuple[int, int]] = None,
+    intervals_cuda: torch.Tensor = None,
+    output_size: int = None,
+    max_interval_size: Optional[int] = None,
 ):
-    if opt_level == 0 or len(intervals) < 1000:
-        # NOTE: The C++ implementation has no negative effect, but for small Ns
-        # using the python implementation can omit compliation.
-        return _slice_intervals_py(src, intervals)
-    elif opt_level == 1:
-        try:
-            from realhf._C.slice_interval_cuda import (
-                _slice_intervals as _slice_intervals_cpp,
-            )
-
-            return _slice_intervals_cpp(src, intervals)
-        except ImportError:
-            return _slice_intervals_py(src, intervals)
+    if intervals_cpu is not None:
+        N = len(intervals_cpu)
     else:
-        slice_fn = _slice_interval_dispatch(len(intervals))
-        return slice_fn(src, intervals)
+        N = intervals_cuda.size(0)
+    if N < 1024:
+        # NOTE: The CUDA implementation will launch a thread for each interval,
+        # which has a negative effect when the number of intervals is small.
+        return _slice_intervals_py(src, intervals_cpu)
+    try:
+        from realhf._C.interval_op_cuda import (
+            slice_intervals_bf16,
+            slice_intervals_fp16,
+            slice_intervals_fp32,
+        )
+
+        if src.dtype == torch.float32:
+            return slice_intervals_fp32(
+                src, intervals_cuda, output_size, max_interval_size
+            )
+        elif src.dtype == torch.float16:
+            return slice_intervals_fp16(
+                src, intervals_cuda, output_size, max_interval_size
+            )
+        elif src.dtype == torch.bfloat16:
+            return slice_intervals_bf16(
+                src, intervals_cuda, output_size, max_interval_size
+            )
+        else:
+            raise NotImplementedError(src.dtype)
+    except ImportError:
+        global _SLICE_INTERVAL_EXT_WARNED
+        if not _SLICE_INTERVAL_EXT_WARNED:
+            _SLICE_INTERVAL_EXT_WARNED = True
+            logger.warning(
+                f"The `slice_interval` extension not found. "
+                "Fallback to python, which can be very slow. "
+                "You should re-install the package with REAL_CUDA=1 or "
+                "set REAL_PARAM_REALLOC_OPT_LEVEL=1."
+            )
+        return _slice_intervals_py(src, intervals_cpu)
 
 
 def set_intervals(
     src: torch.Tensor,
     dst: torch.Tensor,
-    intervals: List[Tuple[int, int]],
-    opt_level: int = 1,
+    intervals_cpu: List[Tuple[int, int]] = None,
+    intervals_cuda: torch.Tensor = None,
+    max_interval_size: Optional[int] = None,
 ):
-    if opt_level == 0 or len(intervals) < 2048 or not (src.is_cuda and dst.is_cuda):
+    if intervals_cpu is not None:
+        N = len(intervals_cpu)
+    else:
+        N = intervals_cuda.size(0)
+    if N < 512 or not (src.is_cuda and dst.is_cuda):
         # NOTE: The CUDA implementation will launch a thread for each interval,
         # which has a negative effect when the number of intervals is small.
-        return _set_intervals_py(src, dst, intervals)
-    elif opt_level == 1:
-        try:
-            from realhf._C.set_interval_cuda import (
-                _set_intervals_bf16,
-                _set_intervals_fp16,
-                _set_intervals_fp32,
-            )
+        return _set_intervals_py(src, dst, intervals_cpu)
+    try:
+        from realhf._C.interval_op_cuda import (
+            set_intervals_bf16,
+            set_intervals_fp16,
+            set_intervals_fp32,
+        )
 
-            if src.dtype == torch.float32:
-                return _set_intervals_fp32(src, dst, intervals)
-            elif src.dtype == torch.float16:
-                return _set_intervals_fp16(src, dst, intervals)
-            elif src.dtype == torch.bfloat16:
-                return _set_intervals_bf16(src, dst, intervals)
-            else:
-                raise NotImplementedError(src.dtype)
-        except ImportError:
-            return _set_intervals_py(src, dst, intervals)
-    else:
-        set_fn = _set_interval_dispatch(len(intervals), src.dtype)
-        return set_fn(src, dst, intervals)
+        if src.dtype == torch.float32:
+            return set_intervals_fp32(src, dst, intervals_cuda, max_interval_size)
+        elif src.dtype == torch.float16:
+            return set_intervals_fp16(src, dst, intervals_cuda, max_interval_size)
+        elif src.dtype == torch.bfloat16:
+            return set_intervals_bf16(src, dst, intervals_cuda, max_interval_size)
+        else:
+            raise NotImplementedError(src.dtype)
+    except ImportError:
+        global _SET_INTERVAL_EXT_WARNED
+        if not _SET_INTERVAL_EXT_WARNED:
+            _SET_INTERVAL_EXT_WARNED = True
+            logger.warning(
+                f"The `set_interval` extension not found. "
+                "Fallback to python, which can be very slow. "
+                "You should re-install the package with REAL_CUDA=1 or "
+                "set REAL_PARAM_REALLOC_OPT_LEVEL=1."
+            )
+        return _set_intervals_py(src, dst, intervals_cpu)
 
 
 def param_size_from_keys(

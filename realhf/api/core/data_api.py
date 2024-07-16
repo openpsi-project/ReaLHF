@@ -100,7 +100,7 @@ class SequenceSample:
 
     data: Optional[Dict[str, torch.Tensor | None]] = None
 
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, List[Any]] = Field(default_factory=dict)
 
     @field_validator("ids")
     @classmethod
@@ -235,14 +235,15 @@ class SequenceSample:
             assert all(s.data is None for s in samples)
             data = None
         id_ = sum([s.ids for s in samples], [])
-        metadata = {}
-        for sample in samples:
-            for k, v in sample.metadata.items():
-                if k in metadata and metadata[k] != v:
-                    raise ValueError(
-                        f"Metadata {k} is not the same: {v} and {metadata[k]}."
-                    )
-                metadata[k] = v
+        # For metadata, assuming that all metadata have the same keys,
+        # simply convert a list of dicts to a dict of lists.
+        if not all(
+            set(s.metadata.keys()) == set(samples[0].metadata.keys()) for s in samples
+        ):
+            raise ValueError("Metadata keys are not the same.")
+        metadata = {
+            k: sum([s.metadata[k] for s in samples], []) for k in samples[0].metadata
+        }
         return cls(
             keys=keys,
             dtypes={key: samples[0].dtypes[key] for key in keys},
@@ -291,6 +292,11 @@ class SequenceSample:
             for k in self.keys:
                 data_offset[k] += _data_len[k]
             new_id = self.ids[start:end]
+            for k, v in self.metadata.items():
+                if not isinstance(v, list):
+                    raise ValueError(
+                        f"Unknown how to split non-list metadata: ({k}, {v})."
+                    )
             samples.append(
                 SequenceSample(
                     dtypes=self.dtypes,
@@ -299,7 +305,7 @@ class SequenceSample:
                     ids=new_id,
                     seqlens=new_seqlens,
                     data=new_data,
-                    metadata=self.metadata,
+                    metadata={k: v[start:end] for k, v in self.metadata.items()},
                 )
             )
         return samples
@@ -411,6 +417,13 @@ class SequenceSample:
         dtypes = {
             key: data[key].dtype if data[key] is not None else None for key in keys
         }
+        if metadata is None:
+            metadata = {}
+        for k, v in metadata.items():
+            if not isinstance(v, list) or len(v) != len(seqlens):
+                raise ValueError(
+                    f"Metadata {k} should be a list of length {len(seqlens)}: {v}."
+                )
         return cls(
             keys=keys,
             ids=ids,
@@ -418,7 +431,7 @@ class SequenceSample:
             trailing_shapes=trailing_shapes,
             dtypes=dtypes,
             data=data,
-            metadata=metadata if metadata is not None else {},
+            metadata=metadata,
         )
 
     def remap_keys_(self, remap: Dict[str, str]):
