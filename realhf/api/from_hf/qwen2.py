@@ -5,6 +5,15 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
+from realhf.base.testing import (
+    TESTING_MODEL_HEAD_DIM,
+    TESTING_MODEL_HIDDEN_SIZE,
+    TESTING_MODEL_INTERMEDIATE_SIZE,
+    TESTING_MODEL_N_HEADS,
+    TESTING_MODEL_N_LAYERS,
+    TESTING_MODEL_N_POSITIONS,
+    TESTING_MODEL_VOCAB_SIZE,
+)
 
 from .llama import (
     convert_state_dict_llama,
@@ -66,11 +75,12 @@ def convert_config_back_qwen2(
 
 def qwen2_config_maker():
     hf_config = transformers.Qwen2Config(
-        vocab_size=200,
-        hidden_size=128,
-        intermediate_size=200,
-        num_hidden_layers=8,
-        num_attention_heads=8,
+        vocab_size=TESTING_MODEL_VOCAB_SIZE,
+        max_position_embeddings=TESTING_MODEL_N_POSITIONS,
+        hidden_size=TESTING_MODEL_HIDDEN_SIZE,
+        intermediate_size=TESTING_MODEL_INTERMEDIATE_SIZE,
+        num_hidden_layers=TESTING_MODEL_N_LAYERS,
+        num_attention_heads=TESTING_MODEL_N_HEADS,
         num_key_value_heads=8,
         hidden_act="silu",
         rms_norm_eps=1e-5,

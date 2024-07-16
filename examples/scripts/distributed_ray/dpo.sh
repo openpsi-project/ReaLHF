@@ -34,11 +34,11 @@ python3 -m realhf.apps.quickstart dpo \
     trial_name=$TRIAL_NAME \
     exp_ctrl.total_train_epochs=2 \
     exp_ctrl.save_freq_steps=null \
-    n_nodes=1 \
+    n_nodes=2 \
     allocation_mode=manual \
     actor.type._class=$MODEL_FAMILY \
     actor.path=$PRETRAINED_PATH \
-    actor_train.parallel.pipeline_parallel_size=2 \
+    actor_train.parallel.pipeline_parallel_size=4 \
     actor_train.parallel.model_parallel_size=1 \
     actor_train.parallel.data_parallel_size=4 \
     actor_train.parallel.use_sequence_parallel=True \
@@ -46,7 +46,7 @@ python3 -m realhf.apps.quickstart dpo \
     ref.path=$PRETRAINED_PATH \
     ref_inf.parallel.pipeline_parallel_size=4 \
     ref_inf.parallel.model_parallel_size=1 \
-    ref_inf.parallel.data_parallel_size=2 \
+    ref_inf.parallel.data_parallel_size=4 \
     ref_inf.parallel.use_sequence_parallel=True \
     dataset.train_path=/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl \
     dataset.max_pairs_per_prompt=2 \

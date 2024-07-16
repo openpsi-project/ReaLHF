@@ -3,7 +3,7 @@ from typing import Callable, Dict, List, Optional
 import torch.utils.data
 
 from realhf.api.core import data_api
-from realhf.base import logging, namedarray
+from realhf.base import logging
 
 logger = logging.getLogger("Prompt Dataset")
 
@@ -16,7 +16,6 @@ class PromptDataset(torch.utils.data.Dataset):
         max_length: Optional[int] = None,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
-        pad_to_max_length: bool = False,
     ):
         """A dataset with prompts. Usually used for PPO.
 
@@ -28,7 +27,6 @@ class PromptDataset(torch.utils.data.Dataset):
                 a key "prompt". Defaults to None.
             dataset_builder (Optional[Callable[[], List[Dict]]], optional): Alternative to dataset_path.
                 A callable that returns a list of dictionary. Defaults to None.
-            pad_to_max_length (bool): Whether to pad the prompts to max_length. Defaults to False.
         """
         self._util = util
         self.max_length = max_length
@@ -36,12 +34,13 @@ class PromptDataset(torch.utils.data.Dataset):
         data = data_api.load_shuffle_split_dataset(util, dataset_path, dataset_builder)
 
         prompts_str = [x["prompt"] for x in data]
+        self.ids = [x["id"] for x in data]
         util.tokenizer.padding_side = "left"
         prompt_encodings = util.tokenizer(
             prompts_str,
             truncation=True,
             max_length=max_length,
-            padding=pad_to_max_length,
+            padding=False,
             return_length=True,
             return_attention_mask=False,
         )
@@ -60,11 +59,11 @@ class PromptDataset(torch.utils.data.Dataset):
         return len(self.prompts)
 
     def __getitem__(self, idx):
-        x = namedarray.NamedArray(
-            packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long),
+        return data_api.SequenceSample.from_default(
+            ids=[self.ids[idx]],
+            seqlens=[self.prompt_lengths[idx]],
+            data=dict(packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long)),
         )
-        x.register_metadata(seqlens=[self.prompt_lengths[idx]])
-        return x
 
 
 data_api.register_dataset("prompt", PromptDataset)

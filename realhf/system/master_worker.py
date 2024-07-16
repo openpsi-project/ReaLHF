@@ -28,13 +28,12 @@ import realhf.system.request_reply_stream as request_reply_stream
 import realhf.system.worker_base as worker_base
 from realhf.api.core.config import ModelName
 from realhf.api.core.model_api import ReaLModelConfig
-from realhf.base import datapack, logging, namedarray, timeutil, topology
+from realhf.base import datapack, logging, timeutil, topology
 from realhf.base.asyncio_utils import (
     raise_asyncio_exception,
     setup_run_until_complete,
     teardown_run_util_complete,
 )
-from realhf.base.cluster import spec as cluster_spec
 from realhf.base.constants import MODEL_SAVE_ROOT
 from realhf.base.monitor import (
     caculuate_llama_forward_flops,
@@ -67,10 +66,10 @@ class ExperimentComplete(Exception):
 
 
 def request_all(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[str],
     handle_type: str,
-    datas: List[namedarray.NamedArray],
+    datas: List,
     verbose: bool = True,
 ):
     requests = [
@@ -116,7 +115,7 @@ def create_exact_match_pattern(string_list: List[Union[uuid.UUID, str]]) -> re.P
 
 
 async def _awaitable_response(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     pattern: re.Pattern | None,
 ) -> request_reply_stream.Payload:
     while True:
@@ -128,7 +127,7 @@ async def _awaitable_response(
 
 
 async def gather_all_replies(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     request_ids: List[str],
     verbose: bool = True,
 ) -> List:
@@ -147,12 +146,12 @@ async def gather_all_replies(
 
 
 async def group_rpc_blocked(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[Union[config_pkg.ModelShardID, str]],
     handle_type: str,
-    datas: List[namedarray.NamedArray],
+    datas: List,
     verbose: bool = True,
-) -> List[namedarray.NamedArray]:
+) -> List:
     payloads = await gather_all_replies(
         stream,
         request_all(stream, handlers, handle_type, datas, verbose=verbose),
@@ -161,7 +160,7 @@ async def group_rpc_blocked(
 
 
 def _request_parameter_sync(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     from_model_name: ModelName,
     to_model_name: ModelName,
@@ -276,7 +275,8 @@ class RPCCorountineControl:
     # for synchronizing req ids between req and reply coroutines
     request_queues: Dict[str, asyncio.Queue]
 
-    training_buffer_indices: Set[int] = dataclasses.field(default_factory=set)
+    # for training data management and data cleaning after each step
+    ids_to_clear: Set[int] = dataclasses.field(default_factory=set)
     data_amount: InterfaceDataAmount = dataclasses.field(
         default_factory=InterfaceDataAmount
     )
@@ -361,7 +361,7 @@ def _attach_payloads_with_hooks(
 
 async def scatter_tensor_to_mws(
     rpc: dfg.MFCDef,
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | ReaLModelConfig],
@@ -369,8 +369,7 @@ async def scatter_tensor_to_mws(
     producer_name2producer_handlers: Dict[str, List[config_pkg.ModelShardID]],
     producer_mappings: Dict[str, Dict[str, List[int]]],
     target_mapping: Dict[str, List[int]],
-    buffer_indices: List[int],
-    seqlens: List[int],
+    meta_sample: data_api.SequenceSample,
     handlers: List[config_pkg.ModelShardID],
 ) -> List[uuid.UUID]:
 
@@ -382,8 +381,7 @@ async def scatter_tensor_to_mws(
         "target_mapping": target_mapping,
         "handle_name": rpc.interface_type.value,
         "rpc_name": rpc.name,
-        "buffer_indices": buffer_indices,
-        "seqlens": seqlens,
+        "meta_sample": meta_sample,
     }
 
     payloads = {
@@ -392,6 +390,7 @@ async def scatter_tensor_to_mws(
             handle_name=rpc.interface_type.value,
             pre_hooks=["data_transfer"],
             pre_hook_data=[dt_data],
+            data=rpc.name,
         )
         for handler in handlers
     }
@@ -454,13 +453,15 @@ async def model_rpc_request_func(
     rpc: dfg.MFCDef,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
     src_rpc_model_name: ModelName,
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     buffer: AsyncIOSequenceBuffer,
-    data_owner: Dict[Tuple[int, str], Tuple[str, int]],
+    data_owner: Dict[Tuple[int, str], Tuple[ModelName, int]],
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
     model_configs: Dict[str, None | ReaLModelConfig],
     ctrl: RPCCorountineControl,
 ):
+    """The corountine for sending requests to model workers."""
+
     topo = model_topos[rpc.model_name]
     handlers = [
         config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, j)
@@ -498,65 +499,73 @@ async def model_rpc_request_func(
         # Ensure that parent RPCs will not be over-consumed.
         while any(
             this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.n_seqs
-            for c in rpc.children
+            for c in rpc.all_successors()
         ):
             await asyncio.sleep(0.1)
 
-        sample = await buffer.get_batch_for_rpc(rpc)
+        buf_indices, sample = await buffer.get_batch_for_rpc(rpc)
 
         if rpc.is_src:
-            ctrl.training_buffer_indices = ctrl.training_buffer_indices.union(
-                sample.indices
-            )
+            ctrl.ids_to_clear = ctrl.ids_to_clear.union(sample.ids)
             ctrl.used_hash_vals_this_epoch = ctrl.used_hash_vals_this_epoch.union(
-                sample.hash_vals
+                sample.ids
             )
 
+        # Record the data amount for each interface to compute FLOPs.
+        # Since the user may arbitrarily specify input/output keys,
+        # we can only try to find the most probable key name for computing FLOPs.
+        # If such keys do not exist, we will use the key with the longest
+        # sequence length in this model function call.
+        acc_seqlens = {
+            k: sum(x.sum() for x in slens) for k, slens in sample.seqlens.items()
+        }
+        seqlen_key = max(sample.seqlens, key=acc_seqlens.get)
+        flops_seqlens = [x.sum() for x in sample.seqlens[seqlen_key]]
         if rpc.interface_type == dfg.ModelInterfaceType.GENERATE:
             ctrl.data_amount.gen_configs.append(model_configs[rpc.model_name])
-            ctrl.data_amount.gen_bs.append(len(sample.seqlens))
+            ctrl.data_amount.gen_bs.append(sample.bs)
             ctrl.data_amount.gen_len.append(
                 rpc.interface_impl.args["generation_config"]["min_new_tokens"]
             )
-            ctrl.data_amount.prompt_lens.append(sample.seqlens)
+            ctrl.data_amount.prompt_lens.append(flops_seqlens)
         elif rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP:
             ctrl.data_amount.train_configs.append(model_configs[rpc.model_name])
-            ctrl.data_amount.train_bs.append(len(sample.seqlens))
-            ctrl.data_amount.train_seqlens.append(sample.seqlens)
+            ctrl.data_amount.train_bs.append(sample.bs)
+            ctrl.data_amount.train_seqlens.append(flops_seqlens)
         elif rpc.interface_type == dfg.ModelInterfaceType.INFERENCE:
             ctrl.data_amount.inf_configs.append(model_configs[rpc.model_name])
-            ctrl.data_amount.inf_bs.append(len(sample.seqlens))
-            ctrl.data_amount.inf_seqlens.append(sample.seqlens)
+            ctrl.data_amount.inf_bs.append(sample.bs)
+            ctrl.data_amount.inf_seqlens.append(flops_seqlens)
 
-        this_rpc_consumed_seqs += len(sample.seqlens)
+        this_rpc_consumed_seqs += sample.bs
 
         # logger.info(f"Model rpc {rpc.name} requesting.")
+
+        # Dispatch data to different data parallel ranks.
         dp_size = topo.get_dim("data")
         if rpc.balanced_dp:
-            assert len(sample.seqlens) % dp_size == 0
-            min_n_seqs_per_dp = len(sample.seqlens) // dp_size
+            assert sample.bs % dp_size == 0
+            min_n_seqs_per_dp = sample.bs // dp_size
         else:
             min_n_seqs_per_dp = 1
-        partitions = datapack.min_abs_diff_partition(
-            np.array(sample.seqlens, dtype=np.int32),
-            dp_size,
-            min_size=min_n_seqs_per_dp,
-        )
+        split_spec = sample.get_split_spec(dp_size, min_size=min_n_seqs_per_dp)
+        partitions = split_spec.partitions
         target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
 
         # Set data owner of produced data by this RPC, such that downstream RPCs can know
-        # whether to fetch these data.
+        # where to fetch these data.
         for dp_idx, (st, ed) in enumerate(partitions):
             for i in range(st, ed):
                 for k in rpc.output_keys:
-                    data_owner[sample.indices[i], k] = (rpc.model_name, dp_idx)
+                    data_owner[sample.ids[i], k] = (rpc.model_name, dp_idx)
 
         # Get the data owner of this RPC's input data.
-        producer_mappings: Dict[Tuple[str, str], List[Tuple[int, int]]] = {}
+        # We use it to determine the source of data transfer.
+        producer_mappings = {}
         for k in rpc.input_keys:
             names, dp_indices = [], []
-            for buf_idx in sample.indices:
-                owner_name, dp_idx = data_owner[(buf_idx, k)]
+            for sample_id in sample.ids:
+                owner_name, dp_idx = data_owner[(sample_id, k)]
                 names.append(owner_name)
                 dp_indices.append(dp_idx)
             assert len(set(names)) == 1
@@ -577,17 +586,18 @@ async def model_rpc_request_func(
             producer_name2producer_handlers=producer_name2producer_handlers,
             producer_mappings=producer_mappings,
             target_mapping=target_mapping,
-            buffer_indices=sample.indices,
-            seqlens=sample.seqlens,
+            meta_sample=sample,
             handlers=handlers,
         )
-        await request_queue.put((req_ids, other_req_ids, time.perf_counter()))
+        await request_queue.put(
+            (buf_indices, req_ids, other_req_ids, time.perf_counter())
+        )
         logger.info(f"Model rpc {rpc.name} requested.")
 
 
 async def model_rpc_reply_func(
     rpc: dfg.MFCDef,
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     buffer: AsyncIOSequenceBuffer,
     model_topos: Dict[str, topology.PipeModelDataParallelTopology],
     ctrl: RPCCorountineControl,
@@ -598,18 +608,17 @@ async def model_rpc_reply_func(
         topo.get_rank(data=i, pipe=topo.get_dim("pipe") - 1, model=0)
         for i in range(dp_size)
     ]
-    dp_head_handlers = [
-        config_pkg.ModelShardID.from_parallelism_rank(rpc.model_name, topo, i)
-        for i in dp_head_indices
-    ]
 
     request_queue = ctrl.request_queues[rpc.name]
     can_do_rpc = ctrl.can_do_rpc[rpc.name]
 
     while not ctrl.stop.is_set():
-        req_ids, other_req_ids, tik = await request_queue.get()
+        # Wait for master worker's request.
+        buf_indices, req_ids, other_req_ids, tik = await request_queue.get()
 
-        # empty requests with parameter synchronization hooks may be issued
+        # First, wait for all side-effect requests to finish.
+        # Side-effect or empty requests are required for data transfer
+        # and parameter synchronization.
         await asyncio.gather(
             *[
                 _awaitable_response(
@@ -619,6 +628,7 @@ async def model_rpc_reply_func(
             ]
         )
 
+        # Then, wait for all main requests to finish.
         responses = await asyncio.gather(
             *[
                 _awaitable_response(
@@ -629,38 +639,35 @@ async def model_rpc_reply_func(
         )
         # logger.info(f"rpc {rpc.name} received responses {req_ids}")
 
+        # Filter out responses other than DP heads.
+        # Other repsonses are duplicated or None.
         responses: List[request_reply_stream.Payload] = [
             responses[i] for i in dp_head_indices
         ]
-        recv_tik = time.perf_counter()
 
-        if (
-            isinstance(responses[-1].data, dict)
-            and responses[-1].data.get("seqlens") is not None
-        ):
-            res = []
-            for k in responses[0].data["keys"]:
-                res.append(k)
+        # If the returned data is a SequenceSample, it is the data returned by
+        # model function calls. The data shoulbe be amended into buffer.
+        # Otherwise, it's the train statistics and should be reduced and logged.
+        if isinstance(responses[-1].data, data_api.SequenceSample):
+            res = data_api.SequenceSample.gather([r.data for r in responses])
         else:
             res = _gather_stat([response.data for response in responses])
 
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
 
+        # Release the semaphore to let the request corountine continue running.
         can_do_rpc.release()
         ctrl.rpc_traversal[rpc.name] += 1
 
+        # If this RPC is the final node in the dataflow graph,
+        # update the train counter.
+        # Otherwise, amend data in the buffer.
         if rpc.is_dst:
             await ctrl.train_count.put(1)
         else:
-            buffer_indices = sum(
-                [response.data["buffer_indices"] for response in responses], []
-            )
-            keys = res
-            seqlens = sum([response.data["seqlens"] for response in responses], [])
-            await buffer.amend_batch(
-                buffer_indices, [(keys, seqlen) for seqlen in seqlens]
-            )
+            logger.info(f"Amending RPC {rpc.name} output keys: {res.keys}")
+            await buffer.amend_batch(buf_indices, res.unpack())
 
         logger.info(
             f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s."
@@ -672,8 +679,8 @@ async def load_data_func(
     src_rpc_dp_size: int,
     src_rpc_model_name: str,
     buffer: AsyncIOSequenceBuffer,
-    data_owner: Dict[Tuple[int, str], Tuple[str, int]],
-    stream: request_reply_stream.NameResolvingRequstClient,
+    data_owner: Dict[Tuple[int, str], Tuple[ModelName, int]],
+    stream: request_reply_stream.NameResolvingRequestClient,
     ctrl: RPCCorountineControl,
 ):
     while not ctrl.stop.is_set():
@@ -682,10 +689,17 @@ async def load_data_func(
         blogger.info(f"Filling data into the buffer in a new epoch.")
         fetch_data_start = time.perf_counter()
 
-        loaded_data_batches = []
+        # NOTE: PyTorch dataloader will shuffle data for us.
+        all_data: List[data_api.SequenceSample] = []
+        received_ids = set()
 
+        # NOTE: Currently we send dataloading requests until iterating
+        # over the entire dataset. This may lead to a huge memory waste
+        # with super-large datasets. Empirically, it's fine.
         is_final_batch = False
         while not is_final_batch:
+            # Send request to model workers to get the specification of data.
+            # Data itself is not transferred to the master worker.
             data_batches: List[data_api.DataBatchMeta] = await group_rpc_blocked(
                 stream,
                 handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
@@ -695,77 +709,65 @@ async def load_data_func(
             )
             cur_epoch = data_batches[0].epoch
 
-            loaded_data_batches += data_batches
+            # Unpack batched sequences into individual sequences.
+            for x in data_batches:
+                for xx in x.meta_sample.unpack():
+                    all_data.append(xx)
+                    if xx.ids[0] in received_ids:
+                        raise ValueError(
+                            f"Duplicate data id {xx.ids[0]}. Is the final batch? {is_final_batch}."
+                        )
+                    received_ids.add(xx.ids[0])
+
+            # Store the owner information of the data.
+            # RPCs corountines will use this information to
+            # determine the src and dst of data transfer.
+            for dp_rank, db_meta in enumerate(data_batches):
+                for s in db_meta.meta_sample.unpack():
+                    for k in s.keys:
+                        data_owner[(s.ids[0], k)] = (src_rpc_model_name, dp_rank)
 
             is_final_batch = data_batches[0].is_final_batch
             assert all(is_final_batch == x.is_final_batch for x in data_batches)
 
-        # PyTorch dataloader will shuffle data for us.
-        all_data = []
-        for x in loaded_data_batches:
-            all_data += data_api.unpack_data_batch(x)
-
         steps_per_epoch = len(all_data) // src_rpc.n_seqs
-        avg_tokens_per_batch = sum(x.seqlens[0] for x in all_data) / steps_per_epoch
+        # Since different keys may have different sequence lengths, we cannot
+        # count tokens accurately. Here we just assume that the key with the
+        # longest sequence length is the number of tokens.
+        seqlens = [max(v[0].sum() for v in x.seqlens.values()) for x in all_data]
+        avg_tokens_per_batch = sum(seqlens) / steps_per_epoch
         logger.info(
             f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "
             f"Each batch has {avg_tokens_per_batch:.2f} tokens in average."
         )
         await ctrl.data_spec_queue.put((steps_per_epoch, avg_tokens_per_batch))
 
-        dp_data_batches = [0 for _ in range(src_rpc_dp_size)]
-        for x in all_data:
-            dp_data_batches[x.dp_rank] += 1
-
-        assert all(len(x.seqlens) == 1 for x in all_data)
-        seqlens = np.array([x.seqlens[0] for x in all_data], dtype=np.int32)
-
+        # Reorder loaded (meta-)data and store them into the buffer.
         # NOTE: The reordered indices prioritize longer sequences for detecting OOM errors early.
         reorder_indices, _ = datapack.reorder_to_balanced_batches(
-            seqlens, src_rpc.n_seqs
+            np.array(seqlens), src_rpc.n_seqs
         )
-        recover_indices = np.argsort(reorder_indices)
-        all_data: List[data_api.DataBatchMeta] = [all_data[i] for i in reorder_indices]
+        all_data: List[data_api.SequenceSample] = [all_data[i] for i in reorder_indices]
 
-        keys = all_data[0].keys
-        batch = [(keys, x.seqlens[0], x.hash_vals[0]) for x in all_data]
         if ctrl.is_recover_epoch:
-            batch = list(
+            all_data = list(
                 filter(
-                    lambda x: x[2] not in ctrl.hash_vals_to_ignore_in_recover,
-                    batch,
+                    lambda x: x.ids[0] not in ctrl.hash_vals_to_ignore_in_recover,
+                    all_data,
                 )
             )
-        buffer_indices = await buffer.put_batch(batch)
 
-        all_data = [all_data[i] for i in recover_indices]
-        buffer_indices = [buffer_indices[i] for i in recover_indices]
+        # Store into buffer!
+        buffer_indices = await buffer.put_batch(all_data)
         assert len(buffer_indices) == len(all_data)
 
-        for k in keys:
-            for buf_idx, x in zip(buffer_indices, all_data):
-                data_owner[(buf_idx, k)] = (src_rpc_model_name, x.dp_rank)
-
-        store_buffer_indices = [[] for _ in range(src_rpc_dp_size)]
-        for buf_idx, x in zip(buffer_indices, all_data):
-            store_buffer_indices[x.dp_rank].append(buf_idx)
-
-        for x, y in zip(store_buffer_indices, dp_data_batches):
-            assert len(x) == y, (len(x), y)
-
-        await group_rpc_blocked(
-            stream,
-            handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
-            handle_type="store",
-            datas=store_buffer_indices,
-            verbose=False,
-        )
-
+        # Awake other model RPC corountines to start running the dataflow graph.
         async with buffer.lock:
             buffer.lock.notify(buffer.n_rpcs)
 
         blogger.info(
-            f"Filling data finished. Time consumption: {time.perf_counter() - fetch_data_start:.3f}s."
+            f"Filling data finished. Time consumption: "
+            f"{time.perf_counter() - fetch_data_start:.3f}s."
         )
 
 
@@ -782,13 +784,14 @@ def _gather_stat(src: List[Dict]) -> Dict:
     for k, v in res.items():
         if any(abs(v - x.get(k, None)) > 1e-4 for x in src):
             logger.warning(
-                f"Gathered `{k}` is not all-reduced before returning: ({[x.get(k, None) for x in src]}, {v})."
+                f"Gathered `{k}` is not all-reduced "
+                f"before returning: ({[x.get(k, None) for x in src]}, {v})."
             )
     return res
 
 
 async def model_eval_thread_func(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[config_pkg.ModelShardID],
     eval_queue: asyncio.Queue,
     stop_ctl: asyncio.Event,
@@ -805,7 +808,7 @@ async def model_eval_thread_func(
 
 
 async def model_save_thread_func(
-    stream: request_reply_stream.NameResolvingRequstClient,
+    stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[config_pkg.ModelShardID],
     model_save_root: str,
     save_queue: asyncio.Queue,
@@ -932,7 +935,7 @@ class MasterWorker(worker_base.Worker):
             n_subscribers=self.config.n_model_workers,
             handler_routing=handler_routing,
         )
-        self.__stream: request_reply_stream.NameResolvingRequstClient
+        self.__stream: request_reply_stream.NameResolvingRequestClient
 
         src_rpc = [rpc for rpc in self.config.model_rpcs if rpc.is_src][0]
         src_rpc_model_name = src_rpc.model_name
@@ -1094,8 +1097,7 @@ class MasterWorker(worker_base.Worker):
             model_ft_specs = [ft_spec] * topo.world_size()
 
             # Reallocate parameters if necessary.
-            if model_name.role in _initialized_roles:
-                assert model_name in _param_recevers
+            if model_name.role in _initialized_roles and model_name in _param_recevers:
                 _param_realloc_src = _param_senders[_param_recevers.index(model_name)]
                 _request_parameter_sync(
                     stream=self.__stream,
@@ -1118,7 +1120,7 @@ class MasterWorker(worker_base.Worker):
             event_loop.run_until_complete(asyncio.gather(_task))[0]
 
             # Reallocate parameters back.
-            if model_name.role in _initialized_roles:
+            if model_name.role in _initialized_roles and model_name in _param_recevers:
                 # Reversely sync parameters
                 _request_parameter_sync(
                     stream=self.__stream,
@@ -1434,12 +1436,9 @@ class MasterWorker(worker_base.Worker):
             self.__stream,
             [vs[0] for vs in self.__mwid2msids.values()],
             "clear_data_cache",
-            [
-                self.__rpc_ctrl.training_buffer_indices
-                for _ in self.__all_model_handlers
-            ],
+            [self.__rpc_ctrl.ids_to_clear for _ in self.__all_model_handlers],
         )
-        self.__rpc_ctrl.training_buffer_indices.clear()
+        self.__rpc_ctrl.ids_to_clear.clear()
 
         return worker_base.PollResult(sample_count=1, batch_count=1)
 

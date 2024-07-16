@@ -14,16 +14,8 @@ import pytest
 import torch
 import torch.utils.data
 
-import realhf.api.core.data_api as data_api
-from realhf.base import (
-    constants,
-    gpu_utils,
-    logging,
-    name_resolve,
-    namedarray,
-    names,
-    topology,
-)
+from realhf.api.core.data_api import SequenceSample
+from realhf.base import constants, gpu_utils, logging, name_resolve, names, topology
 from realhf.base.topology import ParallelGrid, PipeModelDataParallelTopology
 
 logger = logging.getLogger("testing")
@@ -31,6 +23,14 @@ logger = logging.getLogger("testing")
 MODEL_NAME = "default"
 _DEFAULT_EXPR_NAME = "test"
 _DEFAULT_TRIAL_NAME = "test"
+
+TESTING_MODEL_VOCAB_SIZE = 32
+TESTING_MODEL_N_POSITIONS = 32
+TESTING_MODEL_INTERMEDIATE_SIZE = 32
+TESTING_MODEL_HIDDEN_SIZE = 16
+TESTING_MODEL_HEAD_DIM = 2
+TESTING_MODEL_N_LAYERS = 8
+TESTING_MODEL_N_HEADS = 8
 
 
 class StandaloneTestingProcess(mp.Process):
@@ -70,7 +70,8 @@ class StandaloneTestingProcess(mp.Process):
 
     def run(self) -> None:
         assert not torch.cuda.is_initialized()
-        torch.cuda.set_device(0)
+        if torch.cuda.is_available():
+            torch.cuda.set_device(0)
 
         self.barrier.wait()
 
@@ -79,7 +80,8 @@ class StandaloneTestingProcess(mp.Process):
         self.barrier.wait()
         from realhf.impl.model.comm.global_comm import setup_global_comm
 
-        setup_global_comm(self.expr_name, self.trial_name, self.rank)
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        setup_global_comm(self.expr_name, self.trial_name, self.rank, backend=backend)
         # NOTE: The import must be here.
         import deepspeed
 
@@ -89,8 +91,9 @@ class StandaloneTestingProcess(mp.Process):
         constants.set_experiment_trial_names(self.expr_name, self.trial_name)
 
         # misc setup
-        pynvml.nvmlInit()
-        pytorch_memory_burnin(self.rank)
+        if torch.cuda.is_available():
+            pynvml.nvmlInit()
+            pytorch_memory_burnin(self.rank)
 
         try:
             self._run()
@@ -122,12 +125,14 @@ class LocalMultiProcessTest:
         self.barrier = mp.Barrier(world_size)
         self.err_queue = mp.Queue(world_size)
         os.environ["REAL_MODE"] = "LOCAL"
-        os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
-        os.environ["GPU_DEVICES_ISOLATED"] = str(1)
+        if torch.cuda.is_available():
+            os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+            os.environ["GPU_DEVICES_ISOLATED"] = str(1)
         clear_name_resolve(expr_name, trial_name)
         self.processes = []
         for rank in range(world_size):
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
+            if torch.cuda.is_available():
+                os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
             p = StandaloneTestingProcess(
                 rank,
                 world_size,
@@ -264,7 +269,7 @@ def make_random_packed_batches(
     seed: int = 1,
     dp_rank=None,
     dp_size=None,
-):
+) -> List[SequenceSample]:
     assert (dp_rank is None and dp_size is None) or (
         dp_rank is not None and dp_size is not None
     )
@@ -272,18 +277,18 @@ def make_random_packed_batches(
         dp_rank = constants.data_parallel_rank()
         dp_size = constants.data_parallel_world_size()
     assert batch_size % dp_size == 0
-    dp_batch_size = batch_size // dp_size
     n_seqs = batch_size * n_batches
     seqs = random_sample(batch_size * n_batches, seq_len, vocab_size, seed)
     seqs = seqs[n_seqs * dp_rank // dp_size : n_seqs * (dp_rank + 1) // dp_size]
-    seqs = [namedarray.NamedArray(packed_prompts=seqs[i]) for i in range(len(seqs))]
-    for seq in seqs:
-        seq.register_metadata(seqlens=[seq_len])
-    batches = [
-        seqs[j * dp_batch_size : (j + 1) * dp_batch_size] for j in range(n_batches)
-    ]
-    batches = [data_api.gather_sequences(batch) for batch in batches]
-    return batches
+    x = SequenceSample.from_default(
+        seqlens=[seq_len for _ in range(seqs.shape[0])],
+        data=dict(
+            packed_input_ids=seqs.view(-1),
+            prompt_mask=torch.zeros_like(seqs.view(-1), dtype=torch.bool),
+        ),
+        ids=list(range(seqs.shape[0])),
+    )
+    return x.split(n_batches)
 
 
 def make_random_unpacked_batches(

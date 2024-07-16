@@ -122,8 +122,32 @@ def make_model_config(cfg: ModelTrainEvalConfig):
     )
 
 
-def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
+def parallel_eq(a: ParallelismConfig, b: ParallelismConfig) -> bool:
+    return (
+        a.model_parallel_size == b.model_parallel_size
+        and a.pipeline_parallel_size == b.pipeline_parallel_size
+        and a.data_parallel_size == b.data_parallel_size
+    )
+
+
+def resolve_replica_ids(rpc_allocs: List[RPCAllocation]):
     role_cnt = collections.defaultdict(int)
+    first_device_mesh = dict()
+    first_parallel = dict()
+    for alloc in rpc_allocs:
+        rpc = alloc.rpc
+        if rpc.role not in first_device_mesh:
+            first_device_mesh[rpc.role] = alloc.device_mesh
+            first_parallel[rpc.role] = alloc.parallel
+            continue
+        if alloc.device_mesh != first_device_mesh[rpc.role] or not parallel_eq(
+            alloc.parallel, first_parallel[rpc.role]
+        ):
+            role_cnt[rpc.role] += 1
+            rpc.model_name = ModelName(rpc.role, role_cnt[rpc.role])
+
+
+def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
     role_interface_types = collections.defaultdict(set)
     for rpc_alloc in rpc_allocs:
         role_interface_types[rpc_alloc.rpc.role].add(rpc_alloc.rpc.interface_type)
@@ -139,10 +163,11 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                     continue
                 if rpc.role != other.rpc.role:
                     continue
-                if parallel == other.parallel and device_mesh == other.device_mesh:
+                if (
+                    parallel_eq(parallel, other.parallel)
+                    and device_mesh == other.device_mesh
+                ):
                     continue
-                other.rpc.model_name = ModelName(rpc.role, role_cnt[rpc.role] + 1)
-                role_cnt[rpc.role] += 1
                 other.rpc.add_pre_hook(SyncParamHook(source=rpc.model_name))
                 other.rpc.add_post_hook(SyncParamHook(target=rpc.model_name))
                 logger.info(

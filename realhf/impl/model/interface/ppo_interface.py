@@ -1,19 +1,18 @@
 import collections
 import dataclasses
+import functools
 import itertools
 import time
 from typing import Dict, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-from deepspeed import DeepSpeedEngine
 
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 import realhf.impl.model.utils.ppo_functional as ppo_functional
-from realhf.api.core import data_api
-from realhf.base.namedarray import NamedArray, from_dict, recursive_apply
+from realhf.api.core.data_api import SequenceSample
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output
 from realhf.impl.model.utils.functional import (
@@ -21,29 +20,35 @@ from realhf.impl.model.utils.functional import (
     gather_packed_shifted_log_probs,
     masked_normalization,
 )
-from realhf.impl.model.utils.padding import unpad_input
 
 logger = logging.getLogger("PackedPPOInterface")
 
 
 def _ppo_actor_loss_from_model_outputs(
     logits: torch.FloatTensor,  # [tot_seqlen, vocab_size]
-    packed_input_ids: torch.LongTensor,  # [tot_seqlen]
-    cu_seqlens: torch.LongTensor,  # [bs+1]
-    old_logp: torch.FloatTensor,  # [tot_seqlen-bs]
-    ppo_loss_mask: torch.FloatTensor,  # [tot_seqlen-bs]
-    advantages: torch.FloatTensor,  # [tot_seqlen-bs]
-    kl_rewards: torch.FloatTensor,  # [tot_seqlen-bs]
+    input_: SequenceSample,
     kl_adapter: ppo_functional.KLController,  # const
-    eps_clip: int,  # const
+    eps_clip: float,  # const
     early_stop_imp_ratio: Optional[float],  # const
     early_stop_kl: Optional[float],  # const
-    logits_mask: Optional[torch.BoolTensor] = None,  # [tot_seqlen, vocab_size]
-    **kwargs,
 ) -> Tuple[torch.FloatTensor, Dict]:
     """Loss function for ppo actor step, all inputs should be splitted into pipeline micro batches,
     returns loss and logging stats.
     """
+    logits_mask = input_.data["packed_logits_mask"]
+    packed_input_ids = input_.data["packed_input_ids"]
+    cu_seqlens = (
+        torch.nn.functional.pad(
+            torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
+        )
+        .int()
+        .cuda()
+    )
+    ppo_loss_mask = input_.data["ppo_loss_mask"]
+    advantages = input_.data["advantages"]
+    old_logp = input_.data["old_logp"]
+    kl_rewards = input_.data["kl_rewards"]
+
     if logits_mask is not None:
         apply_logits_mask(logits, logits_mask)
 
@@ -172,25 +177,24 @@ class PPOActorInterface(model_api.ModelInterface):
         )
 
     @torch.no_grad()
-    def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def generate(
+        self, model: model_api.Model, input_: SequenceSample
+    ) -> SequenceSample:
         module = model.module
 
         module.eval()
 
-        data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_prompts = data["packed_prompts"]
-        prompt_lengths = torch.tensor(
-            data.metadata["seqlens"],
-            dtype=torch.int32,
-            device=packed_prompts.device,
+        # Remap the key `packed_prompts` to `packed_input_ids`,
+        # because the pipe runner only recognizes `packed_input_ids`.
+        x = SequenceSample.from_default(
+            ids=input_.ids,
+            seqlens=input_.seqlens["packed_prompts"],
+            data=dict(packed_input_ids=input_.data["packed_prompts"]),
         )
-        prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
 
         res = module.generate(
-            seqlens_cpu=data.metadata["seqlens"],
+            input_=x,
             tokenizer=model.tokenizer,
-            packed_input_ids=packed_prompts,
-            cu_seqlens=prompt_cu_seqlens,
             gconfig=self.generation_config,
         )
         if res is None:
@@ -210,81 +214,83 @@ class PPOActorInterface(model_api.ModelInterface):
         gen_lengths = gen_lengths.clip(max=gen_tokens.shape[-1])
 
         (
-            packed_seq,
+            packed_input_ids,
             packed_logprobs,
             packed_logits_mask,
             seq_lengths,
             prompt_mask,
         ) = concat_prompt_to_generation_output(
-            packed_prompts=packed_prompts,
-            prompt_lengths=prompt_lengths,
+            packed_prompts=input_.data["packed_prompts"],
+            prompt_lengths=torch.cat(input_.seqlens["packed_prompts"]).to(model.device),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
             logits_mask=logits_mask,
             gen_lengths=gen_lengths,
         )
 
-        res = dict(
-            seq_no_eos_mask=seq_no_eos_mask,
-            packed_seq=packed_seq,
-            packed_logprobs=packed_logprobs,
-            packed_logits_mask=(
-                packed_logits_mask.bool()
-                if not self.force_no_logits_mask and packed_logits_mask is not None
-                else None
+        seqlens = [
+            torch.tensor([s], dtype=torch.int32)
+            for s in seq_lengths.cpu().numpy().tolist()
+        ]
+        res = SequenceSample.from_default(
+            ids=input_.ids,
+            seqlens=seqlens,
+            data=dict(
+                seq_no_eos_mask=seq_no_eos_mask,
+                packed_input_ids=packed_input_ids,
+                packed_logprobs=packed_logprobs,
+                packed_logits_mask=(
+                    packed_logits_mask.bool()
+                    if not self.force_no_logits_mask and packed_logits_mask is not None
+                    else None
+                ),
+                prompt_mask=prompt_mask,
             ),
-            prompt_mask=prompt_mask,
         )
-        res = from_dict(res)
-        seqlens = seq_lengths.cpu().numpy().tolist()
-        res.register_metadata(seqlens=seqlens)
         return res
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def inference(
+        self, model: model_api.Model, input_: SequenceSample
+    ) -> SequenceSample:
         module = model.module
         module.eval()
-        data = recursive_apply(data, lambda x: x.to(model.device))
 
-        input_lens = torch.tensor(
-            data.metadata["seqlens"], dtype=torch.int32, device=model.device
-        )
-        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-
-        logits = module.forward(
-            seqlens_cpu=data.metadata["seqlens"],
-            packed_input_ids=data["packed_seq"],
-            cu_seqlens=cu_seqlens,
-        )
+        logits = module.forward(input_=input_)
         if logits is None:
             return None
 
         logits /= self.generation_config.temperature
-        if "packed_logits_mask" in data and data["packed_logits_mask"] is not None:
-            apply_logits_mask(logits, data["packed_logits_mask"])
+        if (
+            "packed_logits_mask" in input_.data
+            and input_.data["packed_logits_mask"] is not None
+        ):
+            apply_logits_mask(logits, input_.data["packed_logits_mask"])
+        input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         logprobs = gather_packed_shifted_log_probs(
-            logits, cu_seqlens, data["packed_seq"]
+            logits, cu_seqlens, input_.data["packed_input_ids"]
         )
-        res = from_dict(dict(packed_ref_logprobs=logprobs))
-        res.register_metadata(seqlens=data.metadata["seqlens"])
+        res = SequenceSample.from_default(
+            ids=input_.ids,
+            seqlens=input_.seqlens["packed_input_ids"],
+            data=dict(packed_ref_logprobs=logprobs),
+        )
         return res
 
-    def train_step(self, model: model_api.Model, data_: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
         module = model.module
-        tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
 
-        old_logp: torch.FloatTensor = data_["packed_logprobs"].float()
-        ref_logp: torch.FloatTensor = data_["packed_ref_logprobs"].float()
-        prompt_mask = data_["prompt_mask"]
-        input_lens = torch.tensor(
-            data_.metadata["seqlens"], dtype=torch.int32, device=model.device
-        )
+        old_logp: torch.FloatTensor = input_.data["packed_logprobs"].float()
+        ref_logp: torch.FloatTensor = input_.data["packed_ref_logprobs"].float()
+        prompt_mask = input_.data["prompt_mask"]
+        input_lens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-        reward_score = data_["rewards"].float()
-        values = data_["values"].float()
-        seq_no_eos_mask = data_["seq_no_eos_mask"]
+        reward_score = input_.data["rewards"].float()
+        values = input_.data["values"].float()
+        seq_no_eos_mask = input_.data["seq_no_eos_mask"]
 
         if self.value_norm:
             denormalized_values = self.rms.denormalize(values)
@@ -344,25 +350,25 @@ class PPOActorInterface(model_api.ModelInterface):
             advantages = masked_normalization(advantages, loss_mask)
 
         # Prepare data to be splitted into mini-batches.
-        batch_seqlens = data_.metadata["seqlens"]
-        data_ = from_dict(
-            dict(
+        input_ = SequenceSample.from_default(
+            ids=input_.ids,
+            data=dict(
                 advantages=advantages,
                 old_logp=old_logp,
                 ppo_loss_mask=loss_mask,
-                packed_seq=data_["packed_seq"],
-                cu_seqlens=cu_seqlens.int(),
+                packed_input_ids=input_.data["packed_input_ids"],
                 kl_rewards=kl_rewards,
                 packed_logits_mask=(
-                    data_["packed_logits_mask"]
-                    if "packed_logits_mask" in data_
+                    input_.data["packed_logits_mask"]
+                    if "packed_logits_mask" in input_.data
                     else None
                 ),
-            )
+            ),
+            seqlens=input_.seqlens["packed_input_ids"],
         )
-        data_.register_metadata(seqlens=batch_seqlens)
-        datas = data_api.split_sequences(
-            data_,
+        # NOTE: We cannot randomly shuffle data here because
+        # data must have the same shape across different pipeline stages.
+        datas = input_.split(
             self.n_minibatches,
             min_size=constants.pipe_parallel_world_size() * 2,
         )
@@ -394,10 +400,10 @@ class PPOActorInterface(model_api.ModelInterface):
             n_seqs=int(_n_seqs),
         )
 
-        if data_["packed_logits_mask"] is not None:
-            n_masked_vocabs = data_["packed_logits_mask"].count_nonzero()
+        if input_.data["packed_logits_mask"] is not None:
+            n_masked_vocabs = input_.data["packed_logits_mask"].count_nonzero()
             total_vocabs = torch.tensor(
-                data_["packed_logits_mask"].numel(),
+                input_.data["packed_logits_mask"].numel(),
                 dtype=torch.long,
                 device=model.device,
             )
@@ -408,40 +414,19 @@ class PPOActorInterface(model_api.ModelInterface):
             )
         ### Logging code ends. ###
 
-        # NOTE: We cannot randomly shuffle data here because
-        # data must have the same shape across different pipeline stages.
+        # Run mini-batched PPO training!
         train_stats = collections.defaultdict(lambda: 0)
-        offset = 0
         for data in datas:
-            input_lens = torch.tensor(
-                data.metadata["seqlens"], dtype=torch.int32, device=model.device
-            )
-            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-            logits_mask = (
-                data["packed_logits_mask"] if "packed_logits_mask" in data else None
-            )
-            seqlens = batch_seqlens[offset : offset + input_lens.shape[0]]
-            offset += input_lens.shape[0]
-            loss_fn_kwargs = dict(
-                input_lens=input_lens,  # used for partition
-                old_logp=data["old_logp"],
-                ppo_loss_mask=data["ppo_loss_mask"],
-                advantages=data["advantages"],
-                kl_rewards=data["kl_rewards"],
-                kl_adapter=self.kl_adapter,
-                eps_clip=self.eps_clip,
-                early_stop_imp_ratio=self.early_stop_imp_ratio,
-                early_stop_kl=self.early_stop_kl,
-                logits_mask=logits_mask,
-            )
-
             stats = module.train_batch(
-                seqlens_cpu=seqlens,
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
+                input_=data,
                 version_steps=model.version.global_step,
-                loss_fn=_ppo_actor_loss_from_model_outputs,
-                **loss_fn_kwargs,
+                loss_fn=functools.partial(
+                    _ppo_actor_loss_from_model_outputs,
+                    kl_adapter=self.kl_adapter,
+                    eps_clip=self.eps_clip,
+                    early_stop_imp_ratio=self.early_stop_imp_ratio,
+                    early_stop_kl=self.early_stop_kl,
+                ),
             )
 
             if stats:
@@ -464,17 +449,24 @@ class PPOActorInterface(model_api.ModelInterface):
 
 def _ppo_critic_loss_from_model_outputs(
     new_values: torch.FloatTensor,
-    packed_input_ids: torch.LongTensor,
-    cu_seqlens: torch.LongTensor,
-    values: torch.FloatTensor,
-    ppo_loss_mask: torch.FloatTensor,
-    returns: torch.FloatTensor,
-    kl_rewards: torch.FloatTensor,
+    input_: SequenceSample,
     value_eps_clip: float,
     kl_adapter: ppo_functional.KLController,
     rms=None,
-    **kwargs,
 ) -> Tuple[torch.FloatTensor, Dict]:
+
+    cu_seqlens = (
+        torch.nn.functional.pad(
+            torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
+        )
+        .int()
+        .cuda()
+    )
+    ppo_loss_mask = input_.data["ppo_loss_mask"]
+    returns = input_.data["returns"]
+    values = input_.data["values"]
+    kl_rewards = input_.data["kl_rewards"]
+
     leave_one_indices = torch.cat(
         [
             torch.arange(
@@ -533,7 +525,6 @@ class PPOCriticInterface(model_api.ModelInterface):
     kl_ctl: float = 0.1
     discount: float = 1.0
     gae_lambda: float = 0.95
-    eps_clip: float = 0.2
     value_eps_clip: float = 0.2
     max_reward_clip: float = 5.0
     adaptive_kl_ctl: bool = False
@@ -583,46 +574,37 @@ class PPOCriticInterface(model_api.ModelInterface):
         )
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def inference(
+        self, model: model_api.Model, input_: SequenceSample
+    ) -> SequenceSample:
         module = model.module
         module.eval()
-        data = recursive_apply(data, lambda x: x.to(model.device))
 
-        input_lens = torch.tensor(
-            data.metadata["seqlens"], dtype=torch.int32, device=model.device
-        )
-        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-        max_seqlen = int(max(input_lens))
-
-        scores = module.forward(
-            seqlens_cpu=data.metadata["seqlens"],
-            packed_input_ids=data["packed_seq"],
-            cu_seqlens=cu_seqlens,
-        )
+        scores = module.forward(input_=input_)
         if scores is None:
             return None
         scores = scores.squeeze(-1)
-        res = from_dict(dict(values=scores))
-        res.register_metadata(seqlens=data.metadata["seqlens"])
+        res = SequenceSample.from_default(
+            ids=input_.ids,
+            data=dict(values=scores),
+            seqlens=input_.seqlens["packed_input_ids"],
+        )
         return res
 
-    def train_step(self, model: model_api.Model, data_: NamedArray) -> Dict:
+    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
-        data_ = recursive_apply(data_, lambda x: x.to(model.device))
 
-        old_logp: torch.FloatTensor = data_["packed_logprobs"].float()
-        ref_logp: torch.FloatTensor = data_["packed_ref_logprobs"].float()
-        prompt_mask = data_["prompt_mask"]
-        input_lens = torch.tensor(
-            data_.metadata["seqlens"], dtype=torch.int32, device=model.device
-        )
+        old_logp: torch.FloatTensor = input_.data["packed_logprobs"].float()
+        ref_logp: torch.FloatTensor = input_.data["packed_ref_logprobs"].float()
+        prompt_mask = input_.data["prompt_mask"]
+        input_lens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-        reward_score = data_["rewards"].float()
-        values = data_["values"].float()
-        seq_no_eos_mask = data_["seq_no_eos_mask"]
+        reward_score = input_.data["rewards"].float()
+        values = input_.data["values"].float()
+        seq_no_eos_mask = input_.data["seq_no_eos_mask"]
 
         if self.value_norm:
             denormalized_values = self.rms.denormalize(values)
@@ -684,20 +666,20 @@ class PPOCriticInterface(model_api.ModelInterface):
             normalized_returns = returns
 
         # Prepare data to be splitted into mini-batches.
-        batch_seqlens = data_.metadata["seqlens"]
-        data_ = from_dict(
-            dict(
+        input_ = SequenceSample.from_default(
+            ids=input_.ids,
+            data=dict(
                 returns=normalized_returns,
                 values=values,
                 ppo_loss_mask=loss_mask,
+                packed_input_ids=input_.data["packed_input_ids"],
                 kl_rewards=kl_rewards,
-                packed_seq=data_["packed_seq"],
-                cu_seqlens=cu_seqlens,
-            )
+            ),
+            seqlens=input_.seqlens["packed_input_ids"],
         )
-        data_.register_metadata(seqlens=batch_seqlens)
-        datas = data_api.split_sequences(
-            data_,
+        # NOTE: We cannot randomly shuffle data here because
+        # data must have the same shape across different pipeline stages.
+        datas = input_.split(
             self.n_minibatches,
             min_size=constants.pipe_parallel_world_size() * 2,
         )
@@ -709,35 +691,19 @@ class PPOCriticInterface(model_api.ModelInterface):
         dist.all_reduce(n_tokens, group=constants.data_parallel_group())
         global_stats = dict(returns=float(returns), n_tokens=int(n_tokens))
 
-        # NOTE: We cannot randomly shuffle data here because data must the same shape across different pipeline stages.
+        # Run mini-batched PPO training!
         train_stats = collections.defaultdict(lambda: 0)
-        offset = 0
         for data in datas:
-            input_lens = torch.tensor(
-                data.metadata["seqlens"], dtype=torch.int32, device=model.device
-            )
-            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-            seqlens_cpu = batch_seqlens[offset : offset + input_lens.shape[0]]
-            offset += input_lens.shape[0]
-
-            loss_kwargs = dict(
-                input_lens=input_lens,
-                values=data["values"],
-                ppo_loss_mask=data["ppo_loss_mask"],
-                returns=data["returns"],
-                kl_rewards=data["kl_rewards"],
-                value_eps_clip=self.value_eps_clip,
-                kl_adapter=self.kl_adapter,
-                rms=self.rms if self.value_norm else None,
-            )
 
             stats = module.train_batch(
-                seqlens_cpu=seqlens_cpu,
-                packed_input_ids=data["packed_seq"],
-                cu_seqlens=cu_seqlens,
+                input_=data,
                 version_steps=model.version.global_step,
-                loss_fn=_ppo_critic_loss_from_model_outputs,
-                **loss_kwargs,
+                loss_fn=functools.partial(
+                    _ppo_critic_loss_from_model_outputs,
+                    value_eps_clip=self.value_eps_clip,
+                    kl_adapter=self.kl_adapter,
+                    rms=None if not self.value_norm else self.rms,
+                ),
             )
 
             if stats:

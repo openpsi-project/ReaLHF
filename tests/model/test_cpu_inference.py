@@ -56,7 +56,7 @@ def save_path(tmpdir_factory: pytest.TempdirFactory):
 
 @pytest.fixture
 def cpu_real_model(model_class, mconfig, save_path):
-    max_prompt_len = 128
+    max_prompt_len = mconfig.n_positions
     maybe_prepare_cpu_env(max_prompt_len)
     with constants.model_scope(testing.MODEL_NAME):
         from realhf.impl.model.nn.real_llm_api import ReaLModel
@@ -80,7 +80,7 @@ def cpu_hf_model(save_path):
 
 @torch.no_grad()
 def test_inference_cpu_consistency(cpu_real_model, cpu_hf_model, model_class, mconfig):
-    max_prompt_len = 128
+    max_prompt_len = mconfig.n_positions
     with constants.model_scope(testing.MODEL_NAME):
         bs = 10
         torch.manual_seed(1)

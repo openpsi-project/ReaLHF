@@ -40,6 +40,7 @@ def _save_then_load(
     is_critic: bool,
     init_critic_from_actor: bool,
     pp_dp_mp: Tuple,
+    device: torch.device,
 ):
     # NOTE: import here to avoid initializing CUDA context in the main process
     from realhf.impl.model.nn.real_llm_api import ReaLModel
@@ -68,7 +69,7 @@ def _save_then_load(
         mconfig.is_critic = is_critic
 
         # load from hf model or create a new critic model
-        model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
+        model = ReaLModel(mconfig, dtype=torch.float32, device=device)
         model.instantiate()
         # sync initialized parameters
         getattr(model, f"to_{model_family_name}")(tokenizer, init_save_path)
@@ -87,7 +88,7 @@ def _save_then_load(
                 file_size += os.path.getsize(os.path.join(real_save_path, fn))
 
         # load ReaLModel (e.g., before PPO, RW)
-        model = ReaLModel(mconfig, dtype=torch.float32, device="cuda")
+        model = ReaLModel(mconfig, dtype=torch.float32, device=device)
         model._instantiation_hooks.append(
             lambda: getattr(model, f"from_{model_family_name}")(
                 real_save_path, init_critic_from_actor
@@ -133,12 +134,6 @@ def _save_then_load(
         dist.barrier()
 
 
-@pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.device_count() < 8,
-    reason="This test requires at least 8 GPUs to run.",
-)
-@pytest.mark.slow
-@pytest.mark.distributed
 @pytest.mark.parametrize(
     "model_family_name", ["gemma", "gpt2", "llama", "qwen2", "mistral"]
 )
@@ -153,6 +148,8 @@ def test_save_then_load(
     pp_dp_mp: Tuple,
 ):
     if model_family_name == "gpt2" and pp_dp_mp[-1] > 1:
+        # GPT-2 has an odd vocabulary size, so it doesn't work
+        # with tensor-model parallelism.
         return
     if not is_critic and init_critic_from_actor:
         return
@@ -168,5 +165,6 @@ def test_save_then_load(
         init_critic_from_actor=init_critic_from_actor,
         pp_dp_mp=pp_dp_mp,
         tmp_path=tmp_path,
+        device="cpu",
     )
     test_impl.launch()

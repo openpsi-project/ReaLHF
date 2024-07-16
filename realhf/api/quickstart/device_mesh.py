@@ -60,7 +60,6 @@ class DeviceMesh:
                 )
 
         if self.global_mesh_name is not None and self.name is None:
-            print(self.mapping.shape, self.n_nodes, self.n_gpus_per_node)
             self.name = device_mesh_name_from_mapping(
                 self.global_mesh_name, self.mapping
             )

@@ -280,6 +280,7 @@ class PPOConfig(CommonExperimentConfig):
             "ppo_critic",
             args=copy.deepcopy(self.ppo_kwargs),
         )
+        critic_interface.args.pop("eps_clip")
         rw_interface = ModelInterfaceAbstraction(
             "paired_rw",
             args=dict(
@@ -298,7 +299,7 @@ class PPOConfig(CommonExperimentConfig):
             input_keys=["packed_prompts"],
             output_keys=[
                 "seq_no_eos_mask",
-                "packed_seq",
+                "packed_input_ids",
                 "packed_logprobs",
                 "prompt_mask",
                 "packed_logits_mask",
@@ -314,12 +315,12 @@ class PPOConfig(CommonExperimentConfig):
             interface_impl=rw_interface,
             model_type=self.rew.type,
             model_path=self.rew.path,
-            input_keys=["packed_seq"],
+            input_keys=["packed_input_ids"],
             output_keys=["rewards"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
-        inf_ref_inputs = ["packed_seq"]
+        inf_ref_inputs = ["packed_input_ids"]
         if not self.ppo.force_no_logits_mask:
             inf_ref_inputs.append(
                 "packed_logits_mask",
@@ -343,13 +344,13 @@ class PPOConfig(CommonExperimentConfig):
             interface_impl=critic_interface,
             model_type=self.critic.type,
             model_path=self.critic.path,
-            input_keys=["packed_seq", "seq_no_eos_mask"],
+            input_keys=["packed_input_ids", "seq_no_eos_mask"],
             output_keys=["values"],
             n_seqs=self.dataset.train_bs_n_seqs,
         )
 
         train_actor_inputs = [
-            "packed_seq",
+            "packed_input_ids",
             "packed_logprobs",
             "packed_ref_logprobs",
             "rewards",
@@ -380,7 +381,7 @@ class PPOConfig(CommonExperimentConfig):
             model_type=self.critic.type,
             model_path=self.critic.path,
             input_keys=[
-                "packed_seq",
+                "packed_input_ids",
                 "packed_logprobs",
                 "packed_ref_logprobs",
                 "rewards",
@@ -419,7 +420,6 @@ class PPOConfig(CommonExperimentConfig):
                 args=dict(
                     dataset_path=self.dataset.path,
                     max_length=self.dataset.max_prompt_len,
-                    pad_to_max_length=self.dataset.pad_to_max_length,
                 ),
             )
         ]

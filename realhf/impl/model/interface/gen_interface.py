@@ -4,7 +4,7 @@ from typing import Dict, Optional, Tuple
 import torch
 
 import realhf.api.core.model_api as model_api
-from realhf.base.namedarray import NamedArray, recursive_apply
+from realhf.api.core.data_api import SequenceSample
 
 
 @dataclasses.dataclass
@@ -14,25 +14,24 @@ class GenerationInterface(model_api.ModelInterface):
     )
 
     @torch.no_grad()
-    def generate(self, model: model_api.Model, data: NamedArray) -> NamedArray:
+    def generate(
+        self, model: model_api.Model, input_: SequenceSample
+    ) -> SequenceSample:
         module = model.module
 
         module.eval()
 
-        data = recursive_apply(data, lambda x: x.to(model.device))
-        packed_prompts = data["packed_prompts"]
-        prompt_lengths = torch.tensor(
-            data.metadata["seqlens"],
-            dtype=torch.int32,
-            device=packed_prompts.device,
+        # Remap the key `packed_prompts` to `packed_input_ids`,
+        # because the pipe runner only recognizes `packed_input_ids`.
+        x = SequenceSample.from_default(
+            ids=input_.ids,
+            seqlens=input_.seqlens["packed_prompts"],
+            data=dict(packed_input_ids=input_.data["packed_prompts"]),
         )
-        prompt_cu_seqlens = torch.nn.functional.pad(prompt_lengths.cumsum(0), (1, 0))
 
         res = module.generate(
-            seqlens_cpu=data.metadata["seqlens"],
+            input_=x,
             tokenizer=model.tokenizer,
-            packed_input_ids=packed_prompts,
-            cu_seqlens=prompt_cu_seqlens,
             gconfig=self.generation_config,
         )
         if res is None:

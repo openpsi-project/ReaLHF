@@ -52,8 +52,8 @@ python3 -m realhf.apps.quickstart rw \
     dataset.train_bs_n_seqs=512 \
     dataset.valid_bs_n_seqs=512 \
     allocation_mode=manual \
-    n_nodes=1 \
+    n_nodes=2 \
     allocation.parallel.pipeline_parallel_size=2 \
     allocation.parallel.model_parallel_size=2 \
-    allocation.parallel.data_parallel_size=2 \
+    allocation.parallel.data_parallel_size=4 \
     allocation.parallel.use_sequence_parallel=True
