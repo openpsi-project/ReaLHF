@@ -5,8 +5,6 @@ from typing import Any, Optional
 
 import torch
 
-# from megatron.core import parallel_state
-
 
 def switch_load_balancing_loss_func(
     probs: torch.Tensor,

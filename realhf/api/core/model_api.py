@@ -165,8 +165,7 @@ class ReaLModelConfig:
         gradient accumulation in Megatron.
         Currently not supported.
     :type gradient_accumulation_fusion: bool
-    :param use_grouped_gemm: Whether to use grouped GEMM for the MoE.
-        Note that if CUDAGraph is enabled, this option must be set to True.
+    :param use_grouped_gemm: Whether to use grouped GEMM for MoE.
     :type use_grouped_gemm: bool
     """
 
