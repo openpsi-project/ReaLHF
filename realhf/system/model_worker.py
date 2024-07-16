@@ -455,15 +455,16 @@ class ModelWorker(worker_base.Worker):
                 )
                 self.__model_is_handle[to_model_name] = False
         elif hook == "offload":
-            with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
-                m = self.__unwrapped_models[hook_data["model_name"]]
-                if not isinstance(m, ReaLModel):
-                    logger.warning(
-                        f"Model {hook_data['model_name']} (type={type(m)}) is not a ReaLModel, "
-                        f"so it can't use offload."
-                    )
-                    return
-                m.async_offload()
+            # NOTE: Profiling (or cuda synchronization) will cause an overhead ~0.5s.
+            # with cuda_tmarked("offload", CUDATimeMarkType.mem_layout):
+            m = self.__unwrapped_models[hook_data["model_name"]]
+            if not isinstance(m, ReaLModel):
+                logger.warning(
+                    f"Model {hook_data['model_name']} (type={type(m)}) is not a ReaLModel, "
+                    f"so it can't use offload."
+                )
+                return
+            m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
 
