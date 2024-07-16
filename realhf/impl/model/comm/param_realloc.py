@@ -290,6 +290,8 @@ class ReparallelizeSenderStep:
     receiver_mp_portion_id: int
     param_keys: List[str]
     param_intervals_cpu: List[Tuple[int, int]]
+    param_intervals_cuda: torch.Tensor
+    max_interval_size: int
     param_size: int
     group: torch.distributed.ProcessGroup
     dst_ranks: List[int]
@@ -302,7 +304,11 @@ class ReparallelizeReceiverStep:
     sender_mp_portion_id: int
     receiver_mp_portion_id: int
     sender_param_intervals_cpu: List[Tuple[int, int]]
+    sender_param_intervals_cuda: torch.Tensor
+    sender_max_interval_size: int
     receiver_param_intervals_cpu: List[Tuple[int, int]]
+    receiver_param_intervals_cuda: torch.Tensor
+    receiver_max_interval_size: int
     param_size: int
     param_keys: List[str]
     param_dtype: torch.dtype
@@ -432,6 +438,8 @@ def _derive_reparallelize_comm_plan(
 
                     param_keys = None
                     param_intervals_cpu = receiver_param_intervals_cpu = None
+                    param_intervals_cuda = receiver_param_intervals_cuda = None
+                    max_interval_size = max_receiver_interval_size = None
                     param_keys = keys_from_layer_indices(
                         from_model_config, layer_indices
                     )
@@ -458,6 +466,12 @@ def _derive_reparallelize_comm_plan(
                                 sequence_parallel=from_topo.sequence_parallel,
                                 head_param_point_to_embedding=from_model_head_param_point_to_embedding,
                             )
+                            param_intervals_cuda = torch.tensor(
+                                param_intervals_cpu, dtype=torch.long, device="cuda"
+                            )
+                            max_interval_size = max(
+                                y - x for x, y in param_intervals_cpu
+                            )
                         if torch.distributed.get_rank() in dst_ranks:
                             receiver_param_intervals_cpu = param_intervals_from_keys(
                                 model_name=to_model_name,
@@ -470,6 +484,14 @@ def _derive_reparallelize_comm_plan(
                                 sequence_parallel=to_topo.sequence_parallel,
                                 head_param_point_to_embedding=to_model_head_param_point_to_embedding,
                             )
+                            receiver_param_intervals_cuda = torch.tensor(
+                                receiver_param_intervals_cpu,
+                                dtype=torch.long,
+                                device="cuda",
+                            )
+                            max_receiver_interval_size = max(
+                                y - x for x, y in receiver_param_intervals_cpu
+                            )
 
                     for dst_rank in dst_ranks:
                         comm_plan.append(
@@ -479,7 +501,11 @@ def _derive_reparallelize_comm_plan(
                                 receiver_mp_portion_id=receiver_mp_portion_id,
                                 param_keys=param_keys,
                                 sender_param_intervals_cpu=param_intervals_cpu,
+                                sender_param_intervals_cuda=param_intervals_cuda,
+                                sender_max_interval_size=max_interval_size,
                                 receiver_param_intervals_cpu=receiver_param_intervals_cpu,
+                                receiver_param_intervals_cuda=receiver_param_intervals_cuda,
+                                receiver_max_interval_size=max_receiver_interval_size,
                                 param_size=param_size,
                                 param_dtype=dtype,
                                 src=src,
@@ -494,6 +520,8 @@ def _derive_reparallelize_comm_plan(
                             receiver_mp_portion_id=receiver_mp_portion_id,
                             param_keys=param_keys,
                             param_intervals_cpu=param_intervals_cpu,
+                            param_intervals_cuda=param_intervals_cuda,
+                            max_interval_size=max_interval_size,
                             param_size=param_size,
                             group=group,
                             dst_ranks=dst_ranks,

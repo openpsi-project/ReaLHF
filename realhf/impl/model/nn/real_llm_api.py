@@ -629,8 +629,6 @@ class ReaLModel(nn.Module):
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
         """Trigger the parameter realloaction from the source model to the target model."""
 
-        opt_level = int(os.getenv("REAL_PARAM_REALLOC_OPT_LEBEL", "1"))
-
         assert not (is_trainable(from_model_name) and is_trainable(to_model_name))
         assert is_trainable(from_model_name) or is_trainable(to_model_name)
 
@@ -695,7 +693,9 @@ class ReaLModel(nn.Module):
                     buf = slice_intervals(
                         self.contiguous_param,
                         step.sender_param_intervals_cpu,
-                        opt_level=opt_level,
+                        intervals_cuda=step.sender_param_intervals_cuda,
+                        max_interval_size=step.sender_max_interval_size,
+                        output_size=step.param_size,
                     )
                 else:
                     buf = torch.zeros(
@@ -707,7 +707,9 @@ class ReaLModel(nn.Module):
                     dict(
                         src=buf,
                         dst=to_contiguous_param,
-                        intervals=step.receiver_param_intervals_cpu,
+                        intervals_cpu=step.receiver_param_intervals_cpu,
+                        intervals_cuda=step.receiver_param_intervals_cuda,
+                        max_interval_size=step.receiver_max_interval_size,
                     )
                 )
 
@@ -719,7 +721,9 @@ class ReaLModel(nn.Module):
                     buf = slice_intervals(
                         self.contiguous_param,
                         step.param_intervals_cpu,
-                        opt_level=opt_level,
+                        intervals_cuda=step.param_intervals_cuda,
+                        max_interval_size=step.max_interval_size,
+                        output_size=step.param_size,
                     )
                     send_buf_specs.append(buf)
 
@@ -761,7 +765,7 @@ class ReaLModel(nn.Module):
         assert len(recv_events) == len(recv_buf_specs)
         for e, x in zip(recv_events, recv_buf_specs):
             torch.cuda.current_stream().wait_event(e)
-            set_intervals(**x, opt_level=opt_level)
+            set_intervals(**x)
 
         return rtgt.to_layers_handle, to_contiguous_param, comm_volume
 
