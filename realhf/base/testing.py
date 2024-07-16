@@ -120,6 +120,7 @@ class LocalMultiProcessTest:
         *args,
         expr_name: str = None,
         trial_name: str = None,
+        timeout_secs: int = 300,
         **kwargs,
     ):
         self.barrier = mp.Barrier(world_size)
@@ -129,6 +130,7 @@ class LocalMultiProcessTest:
             os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
             os.environ["GPU_DEVICES_ISOLATED"] = str(1)
         clear_name_resolve(expr_name, trial_name)
+        self.timeout_secs = timeout_secs
         self.processes = []
         for rank in range(world_size):
             if torch.cuda.is_available():
@@ -148,6 +150,7 @@ class LocalMultiProcessTest:
             self.processes.append(p)
 
     def launch(self):
+        tik = time.time()
         while any([p.is_alive() for p in self.processes]):
             try:
                 err = self.err_queue.get_nowait()
@@ -155,6 +158,9 @@ class LocalMultiProcessTest:
                 raise err
             except queue.Empty:
                 time.sleep(0.1)
+            if time.time() - tik > self.timeout_secs:
+                [p.terminate() for p in self.processes]
+                raise TimeoutError("Timeout")
         [p.join() for p in self.processes]
 
 
