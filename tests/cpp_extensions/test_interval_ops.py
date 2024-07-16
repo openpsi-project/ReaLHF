@@ -24,6 +24,7 @@ def make_intervals(maxsize, n_intervals):
     for i in range(n_intervals):
         intervals.append((i * s, i * s + s // 2))
         interval_size += s // 2
+    np.random.shuffle(intervals)
     return np.array(intervals, dtype=np.int64), interval_size
 
 

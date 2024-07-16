@@ -457,7 +457,6 @@ def param_intervals_from_keys(
         interval_size += sum(zero_start_intervals[:, 1] - zero_start_intervals[:, 0])
     # assert len(set([x[0] for x in intervals])) == len(intervals)
     assert interval_size == param_size, (interval_size, param_size)
-    intervals = sorted(intervals, key=lambda x: x[0])
     if merge_intervals is not None:
         intervals = merge_intervals(intervals)
     return intervals

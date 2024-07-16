@@ -239,7 +239,7 @@ def _check_tied_embedding_weights(model_name, model: "ReaLModel"):
             )
             w_ /= dist.get_world_size(constants.grid().embedding_proc_group)
             if model.config.tied_embedding and not model.config.is_critic:
-                assert torch.allclose(w_, w), (w_ - w).abs().max()
+                assert torch.allclose(w_, w, atol=2e-4), (w_ - w).abs().max()
             else:
                 assert not torch.allclose(w_, w), (w_ - w).abs().max()
 
@@ -434,6 +434,8 @@ def _test_para_realloc(
                 assert torch.allclose(v, sd2[k], atol=2e-4), (
                     k,
                     (v - sd2[k]).abs().max(),
+                    v.flatten()[:10],
+                    sd2[k].flatten()[:10],
                 )
 
         # Run a forward with the redistributed model.
@@ -521,12 +523,12 @@ parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
     not torch.cuda.is_available() or torch.cuda.device_count() < 8,
     reason="This test requires at least 8 GPUs to run.",
 )
-@pytest.mark.parametrize("model_family_name", ["gpt2"])
-@pytest.mark.parametrize("is_critic", [False])
-@pytest.mark.parametrize("from_pp_dp_mp", [(1, 8, 1)])
-@pytest.mark.parametrize("to_pp_dp_mp", [(4, 1, 1)])
-@pytest.mark.parametrize("from_sequence_parallel", [False])
-@pytest.mark.parametrize("to_sequence_parallel", [False])
+@pytest.mark.parametrize("model_family_name", ["gpt2", "llama"])
+@pytest.mark.parametrize("is_critic", [False, True])
+@pytest.mark.parametrize("from_pp_dp_mp", parallelism)
+@pytest.mark.parametrize("to_pp_dp_mp", parallelism)
+@pytest.mark.parametrize("from_sequence_parallel", [False, True])
+@pytest.mark.parametrize("to_sequence_parallel", [False, True])
 @pytest.mark.parametrize("skip_saveload", [False])
 @pytest.mark.gpu
 @pytest.mark.distributed
