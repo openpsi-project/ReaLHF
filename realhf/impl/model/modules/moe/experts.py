@@ -191,6 +191,7 @@ class GroupedMLP(torch.nn.Module):
         permuted_local_hidden_states: torch.Tensor,
         tokens_per_expert: torch.Tensor,
     ):
+        tokens_per_expert = tokens_per_expert.cpu()
         if permuted_local_hidden_states.nelement() != 0:
             if constants.model_parallel_world_size() > 1:
                 permuted_local_hidden_states = copy_to_tensor_model_parallel_region(

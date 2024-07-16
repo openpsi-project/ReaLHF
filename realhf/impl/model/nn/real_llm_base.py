@@ -169,6 +169,7 @@ class ReaLModelBlock(nn.Module):
         elif config.mlp_type == "moe":
             self.mlp = LayerNormMoELayer(
                 config=config,
+                # FIXME:
                 use_grouped_gemm=False,
                 layer_idx=layer_index,
                 dtype=dtype,

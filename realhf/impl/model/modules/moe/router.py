@@ -185,21 +185,14 @@ class TopKRouter(Router):
         """
         moe_aux_loss_coeff = self.config.aux_loss_coeff
         scale_for_logging = 1.0
-        sequence_partition_group = None
-        if self.config.token_dispatcher_type == "allgather":
-            sequence_partition_group = constants.model_parallel_group()
-        elif self.config.token_dispatcher_type == "alltoall":
-            moe_aux_loss_coeff /= constants.model_parallel_world_size()
 
-        if sequence_partition_group is not None:
-            scale_for_logging *= constants.model_parallel_world_size()
-
+        moe_aux_loss_coeff /= constants.model_parallel_world_size()
         aux_loss = switch_load_balancing_loss_func(
             probs,
             num_local_tokens_per_expert,
             self.config.moe_top_k,
             moe_aux_loss_coeff,
-            sequence_partition_group=sequence_partition_group,
+            sequence_partition_group=None,
         )
         # FIXME
         # save_to_aux_losses_tracker(
@@ -272,10 +265,7 @@ class TopKRouter(Router):
         # Apply Z-Loss
         logits = self.apply_z_loss(logits)
 
-        if (
-            constants.model_parallel_world_size() > 1
-            and self.config.token_dispatcher_type == "alltoall"
-        ):
+        if constants.model_parallel_world_size() > 1:
             # Gather the logits from the TP region
             logits = gather_from_sequence_parallel_region(logits)
 

@@ -12,8 +12,7 @@ def grouped_gemm_is_available():
 
 def assert_grouped_gemm_is_available():
     assert grouped_gemm_is_available(), (
-        "Grouped GEMM is not available. Please run "
-        "`pip install git+https://github.com/fanshiqing/grouped_gemm@v1.0`."
+        "Grouped GEMM is not available. Please run " "`pip install grouped_gemm."
     )
 
 

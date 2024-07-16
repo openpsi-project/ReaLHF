@@ -10,10 +10,7 @@ from realhf.api.core.model_api import ReaLModelConfig
 from realhf.impl.model.modules.mlp import GemmaRMSNorm, LlamaRMSNorm
 from realhf.impl.model.modules.moe.experts import GroupedMLP, SequentialMLP
 from realhf.impl.model.modules.moe.router import TopKRouter
-from realhf.impl.model.modules.moe.token_dispatcher import (
-    MoEAllGatherTokenDispatcher,
-    MoEAlltoAllTokenDispatcher,
-)
+from realhf.impl.model.modules.moe.token_dispatcher import MoETokenDispatcher
 
 
 class LayerNormMoELayer(torch.nn.Module):
@@ -22,7 +19,6 @@ class LayerNormMoELayer(torch.nn.Module):
     def __init__(
         self,
         config: ReaLModelConfig,
-        use_grouped_gemm: bool,
         layer_idx: int,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
@@ -62,7 +58,7 @@ class LayerNormMoELayer(torch.nn.Module):
         )
 
         self.router = TopKRouter(config.hidden_dim, config=self.config)
-        if use_grouped_gemm:
+        if config.use_grouped_gemm:
             self.experts = GroupedMLP(
                 self.num_local_experts, self.config, dtype=dtype, device=device
             )
@@ -71,18 +67,7 @@ class LayerNormMoELayer(torch.nn.Module):
                 self.num_local_experts, self.config, dtype=dtype, device=device
             )
 
-        if self.config.token_dispatcher_type == "allgather":
-            self.token_dispatcher = MoEAllGatherTokenDispatcher(
-                self.num_local_experts, self.local_expert_indices, config=self.config
-            )
-        elif config.token_dispatcher_type == "alltoall":
-            self.token_dispatcher = MoEAlltoAllTokenDispatcher(
-                self.num_local_experts, self.local_expert_indices, config=self.config
-            )
-        else:
-            raise ValueError(
-                f"Unsupported token dispatcher type: {self.config.token_dispatcher_type}"
-            )
+        self.token_dispatcher = MoETokenDispatcher(config=self.config)
 
     def forward(self, hidden_states: torch.Tensor):
         if (

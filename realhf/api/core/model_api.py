@@ -145,9 +145,6 @@ class ReaLModelConfig:
     :param aux_loss_coeff: The coefficient for the auxiliary loss.
         Only effective when routing_type="aux_loss".
     :type aux_loss_coeff: float
-    :param token_dispatcher_type: The token dispatcher type for the MoE.
-        Can be "allgather" or "alltoall".
-    :type token_dispatcher_type: str
     :param capacity_factor: The capacity factor of each expert.
         An expert will drop tokens if the number of tokens exceeds capacity_factor * (num_tokens / num_experts).
         Drop nothing when capacity_factor is None.
@@ -168,6 +165,9 @@ class ReaLModelConfig:
         gradient accumulation in Megatron.
         Currently not supported.
     :type gradient_accumulation_fusion: bool
+    :param use_grouped_gemm: Whether to use grouped GEMM for the MoE.
+        Note that if CUDAGraph is enabled, this option must be set to True.
+    :type use_grouped_gemm: bool
     """
 
     ### Architectural configurations. ###
@@ -210,12 +210,12 @@ class ReaLModelConfig:
     moe_top_k: int = 2
     routing_type: str = "aux_loss"  # "sinkhorn" "none"
     aux_loss_coeff: float = 1e-3
-    token_dispatcher_type: str = "allgather"  # "alltoall"
     capacity_factor: float = None
     pad_to_capacity: bool = False
     token_drop_policy: str = "probs"  # "position"
     z_loss_coeff: float = 0.0
     input_jitter_eps: float = 0.0
+    use_grouped_gemm: bool = False
 
     # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False

@@ -1,7 +1,7 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 
 import math
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 
@@ -105,10 +105,48 @@ def get_capacity(
 def custom_histc(input, bins, min, max):
     """A CPU compatible version of torch.histc."""
     if input.device == torch.device("cpu"):
-        float_input = input.to(torch.float)
-        return torch.histc(float_input, bins=bins, min=min, max=max)
+        out = torch.zeros(bins, dtype=torch.long)
+        bin_width = (max - min) / bins
+
+        # Iterate over the input tensor and increment the appropriate bin
+        for value in input.flatten():
+            if min <= value < max:
+                bin_index = int((value - min) / bin_width)
+                out[bin_index] += 1
+            elif value == max:
+                out[bins - 1] += 1
+        return out
     else:
         return torch.histc(input, bins=bins, min=min, max=max)
+
+
+# def custom_histc(
+#     input_tensor: torch.Tensor,
+#     bins: int,
+#     min: Any,
+#     max: Any,
+#     out: Optional[torch.LongTensor] = None
+# ):
+#     """A CPU compatible version of torch.histc
+#     that can output into a pre-allocated long tensor.
+#     """
+#     if out is None:
+#         out = torch.zeros(bins, dtype=torch.long, device=input_tensor.device)
+#     else:
+#         assert out.shape[0] == bins and out.dim() == 1, "Output tensor must have shape (bins,)."
+#         out.zero_()
+
+#     bin_width = (max - min) / bins
+
+#     # Iterate over the input tensor and increment the appropriate bin
+#     flattened = input_tensor.flatten()
+#     for value in flattened:
+#         if min <= value < max:
+#             bin_index = int((value - min) / bin_width)
+#             out[bin_index] += 1
+#         elif value == max:
+#             out[bins - 1] += 1
+#     return out
 
 
 class MoEAuxLossAutoScaler(torch.autograd.Function):
@@ -175,11 +213,20 @@ def permute(tokens, indices, num_out_tokens: int = None, padded_mode: bool = Fal
         topk = 1
     else:
         topk = indices.size(1)
+
     flatten_indices = indices.view(-1)
     sorted_indices = torch.argsort(flatten_indices, stable=True)
-    if num_out_tokens is not None:
-        sorted_indices = sorted_indices[:num_out_tokens]
+    # print(sorted_indices, sorted_indices.shape)
+    # if num_out_tokens is not None:
+    #     sorted_indices = sorted_indices[:num_out_tokens]
     permuted_tokens = tokens.index_select(0, sorted_indices // topk)
+    # indices = sorted_indices // topk
+    # cols = []
+    # for i in indices:
+    #     # print(i, type(i))
+    #     a = tokens[i]
+    #     cols.append(a)
+    # permuted_tokens = torch.stack(cols, dim=0)
     return permuted_tokens, sorted_indices
 
 

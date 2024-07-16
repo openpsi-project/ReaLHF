@@ -71,12 +71,17 @@ def run_grouped_mlp(num_tokens, mp_size, token_dispatch_strategy, seed=1):
 
         tokens_per_expert = torch.tensor(tokens_per_expert)
 
-        st = time.perf_counter()
         o1 = seq_mlp(permuted_hidden_states, tokens_per_expert)
+        o2 = grouped_mlp(permuted_hidden_states, tokens_per_expert)
+
+        st = time.perf_counter()
+        for _ in range(10):
+            o1 = seq_mlp(permuted_hidden_states, tokens_per_expert)
         t1 = time.perf_counter() - st
 
         st = time.perf_counter()
-        o2 = grouped_mlp(permuted_hidden_states, tokens_per_expert)
+        for _ in range(10):
+            o2 = grouped_mlp(permuted_hidden_states, tokens_per_expert)
         t2 = time.perf_counter() - st
 
         print(

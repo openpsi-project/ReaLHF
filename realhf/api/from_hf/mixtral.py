@@ -35,7 +35,6 @@ def config_from_mixtral(hf_config: transformers.MixtralConfig) -> ReaLModelConfi
         moe_top_k=hf_config.num_experts_per_tok,
         aux_loss_coeff=hf_config.router_aux_loss_coef,
         input_jitter_eps=hf_config.router_jitter_noise,
-        token_dispatcher_type="alltoall",
     )
 
 

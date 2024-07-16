@@ -165,13 +165,16 @@ def make_random_inference_model(model_class, model_path):
             model_path=model_path,
             is_critic=False,
         )
-        model = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
+
+        # FIXME
+        model = ReaLModel(mconfig, dtype=torch.bfloat16, device="cuda")
         if constants.pipe_parallel_world_size() == 1:
             model = add_helper_functions(model)
         model.instantiate()
-        getattr(model, f"from_{model_class}")(
-            load_dir=model_path, init_critic_from_actor=False
-        )
+        # FIXME
+        # getattr(model, f"from_{model_class}")(
+        #     load_dir=model_path, init_critic_from_actor=False
+        # )
         model = PipelinableInferenceEngine(model)
         model.eval()
     return model
@@ -224,6 +227,7 @@ def real_model_generate(
             constants.pipe_parallel_rank() == constants.pipe_parallel_world_size() - 1
             and constants.model_parallel_rank() == 0
         )
+
         results = []
         for i, data_batch in enumerate(data_batches):
             data_batch: NamedArray
@@ -346,10 +350,11 @@ real_pp_cudagraph = GenerateTestParams(
     [
         # (real_simple, huggingface, 0.8, 0.8),
         # (real_simple, real_cudagraph, 1.0, 1.0),
+        # (real_cudagraph, real_simple, 1.0, 1.0),
         # (real_simple, real_3d_parallel, 0.8, 0.8),
         # (real_mp, real_mp_cudagraph, 0.8, 0.8),
         # (real_dp, real_dp_cudagraph, 1.0, 1.0),
-        (real_pp, real_pp_cudagraph, 1.0, 1.0),
+        (real_pp_cudagraph, real_pp, 1.0, 1.0),
         # (real_3d_parallel, real_3d_parallel_cudagraph, 0.8, 0.8),
     ],
 )
