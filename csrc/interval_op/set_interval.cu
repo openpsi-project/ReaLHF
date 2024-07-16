@@ -19,9 +19,9 @@ __global__ void copyDataKernel(T *dst, const T *src, size_t *dst_offsets, size_t
   }
 }
 
-template<size_t N, typename T>
-void set_intervals(const at::Tensor src, at::Tensor dst,
-                   std::vector<std::pair<size_t, size_t>> intervals) {
+template<typename T>
+inline void _set_intervals_helper(const at::Tensor src, at::Tensor dst,
+                                  std::vector<std::pair<size_t, size_t>> intervals, size_t N) {
   {
     TORCH_CHECK(src.dtype() == dst.dtype(),
                 "Source and destination tensors must have the same dtype");
@@ -85,4 +85,23 @@ void set_intervals(const at::Tensor src, at::Tensor dst,
     cudaFree(device_interval_sizes);
     cudaFree(device_interval_starts);
   }
+}
+
+template<size_t N, typename T>
+void set_intervals(const at::Tensor src, at::Tensor dst,
+                   std::vector<std::pair<size_t, size_t>> intervals) {
+  _set_intervals_helper<T>(src, dst, intervals, N);
+}
+
+template<typename T>
+void _set_intervals(const at::Tensor src, at::Tensor dst,
+                    std::vector<std::pair<size_t, size_t>> intervals) {
+  size_t N = intervals.size();
+  _set_intervals_helper<T>(src, dst, intervals, N);
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("_set_intervals_fp32", &_set_intervals<float>, "Set intervals of a 1D tensor");
+  m.def("_set_intervals_fp16", &_set_intervals<at::Half>, "Set intervals of a 1D tensor");
+  m.def("_set_intervals_bf16", &_set_intervals<at::BFloat16>, "Set intervals of a 1D tensor");
 }

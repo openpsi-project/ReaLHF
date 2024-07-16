@@ -1,12 +1,11 @@
 import dataclasses
 import functools
+import os
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
@@ -22,11 +21,7 @@ from realhf.impl.model.comm.param_realloc import (
     _derive_reparallelize_comm_plan,
     is_trainable,
 )
-from realhf.impl.model.nn.flatten_param import (
-    recursive_getattr,
-    set_intervals,
-    slice_intervals,
-)
+from realhf.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from realhf.impl.model.utils.padding import pad_input, unpad_input
 
 from .flatten_param import build_param_spec, map_param_to_contigous_memory
@@ -634,6 +629,8 @@ class ReaLModel(nn.Module):
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
         """Trigger the parameter realloaction from the source model to the target model."""
 
+        opt_level = int(os.getenv("REAL_PARAM_REALLOC_OPT_LEBEL", "1"))
+
         assert not (is_trainable(from_model_name) and is_trainable(to_model_name))
         assert is_trainable(from_model_name) or is_trainable(to_model_name)
 
@@ -698,6 +695,7 @@ class ReaLModel(nn.Module):
                     buf = slice_intervals(
                         self.contiguous_param,
                         step.sender_param_intervals_cpu,
+                        opt_level=opt_level,
                     )
                 else:
                     buf = torch.zeros(
@@ -721,6 +719,7 @@ class ReaLModel(nn.Module):
                     buf = slice_intervals(
                         self.contiguous_param,
                         step.param_intervals_cpu,
+                        opt_level=opt_level,
                     )
                     send_buf_specs.append(buf)
 
@@ -762,7 +761,7 @@ class ReaLModel(nn.Module):
         assert len(recv_events) == len(recv_buf_specs)
         for e, x in zip(recv_events, recv_buf_specs):
             torch.cuda.current_stream().wait_event(e)
-            set_intervals(**x)
+            set_intervals(**x, opt_level=opt_level)
 
         return rtgt.to_layers_handle, to_contiguous_param, comm_volume
 

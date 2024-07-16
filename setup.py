@@ -217,7 +217,7 @@ if _is_cuda():
             "cxx": CXX_FLAGS,
             "nvcc": NVCC_FLAGS,
         },
-        libraries=["cuda"] if _is_cuda() else [],
+        libraries=["cuda"],
     )
     ext_modules.append(cr_extension)
 
@@ -235,9 +235,35 @@ if _is_cuda():
                 "--use_fast_math",
             ],
         },
-        libraries=["cuda"] if _is_cuda() else [],
+        libraries=["cuda"],
     )
     ext_modules.append(gae_extension)
+
+    set_interval_cuda = CUDAExtension(
+        name="realhf._C.set_interval_cuda",
+        sources=[
+            "csrc/interval_op/set_interval.cu",
+        ],
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+            "nvcc": NVCC_FLAGS,
+        },
+        libraries=["cuda"],
+    )
+    ext_modules.append(set_interval_cuda)
+
+    slice_interval_cuda = CUDAExtension(
+        name="realhf._C.slice_interval_cuda",
+        sources=[
+            "csrc/interval_op/slice_interval.cpp",
+        ],
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+            "nvcc": NVCC_FLAGS,
+        },
+        libraries=["cuda"],
+    )
+    ext_modules.append(slice_interval_cuda)
 
 search_extension = setuptools.Extension(
     name="realhf._C.mdm_search",

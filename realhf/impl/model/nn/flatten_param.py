@@ -101,6 +101,11 @@ def _slice_interval_dispatch(N: int) -> Callable:
         src = f.read()
     # NOTE: We embed the C++ binding code in python docstring because we want to dynamically compile
     # for a specific template value N. This ensures the optimal performance.
+    lines = src.split("\n")
+    for i, line in enumerate(lines):
+        if "TORCH_EXTENSION_NAME" in line:
+            break
+    src = "\n".join(lines[:i])
     src += f"""
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{
   m.def("slice_intervals", &slice_intervals<{N}>, "Slice intervals of a 1D tensor");
@@ -137,6 +142,11 @@ def _set_interval_dispatch(N: int, torch_dtype: torch.dtype) -> Callable:
         src = f.read()
     # NOTE: We embed the C++ binding code in python docstring because we want to dynamically compile
     # for a specific template value N. This ensures the optimal performance.
+    lines = src.split("\n")
+    for i, line in enumerate(lines):
+        if "TORCH_EXTENSION_NAME" in line:
+            break
+    src = "\n".join(lines[:i])
     src += f"""
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{
   m.def("set_intervals", &set_intervals<{N}, {dtype}>, "Set intervals of a 1D tensor");
@@ -209,27 +219,57 @@ def _set_intervals_py(
 def slice_intervals(
     src: torch.Tensor,
     intervals: List[Tuple[int, int]],
+    opt_level: int = 1,
 ):
-    N = len(intervals)
-    if N < 1000:
+    if opt_level == 0 or len(intervals) < 1000:
         # NOTE: The C++ implementation has no negative effect, but for small Ns
         # using the python implementation can omit compliation.
         return _slice_intervals_py(src, intervals)
-    slice_fn = _slice_interval_dispatch(N)
-    return slice_fn(src, intervals)
+    elif opt_level == 1:
+        try:
+            from realhf._C.slice_interval_cuda import (
+                _slice_intervals as _slice_intervals_cpp,
+            )
+
+            return _slice_intervals_cpp(src, intervals)
+        except ImportError:
+            return _slice_intervals_py(src, intervals)
+    else:
+        slice_fn = _slice_interval_dispatch(len(intervals))
+        return slice_fn(src, intervals)
 
 
 def set_intervals(
     src: torch.Tensor,
     dst: torch.Tensor,
     intervals: List[Tuple[int, int]],
+    opt_level: int = 1,
 ):
-    if len(intervals) < 2048 or not (src.is_cuda and dst.is_cuda):
+    if opt_level == 0 or len(intervals) < 2048 or not (src.is_cuda and dst.is_cuda):
         # NOTE: The CUDA implementation will launch a thread for each interval,
         # which has a negative effect when the number of intervals is small.
         return _set_intervals_py(src, dst, intervals)
-    set_fn = _set_interval_dispatch(len(intervals), src.dtype)
-    return set_fn(src, dst, intervals)
+    elif opt_level == 1:
+        try:
+            from realhf._C.set_interval_cuda import (
+                _set_intervals_bf16,
+                _set_intervals_fp16,
+                _set_intervals_fp32,
+            )
+
+            if src.dtype == torch.float32:
+                return _set_intervals_fp32(src, dst, intervals)
+            elif src.dtype == torch.float16:
+                return _set_intervals_fp16(src, dst, intervals)
+            elif src.dtype == torch.bfloat16:
+                return _set_intervals_bf16(src, dst, intervals)
+            else:
+                raise NotImplementedError(src.dtype)
+        except ImportError:
+            return _set_intervals_py(src, dst, intervals)
+    else:
+        set_fn = _set_interval_dispatch(len(intervals), src.dtype)
+        return set_fn(src, dst, intervals)
 
 
 def param_size_from_keys(

@@ -1,9 +1,9 @@
 #include <torch/extension.h>
 #include <ATen/ParallelOpenMP.h>
 
-template<size_t N>
-at::Tensor slice_intervals(const at::Tensor &src,
-                           const std::vector<std::pair<size_t, size_t>> &intervals) {
+inline at::Tensor _slice_intervals_helper(const at::Tensor &src,
+                                          const std::vector<std::pair<size_t, size_t>> &intervals,
+                                          size_t N) {
   {
     TORCH_CHECK(intervals.size() == N, "Expected ", N, " tensors, but got ", intervals.size());
     TORCH_CHECK(src.ndimension() == 1, "Expected 1D tensor, but got ", src.ndimension());
@@ -41,4 +41,20 @@ at::Tensor slice_intervals(const at::Tensor &src,
     });
     return at::cat_out(out, slices, 0);
   }
+}
+
+template<size_t N>
+at::Tensor slice_intervals(const at::Tensor &src,
+                           const std::vector<std::pair<size_t, size_t>> &intervals) {
+  return _slice_intervals_helper(src, intervals, N);
+}
+
+at::Tensor _slice_intervals(const at::Tensor &src,
+                            const std::vector<std::pair<size_t, size_t>> &intervals) {
+  size_t N = intervals.size();
+  return _slice_intervals_helper(src, intervals, N);
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("_slice_intervals", &_slice_intervals, "Slice intervals of a 1D tensor");
 }
