@@ -510,7 +510,7 @@ def _test_para_realloc(
     print("success")
 
 
-parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
+parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1), (3, 2, 1), (2, 1, 2), (1, 2, 2)]
 
 
 @pytest.mark.skipif(
