@@ -36,7 +36,6 @@ def run_grouped_mlp(num_tokens, mp_size, token_dispatch_strategy, seed=1):
         seq_mlp = SequentialMLP(
             num_local_experts=num_experts,
             config=mconfig,
-            add_bias_linear=False,
             dtype=torch.bfloat16,
             device=device,
         )
@@ -45,7 +44,6 @@ def run_grouped_mlp(num_tokens, mp_size, token_dispatch_strategy, seed=1):
         grouped_mlp = GroupedMLP(
             num_local_experts=num_experts,
             config=mconfig,
-            add_bias_linear=False,
             dtype=torch.bfloat16,
             device=device,
         )

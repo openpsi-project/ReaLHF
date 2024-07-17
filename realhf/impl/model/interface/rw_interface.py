@@ -166,6 +166,9 @@ class PairedRewardInterface(model_api.ModelInterface):
         )
 
         res = {}
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stats:
             if constants.pipe_parallel_world_size() > 1:
                 stats["max_pos_score"] /= constants.pipe_parallel_world_size() * 2
@@ -185,6 +188,7 @@ class PairedRewardInterface(model_api.ModelInterface):
                 correct_predictions=int(stats["correct_predictions"]),
                 max_pos_score=float(stats["max_pos_score"]),
                 min_neg_score=float(stats["min_neg_score"]),
+                **global_stats,
             )
 
         cur_epoch = model.version.epoch

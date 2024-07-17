@@ -170,6 +170,7 @@ class ReaLModelConfig:
         Currently not supported.
     :type gradient_accumulation_fusion: bool
     :param use_grouped_gemm: Whether to use grouped GEMM for MoE.
+        Currenly grouped GEMM only supports bf16 and does not support enabling sequence parallel
     :type use_grouped_gemm: bool
     """
 

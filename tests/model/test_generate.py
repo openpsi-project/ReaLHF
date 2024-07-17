@@ -165,16 +165,13 @@ def make_random_inference_model(model_class, model_path):
             model_path=model_path,
             is_critic=False,
         )
-
-        # FIXME
-        model = ReaLModel(mconfig, dtype=torch.bfloat16, device="cuda")
+        model = ReaLModel(mconfig, dtype=torch.float16, device="cuda")
         if constants.pipe_parallel_world_size() == 1:
             model = add_helper_functions(model)
         model.instantiate()
-        # FIXME
-        # getattr(model, f"from_{model_class}")(
-        #     load_dir=model_path, init_critic_from_actor=False
-        # )
+        getattr(model, f"from_{model_class}")(
+            load_dir=model_path, init_critic_from_actor=False
+        )
         model = PipelinableInferenceEngine(model)
         model.eval()
     return model

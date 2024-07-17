@@ -115,7 +115,7 @@ def _gather_along_first_dim(input_):
 
 def _gather_along_first_dim_moe(input_, use_global_buffer=False):
     """Gather tensors and concatenate along the first dimension."""
-    group = constants.expert_and_model_parallel_group()
+    group = constants.model_parallel_group()
     world_size = torch.distributed.get_world_size(group=group)
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
@@ -139,7 +139,7 @@ def _gather_along_first_dim_moe(input_, use_global_buffer=False):
 
 def _reduce_scatter_along_first_dim_moe(input_, use_global_buffer=False):
     """Reduce-scatter the input tensor across model parallel group."""
-    group = constants.expert_and_model_parallel_group()
+    group = constants.model_parallel_group()
     world_size = torch.distributed.get_world_size(group=group)
     # Bypass the function if we are using only 1 GPU.
     if world_size == 1:
@@ -172,26 +172,6 @@ def _reduce_scatter_along_last_dim(input_):
     )
     concat_tensor = torch.cat(split_tensors, dim=0)
     output = _reduce_scatter_along_first_dim(concat_tensor).reshape(target_shape)
-    return output
-
-
-def _gather_along_first_dim_expert_parallel(input_):
-    """Gather tensors and concatinate along the first dimension."""
-
-    world_size = constants.expert_parallel_world_size()
-    # Bypass the function if we are using only 1 GPU.
-    if world_size == 1:
-        return input_
-
-    dim_size = list(input_.size())
-    dim_size[0] = dim_size[0] * world_size
-
-    output = torch.empty(
-        dim_size, dtype=input_.dtype, device=torch.cuda.current_device()
-    )
-    torch.distributed._all_gather_base(
-        output, input_.contiguous(), group=constants.expert_parallel_group()
-    )
     return output
 
 

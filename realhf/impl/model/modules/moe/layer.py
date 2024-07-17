@@ -28,24 +28,7 @@ class LayerNormMoELayer(torch.nn.Module):
         self.config = config
         self.dtype = dtype
         self.device = device
-        self.expert_parallel_size = constants.expert_parallel_world_size()
-        assert (
-            self.expert_parallel_size > 0
-        ), "Expected non-negative expert parallel size"
-
-        assert self.config.num_experts % self.expert_parallel_size == 0
-        self.num_local_experts = self.config.num_experts // self.expert_parallel_size
-        local_expert_indices_offset = (
-            constants.expert_parallel_rank() * self.num_local_experts
-        )
-
-        self.local_expert_indices = [
-            local_expert_indices_offset + i for i in range(self.num_local_experts)
-        ]
-        assert all(
-            map(lambda x: x < self.config.num_experts, self.local_expert_indices)
-        )
-        self.layer_idx = layer_idx
+        self.num_experts = self.config.num_experts
 
         if config.layer_norm_type is None:
             layer_norm_fn = nn.LayerNorm
@@ -57,17 +40,16 @@ class LayerNormMoELayer(torch.nn.Module):
             config.hidden_dim, eps=config.layer_norm_epsilon, dtype=dtype, device=device
         )
 
-        self.router = TopKRouter(config.hidden_dim, config=self.config)
+        self.router = TopKRouter(config=self.config, layer_idx=layer_idx)
+        self.token_dispatcher = MoETokenDispatcher(config=self.config)
         if config.use_grouped_gemm:
             self.experts = GroupedMLP(
-                self.num_local_experts, self.config, dtype=dtype, device=device
+                self.num_experts, self.config, dtype=dtype, device=device
             )
         else:
             self.experts = SequentialMLP(
-                self.num_local_experts, self.config, dtype=dtype, device=device
+                self.num_experts, self.config, dtype=dtype, device=device
             )
-
-        self.token_dispatcher = MoETokenDispatcher(config=self.config)
 
     def forward(self, hidden_states: torch.Tensor):
         if (

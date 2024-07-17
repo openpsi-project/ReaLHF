@@ -4,6 +4,9 @@ import math
 from typing import Any, Optional
 
 import torch
+import torch.distributed as dist
+
+from realhf.base import constants, logging
 
 
 def switch_load_balancing_loss_func(
@@ -32,8 +35,8 @@ def switch_load_balancing_loss_func(
     if sequence_partition_group is not None:
         # We can keep `aggregated_probs_per_expert` local since we don't need the gradient for `tokens_per_expert`, saving one allreduce operation for `aggregated_probs_per_expert`.
         # NOTE: Since the auxiliary loss is computed on the local `aggregated_probs_per_expert`, it requires scaling by `dist.world_size(sequence_partition_group)` when printing the loss.
-        num_sub_sequence = torch.distributed.get_world_size(sequence_partition_group)
-        torch.distributed.all_reduce(tokens_per_expert, group=sequence_partition_group)
+        num_sub_sequence = dist.get_world_size(sequence_partition_group)
+        dist.all_reduce(tokens_per_expert, group=sequence_partition_group)
 
     num_tokens = probs.shape[0] * topk * num_sub_sequence
     num_experts = probs.shape[1]
@@ -100,9 +103,9 @@ def get_capacity(
     return capacity
 
 
-def custom_histc(input, bins, min, max):
+def custom_histc(input: torch.Tensor, bins: int, min: Any, max: Any):
     """A CPU compatible version of torch.histc."""
-    if input.device == torch.device("cpu"):
+    if input.is_cpu:
         out = torch.zeros(bins, dtype=torch.long)
         bin_width = (max - min) / bins
 
@@ -116,35 +119,6 @@ def custom_histc(input, bins, min, max):
         return out
     else:
         return torch.histc(input, bins=bins, min=min, max=max)
-
-
-# def custom_histc(
-#     input_tensor: torch.Tensor,
-#     bins: int,
-#     min: Any,
-#     max: Any,
-#     out: Optional[torch.LongTensor] = None
-# ):
-#     """A CPU compatible version of torch.histc
-#     that can output into a pre-allocated long tensor.
-#     """
-#     if out is None:
-#         out = torch.zeros(bins, dtype=torch.long, device=input_tensor.device)
-#     else:
-#         assert out.shape[0] == bins and out.dim() == 1, "Output tensor must have shape (bins,)."
-#         out.zero_()
-
-#     bin_width = (max - min) / bins
-
-#     # Iterate over the input tensor and increment the appropriate bin
-#     flattened = input_tensor.flatten()
-#     for value in flattened:
-#         if min <= value < max:
-#             bin_index = int((value - min) / bin_width)
-#             out[bin_index] += 1
-#         elif value == max:
-#             out[bins - 1] += 1
-#     return out
 
 
 class MoEAuxLossAutoScaler(torch.autograd.Function):
@@ -214,17 +188,9 @@ def permute(tokens, indices, num_out_tokens: int = None, padded_mode: bool = Fal
 
     flatten_indices = indices.view(-1)
     sorted_indices = torch.argsort(flatten_indices, stable=True)
-    # print(sorted_indices, sorted_indices.shape)
-    # if num_out_tokens is not None:
-    #     sorted_indices = sorted_indices[:num_out_tokens]
+    if num_out_tokens is not None:
+        sorted_indices = sorted_indices[:num_out_tokens]
     permuted_tokens = tokens.index_select(0, sorted_indices // topk)
-    # indices = sorted_indices // topk
-    # cols = []
-    # for i in indices:
-    #     # print(i, type(i))
-    #     a = tokens[i]
-    #     cols.append(a)
-    # permuted_tokens = torch.stack(cols, dim=0)
     return permuted_tokens, sorted_indices
 
 
@@ -422,7 +388,10 @@ def topk_softmax_with_capacity(
         return final_probs, final_indices, tokens_per_expert_before_capacity
 
 
-def save_to_aux_losses_tracker(
+aux_loss_names = ["aux_loss", "z_loss"]
+
+
+def update_aux_losses_tracker(
     name: str, loss: torch.Tensor, layer_number: int, num_layers: int
 ):
     """Save the auxiliary loss for logging.
@@ -432,88 +401,31 @@ def save_to_aux_losses_tracker(
         layer_number (int): Layer index of the loss.
         num_layers (int): The number of total layers.
     """
-    # FIXME
-    pass
-    # Skip aux loss logging if layer_number is None.
-    # if layer_number is None:
-    #     return
-
-    # if name not in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
-    #     parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name] = torch.zeros(
-    #         num_layers, device=loss.device
-    #     )
-    # parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name][
-    #     layer_number - 1
-    # ] += loss.detach()
+    assert name in aux_loss_names, f"Invalid aux loss name: {name}."
+    losses = constants.get_from_global_stats_tracker(name)
+    if losses is None:
+        losses = torch.zeros(num_layers, device=loss.device)
+    losses[layer_number] += loss.detach()
+    constants.save_to_global_stats_tracker(
+        name, losses, hook=avg_aux_loss, stats_key=name
+    )
 
 
-def clear_aux_losses_tracker():
-    """Clear the auxiliary losses."""
-    # for name in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
-    #     parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name].zero_()
-    pass
+def avg_aux_loss_across_pipeline_parallel(stats_key):
+    loss: torch.Tensor = constants.get_from_global_stats_tracker(stats_key)
+    dist.all_reduce(loss, group=constants.pipe_parallel_group())
+    constants.save_to_global_stats_tracker(stats_key, loss.mean())
 
 
-def get_aux_losses_tracker():
-    """Return the auxiliary losses."""
-    # return parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER
-    pass
+def avg_aux_loss_across_data_parallel(stats_key):
+    loss: torch.Tensor = constants.get_from_global_stats_tracker(stats_key)
+    dist.all_reduce(loss, op=dist.ReduceOp.AVG, group=constants.data_parallel_group())
+    constants.save_to_global_stats_tracker(stats_key, loss)
 
 
-def aggregate_aux_losses_tracker_across_pipeline_parallel():
-    """Sum aux losses across PP."""
-    # for name in parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER:
-    #     loss = parallel_state._MOE_AUX_LOSSES_LOGGING_TRACKER[name]
-    #     torch.distributed.all_reduce(
-    #         loss, group=parallel_state.get_pipeline_model_parallel_group()
-    #     )
-    pass
-
-
-def track_moe_metrics(
-    loss_scale,
-    iteration,
-    writer,
-    wandb_writer=None,
-    total_loss_dict=None,
-    per_layer_logging=False,
-):
-    # Aux loss logging
-    aggregate_aux_losses_tracker_across_pipeline_parallel()
-    if writer is not None:
-        aux_losses = {
-            k: v.float() * loss_scale for k, v in get_aux_losses_tracker().items()
-        }
-        for name, loss_list in aux_losses.items():
-            if total_loss_dict is not None:
-                if name not in total_loss_dict:
-                    total_loss_dict[name] = loss_list.mean()
-                else:
-                    total_loss_dict[name] += loss_list.mean()
-
-            # currently when using add_scalars,
-            # torch.utils.add_scalars makes each timer its own run, which
-            # polutes the runs list, so we just add each as a scalar
-            writer.add_scalar(name, loss_list.mean(), iteration)
-            if per_layer_logging:
-                for i, loss in enumerate(loss_list.tolist()):
-                    writer.add_scalar(f"moe/{name}_layer_{i}", loss, iteration)
-
-            # W&B logging lacks support for logging multiple scalars simultaneously.
-            # As a workaround, we log each scalar individually first, then we can create
-            # a custom panel to manually group them to a single plot.
-            if wandb_writer:
-                wandb_writer.log({f"{name}": loss_list.mean()}, iteration)
-                if per_layer_logging:
-                    wandb_writer.log(
-                        {
-                            f"moe/{name}_layer_{i}": loss
-                            for i, loss in enumerate(loss_list.tolist())
-                        },
-                        iteration,
-                    )
-
-    clear_aux_losses_tracker()
+def avg_aux_loss(stats_key):
+    avg_aux_loss_across_pipeline_parallel(stats_key)
+    avg_aux_loss_across_data_parallel(stats_key)
 
 
 class moe_gather(torch.autograd.Function):

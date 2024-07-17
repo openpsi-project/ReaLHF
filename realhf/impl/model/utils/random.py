@@ -166,7 +166,7 @@ def model_parallel_cuda_manual_seed(seed):
     """
     # 2718 is just for fun and any POSITIVE value will work.
     model_parallel_rank = constants.model_parallel_rank()
-    expert_parallel_rank = constants.expert_parallel_rank()
+    expert_parallel_rank = 0
     offset = seed + 2718
     tensor_model_parallel_seed = offset + model_parallel_rank
     # Data parallel gets the original seed.
@@ -279,22 +279,17 @@ def checkpoint(function, distribute_saved_activations, *args):
 
 
 def _initialize_affine_weight_gpu(
-    weight, init_method, partition_dim, stride=1, expert_parallel=False
+    weight,
+    init_method,
+    partition_dim,
+    stride=1,
 ):
     """Initialize affine weight for model parallel on GPU."""
-
     set_tensor_model_parallel_attributes(
         tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
     )
-
-    init_method(weight)
-    # FIXME:
-    # if not expert_parallel:
-    #     with get_cuda_rng_tracker().fork():
-    #         init_method(weight)
-    # else:
-    #     with get_cuda_rng_tracker().fork(get_expert_parallel_rng_tracker_name()):
-    #         init_method(weight)
+    with get_cuda_rng_tracker().fork():
+        init_method(weight)
 
 
 def _initialize_affine_weight_cpu(

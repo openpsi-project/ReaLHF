@@ -29,13 +29,11 @@ class SequentialMLP(torch.nn.Module):
         self,
         num_local_experts: int,
         config: ReaLModelConfig,
-        add_bias_linear: bool = False,  # FIXME: currently bias is not supported
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
         self.config = config
-        self.add_bias = add_bias_linear
 
         self.num_local_experts = num_local_experts
         self.local_experts = torch.nn.ModuleList()
@@ -104,7 +102,6 @@ class GroupedMLP(torch.nn.Module):
         num_local_experts: int,
         config: ReaLModelConfig,
         init_method: Callable = init.xavier_normal_,
-        add_bias_linear: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
@@ -120,10 +117,6 @@ class GroupedMLP(torch.nn.Module):
         self.num_local_experts = num_local_experts
 
         gg.assert_grouped_gemm_is_available()
-        assert (
-            add_bias_linear == False
-        ), "bias in the expert layer is not supported in Grouped GEMM yet"
-
         self.activation_func = get_activation_fn(self.config.activation_function)
 
         # How many feature each rank holds for fc1 and fc2, respectively.
@@ -160,19 +153,16 @@ class GroupedMLP(torch.nn.Module):
             self.grouped_gate_proj,
             init_method,
             partition_dim=1,
-            expert_parallel=False,
         )
         _initialize_affine_weight_gpu(
             self.grouped_up_proj,
             init_method,
             partition_dim=0,
-            expert_parallel=False,
         )
         _initialize_affine_weight_gpu(
             self.grouped_down_proj,
             init_method,
             partition_dim=0,
-            expert_parallel=False,
         )
 
         # Parameters for weight loading

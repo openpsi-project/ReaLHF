@@ -4,6 +4,7 @@ import copy
 import getpass
 import os
 import pathlib
+from collections import defaultdict
 from typing import *
 
 import numpy as np
@@ -388,31 +389,6 @@ def data_parallel_group():
     return grid().get_data_parallel_group()
 
 
-# FIXME
-def expert_parallel_group():
-    return self_group()
-
-
-def expert_parallel_rank() -> int:
-    return 0
-
-
-def expert_parallel_world_size() -> int:
-    return 1
-
-
-def expert_and_model_parallel_group():
-    return model_parallel_group()
-
-
-def expert_and_model_parallel_rank() -> int:
-    return model_parallel_rank()
-
-
-def expert_and_model_parallel_world_size() -> int:
-    return model_parallel_world_size()
-
-
 def set_fake_mp_world_size(world_size):
     # used only in scripts and tests
     global _fake_mp_world_size
@@ -454,3 +430,55 @@ def get_env_vars(**kwargs):
         "REAL_PACKAGE_PATH": str(get_repo_path()),
         **BASE_ENVIRONS,
     }
+
+
+################# logging related #################
+GLOBAL_STATS_TRACKER = defaultdict(dict)
+GLOBAL_STATS_TRACKER_LOG_HOOKS = defaultdict(dict)
+
+
+def save_to_global_stats_tracker(key, value, hook=None, **hook_kwargs):
+    if _model_name is None:
+        raise RuntimeError("Global constant `model_name` is accessed before set.")
+    GLOBAL_STATS_TRACKER[_model_name][key] = value
+    if hook is not None:
+        GLOBAL_STATS_TRACKER_LOG_HOOKS[_model_name][key] = (hook, hook_kwargs)
+
+
+def get_from_global_stats_tracker(key):
+    if _model_name is None:
+        raise RuntimeError("Global constant `model_name` is accessed before set.")
+    return GLOBAL_STATS_TRACKER[_model_name].get(key, None)
+
+
+def clear_global_stats_tracker():
+    if _model_name is None:
+        raise RuntimeError("Global constant `model_name` is accessed before set.")
+    global GLOBAL_STATS_TRACKER
+    GLOBAL_STATS_TRACKER[_model_name] = dict()
+
+
+def log_global_stats_tracker(
+    return_dict: bool = True, clear_stats_after_logging: bool = True
+):
+    if _model_name is None:
+        raise RuntimeError("Global constant `model_name` is accessed before set.")
+    stats = GLOBAL_STATS_TRACKER[_model_name]
+    hooks = GLOBAL_STATS_TRACKER_LOG_HOOKS[_model_name]
+    for key in stats.keys():
+        hook, hook_kwargs = hooks.get(key, None)
+        if hook is not None:
+            hook(**hook_kwargs)
+
+    res = {key: value for key, value in stats.items()}
+    if not return_dict:
+        logger.info(f"Logging global stats tracker:")
+    for key, value in stats.items():
+        if not return_dict:
+            logger.info(f"{key}: {value}")
+
+    if clear_stats_after_logging:
+        clear_global_stats_tracker()
+
+    if return_dict:
+        return res
