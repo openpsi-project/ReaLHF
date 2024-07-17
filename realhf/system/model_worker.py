@@ -563,6 +563,11 @@ class ModelWorker(worker_base.Worker):
                         )
                     )
 
+                # NOTE: Data used in the previous epoch may still exist in the storage
+                # before executing the "clear_data_cache" command. We store data with
+                # the same ID in the next epoch temporarily in early_arrived_data
+                # to prevent them from being cleared in the future requests.
+                # These data will be gradually filled into the storage.
                 self.__early_arrived_data = []
                 data_loaded = []
                 for x in fetched_data:
@@ -783,6 +788,15 @@ class ModelWorker(worker_base.Worker):
 
             self.__request_queue.put_nowait((request, request.data, False, None))
 
+    def amend_early_arrived_data(self):
+        remaining_data = []
+        for x in self.__early_arrived_data:
+            if x.ids[0] not in self.__data_storage:
+                self.__data_storage[x.ids[0]] = x
+            else:
+                remaining_data.append(x)
+        self.__early_arrived_data = remaining_data
+
     def _poll(self):
         if not self.__dist_env_resolved:
             self.__lazy_setup()
@@ -809,6 +823,7 @@ class ModelWorker(worker_base.Worker):
         # A.pre_hook -> B.pre_hook -> A -> B -> A.post_hook -> B.post_hook.
         self.handle_all_pre_hooks()
         for _ in range(16):
+            self.amend_early_arrived_data()
             try:
                 request, data, handled, res = self.__request_queue.get_nowait()
                 self.model_poll_step(request, data, handled, res)

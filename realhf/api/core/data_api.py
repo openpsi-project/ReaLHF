@@ -408,6 +408,13 @@ class SequenceSample:
         data: Dict[str, torch.Tensor],
         metadata: Optional[Dict[str, Any]] = None,
     ):
+        if metadata is None:
+            metadata = {}
+        for k, v in metadata.items():
+            if not isinstance(v, list) or len(v) != len(seqlens):
+                raise ValueError(
+                    f"Metadata `{k}` should be a list of length {len(seqlens)}: {v}."
+                )
         keys = set(data.keys())
         seqlens = [int(seqlen) for seqlen in seqlens]
         seqlens = {key: cls._resolve_seqlen_from_key(key, seqlens) for key in keys}
@@ -417,13 +424,6 @@ class SequenceSample:
         dtypes = {
             key: data[key].dtype if data[key] is not None else None for key in keys
         }
-        if metadata is None:
-            metadata = {}
-        for k, v in metadata.items():
-            if not isinstance(v, list) or len(v) != len(seqlens):
-                raise ValueError(
-                    f"Metadata {k} should be a list of length {len(seqlens)}: {v}."
-                )
         return cls(
             keys=keys,
             ids=ids,

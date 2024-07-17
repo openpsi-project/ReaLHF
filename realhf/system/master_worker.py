@@ -506,10 +506,11 @@ async def model_rpc_request_func(
         buf_indices, sample = await buffer.get_batch_for_rpc(rpc)
 
         if rpc.is_src:
-            ctrl.ids_to_clear = ctrl.ids_to_clear.union(sample.ids)
             ctrl.used_hash_vals_this_epoch = ctrl.used_hash_vals_this_epoch.union(
                 sample.ids
             )
+        if rpc.is_dst and len(ctrl.ids_to_clear) < len(sample.ids):
+            ctrl.ids_to_clear = ctrl.ids_to_clear.union(sample.ids)
 
         # Record the data amount for each interface to compute FLOPs.
         # Since the user may arbitrarily specify input/output keys,
