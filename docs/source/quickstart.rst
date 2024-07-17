@@ -363,6 +363,13 @@ Run the following command to train using PPO:
    You can also pass in the trained DPO checkpoint to initialize the PPO
    actor.
 
+   If you want to direct initialize the critic model from a pre-trained
+   actor model instead of the reward model, you can set
+   ``critic.init_critic_from_actor=True`` and
+   ``reward.init_critic_from_actor=True``. This is also beneficial for
+   benchmarking throughputs since checkpoints of SFT and reward modeling
+   are not required.
+
 The configuration options of PPO are the most complex among the three
 stages. PPO involves four different models: *Actor*, *Critic*,
 *Reference*, and *Reward*. Each model can have different functionalities
@@ -422,7 +429,7 @@ on the algorithm design.
 
 You have now figured out how to run built-in experiments and how to
 manage training hyperparameters, logs, and checkpoints within ReaL.
+
 Next, you can follow the :doc:`distributed` section to set up your
 experiments in a large cluster, or proceed to the :doc:`customization`
-section to learn how to customize the datasets, models, and algorithms
-in ReaL.
+section to learn how to customize the datasets, models, and algorithms.
