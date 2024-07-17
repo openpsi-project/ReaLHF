@@ -16,9 +16,6 @@ We provide three types of dataset implementations in
 -  :class:`realhf.PairedComparisonDatasetConfig`
 -  :class:`realhf.PromptOnlyDatasetConfig`
 
-Please refer to the respective configuration documentation for detailed
-instructions on how to use or modify these datasets.
-
 Datasets in ReaL are commonly used `PyTorch map-style datasets
 <https://pytorch.org/docs/stable/data.html#map-style-datasets>`_. Users
 need to implement a ``__getitem__`` method in the dataset class, which
@@ -27,6 +24,74 @@ single sample and its sequence length. The sequence length is necessary
 because ReaL uses variable-length inputs without padding to save GPU
 memory.
 
+The Data Structure: :class:`realhf.SequenceSample`
+==================================================
+
+ReaL follows `the API of flash_attn_varlen_func
+<https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/flash_attn_interface.py#L1053>`_
+to handle variable-length inputs without padding. The class
+:class:`realhf.SequenceSample` is used to store the lengths and data of
+sequences, facilitating gather, split, and data transfer operations on
+these variable-length datasets.
+
+The core fields of :class:`realhf.SequenceSample` are:
+
+-  ``ids``: A list of unique hashable identifiers for each data piece.
+   The length of ``ids`` corresponds to the batch size.
+
+-  ``keys``: A set of strings representing the keys loaded from the
+   dataset or produced by model function calls. Each key can contain
+   multiple sequences, such as multiple responses generated from the
+   same prompt. Sequences with the same key are packed together, with a
+   vector representing their lengths.
+
+-  ``seqlens``: A dictionary of lists, where each list corresponds to
+   the sequence lengths of the data specified by the key. The length of
+   the lists should be equal to the batch size. The elements in the list
+   should be 1D ``torch.IntTensor``. The tensor size equals the number
+   of sequences packed for each key. For example, if there are K
+   responses for each prompt, each tensor in the "response" list should
+   have size (K,), and each tensor in the "prompt" list should have size
+   (1,).
+
+-  ``data``: A dictionary of PyTorch tensors. All data are packed into
+   1D tensors with size (total_seqlen, ). The outer packing dimension
+   represents the batch size, while the inner packing dimension
+   represents the number of sequences for each key.
+
+Below is an example implementation of the dataset used for reward
+modeling:
+
+.. code:: python
+
+   def __getitem__(self, idx):
+        ...
+        return data_api.SequenceSample(
+            keys=["packed_input_ids", "prompt_lens"],
+            data=dict(
+                  packed_input_ids=torch.tensor(packed_input_ids, dtype=torch.long),
+                  prompt_lens=torch.tensor([prompt_len], dtype=torch.int32),
+            ),
+            ...
+            ids=[self.ids[idx]],
+            seqlens=dict(
+                packed_input_ids=[torch.tensor(input_lens, dtype=torch.int32)],
+                prompt_lens=[torch.tensor([1], dtype=torch.int32)],
+            ),
+        )
+
+In this example, the returned sample has a batch size of 1, with two
+keys: "packed_input_ids" and "prompt_lens". The "packed_input_ids" key
+contains packed positive and negative responses, with their lengths
+specified by the vector "input_lens". The "prompt_lens" key contains a
+scalar tensor representing the length of the prompt, with a length of 1.
+
+Note that the ``ids`` and ``seqlens`` fields are wrapped in length-1
+lists, indicating that the batch size is 1.
+
+For more details, please refer to :class:`realhf.SequenceSample` and the
+implementation of datasets under the ``realhf/impl/dataset`` folder.
+
 How Dataset Configuration is Parsed
 ===================================
 
@@ -34,24 +99,23 @@ We will use the SFT experiment as an example.
 
 The :class:`realhf.PromptAnswerDatasetConfig` object will be converted
 to a dataset configuration under the system API, specifically
-``realhf.api.core.system_api.Dataset``. Refer to the ``datasets`` method
-of :class:`realhf.SFTConfig` for more details. This object includes a
+``realhf.api.core.config.DatasetAbstraction``. This object includes a
 dataset name (in this case, "prompt_answer") and corresponding arguments
 that are passed to the dataset class's constructor:
 
 .. code:: python
 
    @property
-   def datasets(self):
-       return [
-           Dataset(
-               "prompt_answer",
-               args=dict(
-                   max_length=self.dataset.max_seqlen,
-                   dataset_path=self.dataset.train_path,
-               ),
-           )
-       ]
+    def datasets(self):
+        return [
+            DatasetAbstraction(
+                "prompt_answer",
+                args=dict(
+                    max_length=self.dataset.max_seqlen,
+                    dataset_path=self.dataset.train_path,
+                ),
+            )
+        ]
 
 At the end of ``realhf.impl.dataset.prompt_answer_dataset``, we find the
 following line:
@@ -60,12 +124,12 @@ following line:
 
    data_api.register_dataset("prompt_answer", PromptAnswerDataset)
 
-This line registers the dataset class with the system API. When this
-name is provided to the system API, ReaL can locate this dataset
-implementation and construct it. The ``args`` field in
-``realhf.api.core.system_api.Dataset`` will be passed to the
-``__init__`` method of the dataset class, except that ReaL reserves a
-``util`` field to store some utility objects.
+This line registers the dataset class with the system API. When the name
+"prompt_answer" name is provided to the system API, ReaL can locate this
+dataset implementation and construct it. The ``args`` field in
+``DatasetAbstraction`` will be passed to the ``__init__`` method of the
+dataset class, except that ReaL reserves a ``util`` field to store some
+utility objects.
 
 Steps for Implementing a New Dataset
 ====================================
@@ -77,16 +141,21 @@ Steps for Implementing a New Dataset
    object containing the sequence length as metadata.
 
 #. Register the class with ``data_api.register_dataset`` at the end of
-   the file, using the name "my-dataset".
+   the file, e.g., using the name "my-dataset".
+
+#. Check your dataset implementation by running the unit test in
+   ``tests/data/test_load_data.py``. Please implement a new test
+   function for your customized dataset class by imitating existing
+   ones.
 
 #. Update the name of the dataset in experiment configurations, for
-   example, in the ``datasets`` method of ``realhf.SFTConfig``, to
+   example, in the ``datasets`` method of :class:`realhf.SFTConfig`, to
    "my-dataset".
 
 #. If you need to pass additional arguments to construct the dataset
    class, modify the quickstart configuration class (in this case,
    ``realhf.PromptAnswerDatasetConfig``) as well as the ``args`` field
-   in the system API dataset object.
+   in the ``DatasetAbstraction`` object.
 
 ********************
  Customizing Models
@@ -114,12 +183,19 @@ convertible HuggingFace model, the user should implement:
    :class:`realhf.ReaLModelConfig`.
 
 -  Two functions to convert model state dicts between HuggingFace and
-   ReaL, primarily involving key remapping.
+   ReaL, primarily involving key remapping. Importantly, these functions
+   should be able to *remap any subset of model parameters* due to the
+   use of 3D parallelism in ReaL.
 
 -  Three functions specifying the names of parameters in the embedding
    layer, transformer blocks, and the output layer, respectively. These
    functions are used to selectively load checkpoints with 3D
    parallelism.
+
+.. note::
+
+   The actual save/load funcion is implemented in
+   ``realhf/impl/model/conversion/hf_registry.py``.
 
 Steps to Support a New HuggingFace Model
 ========================================
@@ -127,32 +203,8 @@ Steps to Support a New HuggingFace Model
 -  Create a new model file under ``api/from_hf/``.
 -  Implement the required helper functions as described above.
 -  Register the model with register_hf_family at the end of the file.
--  (Optional) Test the consistency of the implemented model with scripts
-   in ``tests/test_cpu_inference.py``.
-
-..
-   We acknowledge that the current configuration and implementation of ``ReaLModel``
-
-..
-   do not support all features of HuggingFace models,
-
-..
-   such as MoE.
-
-..
-   As a result, supporting a new HuggingFace model
-
-..
-   often requires modifications to files in ``impl/model/nn/``,
-
-..
-   which can be a challenging experience for users unfamiliar with the code architecture.
-
-..
-   If you have any questions or wish to request a new model feature,
-
-..
-   please feel free to raise an issue on our GitHub repository.
+-  Test the consistency of the implemented model with scripts in
+   ``tests/model/test_cpu_inference.py``.
 
 ************************
  Customizing Algorithms

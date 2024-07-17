@@ -44,22 +44,23 @@ class ParallelismConfig:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
 
-    def degree_eq(self, other):
-        # NOTE: We only want to know whether the degree or the sharding strategy is the same
-        # for parameter reallocation. We use this function to decide whether to use different
-        # model names.
-        return (
-            (self.model_parallel_size == other.model_parallel_size)
-            and (self.pipeline_parallel_size == other.pipeline_parallel_size)
-            and (self.data_parallel_size == other.data_parallel_size)
-        )
-
     def __str__(self):
         return (
             f"Parallel(mp={self.model_parallel_size},"
             f"pp={self.pipeline_parallel_size},"
             f"dp={self.data_parallel_size})"
         )
+
+
+def parallelism_eq(this, other):
+    # NOTE: We write this function because
+    # 1) we don't want to compare sequence_parallelism (it's irrelevant to parameter reallocation)
+    # 2) implementing this function as a method of ParallelismConfig would cause a OmegaConf bug
+    return (
+        (this.model_parallel_size == other.model_parallel_size)
+        and (this.pipeline_parallel_size == other.pipeline_parallel_size)
+        and (this.data_parallel_size == other.data_parallel_size)
+    )
 
 
 @dataclasses.dataclass
