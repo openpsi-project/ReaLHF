@@ -54,10 +54,6 @@ class DeviceMesh:
                 if self.n_nodes > 1
                 else f"{cluster_spec.node_name_prefix}01"
             )
-            if self.n_gpus_per_node < 8:
-                self.global_mesh_name += ":" + ",".join(
-                    map(str, range(self.n_gpus_per_node))
-                )
 
         if self.global_mesh_name is not None and self.name is None:
             self.name = device_mesh_name_from_mapping(
@@ -177,12 +173,14 @@ class DeviceMesh:
         return True
 
 
-def make_device_mesh_from_name(global_mesh_name: str, name: str):
+def make_device_mesh_from_name(
+    global_mesh_name: str, name: str, n_gpus_per_node: int = 8
+):
     """
     DeviceMesh name format: <prefix><node_indices>[:<gpu_ids>]
         slurm_nodelist is the name of slurm nodes the mesh is on, should follow slurm convention,
         for example "NODE[40-43]" or "NODE[01,11,13-14]" with prefix NODE,
-        if n_nodes=1, gpu_ids are the gpu id list delimited by comma if n_gpus < 8,
+        if n_nodes=1, gpu_ids are the gpu id list delimited by comma if n_gpus < n_gpus_per_node,
         for example "0,1,2,3" or "0,1". An example of full device mesh name
         in this situation is "NODE40:0,1,2,3"
 
@@ -191,12 +189,12 @@ def make_device_mesh_from_name(global_mesh_name: str, name: str):
     prefix = cluster_spec.node_name_prefix
     node_list = parse_nodelist(global_mesh_name, prefix)
     n_nodes = len(node_list)
-    n_gpus_per_node = 8
 
     gpu_ids = None
     if ":" in name:
         node_names, gpu_ids = name.split(":")
         gpu_ids = list(map(int, gpu_ids.split(",")))
+        assert all(gpu_id < n_gpus_per_node for gpu_id in gpu_ids)
     else:
         node_names = name
     node_names = parse_nodelist(node_names, prefix)
@@ -222,15 +220,11 @@ def device_mesh_name_from_mapping(global_mesh_name: str, mapping: np.ndarray):
     prefix = cluster_spec.node_name_prefix
     node_list = parse_nodelist(global_mesh_name, prefix)
     n_nodes = len(node_list)
-    n_gpus_per_node = (
-        8
-        if ":" not in global_mesh_name
-        else len(global_mesh_name.split(":")[1].split(","))
-    )
-    assert mapping.shape == (n_nodes, n_gpus_per_node)
+    n_gpus_per_node = mapping.shape[1]
+    assert mapping.shape[0] == n_nodes
     node_indices, gpu_ids = np.where(mapping == 1)
 
-    if np.sum(mapping) < 8:
+    if np.sum(mapping) < n_gpus_per_node:
         node_name = node_list[node_indices[0]]
         gpu_ids = list(map(str, gpu_ids))
         return f"{node_name}:{','.join(gpu_ids)}"

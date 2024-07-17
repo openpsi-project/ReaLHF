@@ -14,7 +14,6 @@ from realhf.impl.model.modules.moe.token_dispatcher import MoETokenDispatcher
 
 
 class LayerNormMoELayer(torch.nn.Module):
-    """Mixture of experts Layer **currently only supports no token dropping**."""
 
     def __init__(
         self,
@@ -43,19 +42,16 @@ class LayerNormMoELayer(torch.nn.Module):
         self.router = TopKRouter(config=self.config, layer_idx=layer_idx)
         self.token_dispatcher = MoETokenDispatcher(config=self.config)
         if config.use_grouped_gemm:
-            self.experts = GroupedMLP(
-                self.num_experts, self.config, dtype=dtype, device=device
-            )
+            self.experts = GroupedMLP(self.config, dtype=dtype, device=device)
         else:
-            self.experts = SequentialMLP(
-                self.num_experts, self.config, dtype=dtype, device=device
-            )
+            self.experts = SequentialMLP(self.config, dtype=dtype, device=device)
 
     def forward(self, hidden_states: torch.Tensor):
         if (
             self.training
             and constants.model_parallel_world_size() > 1
             and not constants.sequence_parallel()
+            and not self.config.use_grouped_gemm
         ):
             raise ValueError(
                 "During training, performance may degrade if MoE and tensor parallelism"

@@ -52,7 +52,7 @@ def run_grouped_mlp(num_tokens, mp_size, token_dispatch_strategy, seed=1):
         permuted_hidden_states = torch.rand(
             (num_tokens, hidden_dim), dtype=torch.bfloat16, device=device
         )
-        # evenly divided
+
         if token_dispatch_strategy == "even":
             tokens_per_expert = [num_tokens // num_experts for _ in range(num_experts)]
         elif token_dispatch_strategy == "random":

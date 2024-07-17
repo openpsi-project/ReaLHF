@@ -283,7 +283,6 @@ class PipeModelDataParallelTopology(ProcessTopology):
         num_dp: int,
         sequence_parallel: bool,
         gradient_checkpointing: bool,
-        num_ep: Optional[int] = 1,
         max_prompt_len: Optional[int] = None,
     ):
         # TODO: maybe abandon deepspeed implementation of topology and grid
@@ -293,7 +292,6 @@ class PipeModelDataParallelTopology(ProcessTopology):
         self.sequence_parallel = sequence_parallel
         self.gradient_checkpointing = gradient_checkpointing
         self.max_prompt_len = max_prompt_len
-        self.num_ep = num_ep
 
 
 class ParallelGrid:
@@ -452,8 +450,6 @@ class ParallelGrid:
             proc_group = new_or_get_group(ranks=[rank_mapping[rank] for rank in ranks])
             if self.global_rank in ranks:
                 self.tp_dp_proc_group = proc_group
-
-        # create expert parallel group
 
     def get_stage_id(self):
         if self.global_rank == -1:

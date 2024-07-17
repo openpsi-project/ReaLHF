@@ -31,11 +31,6 @@ class TopKRouter(torch.nn.Module):
         layer_idx: int,
         init_method: Callable = init.xavier_normal_,
     ) -> None:
-        """Initialize the zero token dropping router.
-
-        Args:
-            config (TransformerConfig): The configuration for the transformer model.
-        """
         super().__init__()
         self.config = config
         self.num_experts = self.config.num_experts
@@ -53,26 +48,12 @@ class TopKRouter(torch.nn.Module):
         self.num_layers = config.n_layers
 
     def gating(self, input: torch.Tensor):
-        """Forward pass of the router gate.
-
-        Args:
-            input (torch.Tensor): Input tensor.
-
-        Returns:
-            torch.Tensor: Logits tensor.
-        """
+        """Forward pass of the router gate."""
         logits = torch.nn.functional.linear(input, self.weight)
         return logits
 
     def sinkhorn_load_balancing(self, logits: torch.Tensor):
-        """Apply sinkhorn routing to the logits tensor.
-
-        Args:
-            logits (torch.Tensor): The logits tensor.
-
-        Returns:
-            torch.Tensor: The logits tensor after applying sinkhorn routing.
-        """
+        """Apply sinkhorn routing to the logits tensor."""
 
         def _sinkhorn_activation(logits):
             if self.config.moe_top_k == 1:

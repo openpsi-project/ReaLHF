@@ -21,13 +21,11 @@ from realhf.impl.model.utils.random import _initialize_affine_weight_gpu
 
 class SequentialMLP(torch.nn.Module):
     """An implementation of the Experts layer using a sequence of MLP layers.
-
     This class executes each expert sequentially.
     """
 
     def __init__(
         self,
-        num_local_experts: int,
         config: ReaLModelConfig,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
@@ -35,10 +33,10 @@ class SequentialMLP(torch.nn.Module):
         super().__init__()
         self.config = config
 
-        self.num_local_experts = num_local_experts
+        self.num_experts = self.config.num_experts
         self.local_experts = torch.nn.ModuleList()
 
-        for _ in range(self.num_local_experts):
+        for _ in range(self.num_experts):
             expert = LlamaLayerNormMLP(
                 hidden_dim=config.hidden_dim,
                 intermediate_dim=config.intermediate_dim,
@@ -73,6 +71,10 @@ class SequentialMLP(torch.nn.Module):
 
 
 class ExpertParam(torch.nn.Module):
+    """A dummy class that maps weight tensors in GroupedMLP to pytorch parameters
+    for compatibility of weight saving/loading.
+    """
+
     def __init__(
         self,
         gate_proj: torch.Tensor,
@@ -93,13 +95,13 @@ class ExpertParam(torch.nn.Module):
 
 class GroupedMLP(torch.nn.Module):
     """An efficient implementation of the Experts layer using CUTLASS GroupedGEMM.
+    See https://github.com/tgale96/grouped_gemm for details.
 
     This class is designed to execute multiple experts in parallel, thereby maximizing computational efficiency.
     """
 
     def __init__(
         self,
-        num_local_experts: int,
         config: ReaLModelConfig,
         init_method: Callable = init.xavier_normal_,
         dtype: Optional[torch.dtype] = None,
@@ -114,7 +116,7 @@ class GroupedMLP(torch.nn.Module):
         self.config = config
         self.dtype = dtype
         self.device = device
-        self.num_local_experts = num_local_experts
+        self.num_experts = config.num_experts
 
         gg.assert_grouped_gemm_is_available()
         self.activation_func = get_activation_fn(self.config.activation_function)
@@ -125,24 +127,23 @@ class GroupedMLP(torch.nn.Module):
 
         # Note: The current kernel implementations of grouped_gemm
         # does not support transposition with CUTLASS grouped GEMM
-        # (https://github.com/fanshiqing/grouped_gemm/blob/main/csrc/grouped_gemm.cu#L355-L358)
         # and as a result we avoid allocate the transpose of weights.
         self.grouped_gate_proj = torch.empty(
-            num_local_experts,
+            self.num_experts,
             self.config.hidden_dim,
             intermediate_dim_per_partition,
             device=self.device,
             dtype=self.dtype,
         )
         self.grouped_up_proj = torch.empty(
-            num_local_experts,
+            self.num_experts,
             self.config.hidden_dim,
             intermediate_dim_per_partition,
             device=self.device,
             dtype=self.dtype,
         )
         self.grouped_down_proj = torch.empty(
-            num_local_experts,
+            self.num_experts,
             intermediate_dim_per_partition,
             self.config.hidden_dim,
             device=self.device,
@@ -167,13 +168,12 @@ class GroupedMLP(torch.nn.Module):
 
         # Parameters for weight loading
         self.local_experts = torch.nn.ModuleList()
-        for i in range(self.num_local_experts):
+        for i in range(self.num_experts):
             expert = ExpertParam(
                 self.grouped_gate_proj[i, :].transpose_(0, 1),
                 self.grouped_up_proj[i, :].transpose_(0, 1),
                 self.grouped_down_proj[i, :].transpose_(0, 1),
             )
-
             self.local_experts.append(expert)
 
     def forward(

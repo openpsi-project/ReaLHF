@@ -388,46 +388,6 @@ def topk_softmax_with_capacity(
         return final_probs, final_indices, tokens_per_expert_before_capacity
 
 
-aux_loss_names = ["aux_loss", "z_loss"]
-
-
-def update_aux_losses_tracker(
-    name: str, loss: torch.Tensor, layer_number: int, num_layers: int
-):
-    """Save the auxiliary loss for logging.
-    Args:
-        name (str): The name of the loss.
-        loss (torch.Tensor): The loss tensor.
-        layer_number (int): Layer index of the loss.
-        num_layers (int): The number of total layers.
-    """
-    assert name in aux_loss_names, f"Invalid aux loss name: {name}."
-    losses = constants.get_from_global_stats_tracker(name)
-    if losses is None:
-        losses = torch.zeros(num_layers, device=loss.device)
-    losses[layer_number] += loss.detach()
-    constants.save_to_global_stats_tracker(
-        name, losses, hook=avg_aux_loss, stats_key=name
-    )
-
-
-def avg_aux_loss_across_pipeline_parallel(stats_key):
-    loss: torch.Tensor = constants.get_from_global_stats_tracker(stats_key)
-    dist.all_reduce(loss, group=constants.pipe_parallel_group())
-    constants.save_to_global_stats_tracker(stats_key, loss.mean())
-
-
-def avg_aux_loss_across_data_parallel(stats_key):
-    loss: torch.Tensor = constants.get_from_global_stats_tracker(stats_key)
-    dist.all_reduce(loss, op=dist.ReduceOp.AVG, group=constants.data_parallel_group())
-    constants.save_to_global_stats_tracker(stats_key, loss)
-
-
-def avg_aux_loss(stats_key):
-    avg_aux_loss_across_pipeline_parallel(stats_key)
-    avg_aux_loss_across_data_parallel(stats_key)
-
-
 class moe_gather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input_, map_):
@@ -467,3 +427,44 @@ class moe_scatter(torch.autograd.Function):
         map_ = ctx.map
         grad_input = torch.gather(grad_output, 0, map_)
         return grad_input, None, None, None
+
+
+# logging related
+aux_loss_names = ["aux_loss", "z_loss"]
+
+
+def update_aux_losses_tracker(
+    name: str, loss: torch.Tensor, layer_number: int, num_layers: int
+):
+    """Save the auxiliary loss for logging.
+    Args:
+        name (str): The name of the loss.
+        loss (torch.Tensor): The loss tensor.
+        layer_number (int): Layer index of the loss.
+        num_layers (int): The number of total layers.
+    """
+    assert name in aux_loss_names, f"Invalid aux loss name: {name}."
+    losses = constants.get_from_global_stats_tracker(name)
+    if losses is None:
+        losses = torch.zeros(num_layers, device=loss.device)
+    losses[layer_number] += loss.detach()
+    constants.save_to_global_stats_tracker(
+        name, losses, hook=avg_aux_loss, stats_key=name
+    )
+
+
+def avg_aux_loss_across_pipeline_parallel(stats_key):
+    loss: torch.Tensor = constants.get_from_global_stats_tracker(stats_key)
+    dist.all_reduce(loss, group=constants.pipe_parallel_group())
+    constants.save_to_global_stats_tracker(stats_key, loss.mean())
+
+
+def avg_aux_loss_across_data_parallel(stats_key):
+    loss: torch.Tensor = constants.get_from_global_stats_tracker(stats_key)
+    dist.all_reduce(loss, op=dist.ReduceOp.AVG, group=constants.data_parallel_group())
+    constants.save_to_global_stats_tracker(stats_key, loss)
+
+
+def avg_aux_loss(stats_key):
+    avg_aux_loss_across_pipeline_parallel(stats_key)
+    avg_aux_loss_across_data_parallel(stats_key)

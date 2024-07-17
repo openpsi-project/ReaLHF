@@ -11,9 +11,9 @@ def grouped_gemm_is_available():
 
 
 def assert_grouped_gemm_is_available():
-    assert grouped_gemm_is_available(), (
-        "Grouped GEMM is not available. Please run " "`pip install grouped_gemm."
-    )
+    assert (
+        grouped_gemm_is_available()
+    ), "Grouped GEMM is not available. Please run `pip install grouped_gemm`."
 
 
 ops = grouped_gemm.ops if grouped_gemm_is_available() else None
