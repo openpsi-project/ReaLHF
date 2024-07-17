@@ -69,7 +69,10 @@ class Controller:
         self.json_config_file_path = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}/{self.experiment_name}_{self.trial_name}"
 
     def reconnect(self):
-        """Automatically reconnect to workers. And list all jobs to scheduler."""
+        """Automatically reconnect to workers.
+
+        And list all jobs to scheduler.
+        """
         self.__control.auto_connect()
 
     def start(self, experiment: system_api.Experiment, ignore_worker_error=False):
@@ -256,6 +259,7 @@ class Controller:
 
     def stop(self):
         """Stop the experiment.
+
         Note:
             This method assumes that the controller and scheduler is connected to the correct workers. To ensure this,
             call controller.reconnect before your call controller.stop.
@@ -334,9 +338,9 @@ def run_ray_worker(
 class RayController:
     """A controller that uses Ray to manage workers.
 
-    It uses the basic Controller to configure workers.
-    Besides, it launchs all remote workers using Ray,
-    instead of submitting them to the scheduelr.
+    It uses the basic Controller to configure workers. Besides, it
+    launchs all remote workers using Ray, instead of submitting them to
+    the scheduelr.
     """
 
     def __init__(self, experiment_name, trial_name):

@@ -119,10 +119,9 @@ apply_rotary_emb_func = apply_rotary_emb
 
 
 class RotaryEmbedding(torch.nn.Module):
-    """
-    The rotary position embeddings from RoFormer_ (Su et. al).
-    A crucial insight from the method is that the query and keys are
-    transformed by rotation matrices which depend on the relative positions.
+    """The rotary position embeddings from RoFormer_ (Su et. al). A crucial
+    insight from the method is that the query and keys are transformed by
+    rotation matrices which depend on the relative positions.
 
     Other implementations are available in the Rotary Transformer repo_ and in
     GPT-NeoX_, GPT-NeoX was an inspiration

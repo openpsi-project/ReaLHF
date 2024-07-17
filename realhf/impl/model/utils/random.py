@@ -91,16 +91,22 @@ class CudaRNGStatesTracker:
         self.seeds_ = set()
 
     def get_states(self):
-        """Get rng states. Copy the dictionary so we have direct
-        pointers to the states, not just a pointer to the dictionary."""
+        """Get rng states.
+
+        Copy the dictionary so we have direct pointers to the states,
+        not just a pointer to the dictionary.
+        """
         states = {}
         for name in self.states_:
             states[name] = self.states_[name]
         return states
 
     def set_states(self, states):
-        """Set the rng states. For efficiency purposes, we do not check
-        the size of seed for compatibility."""
+        """Set the rng states.
+
+        For efficiency purposes, we do not check the size of seed for
+        compatibility.
+        """
         self.states_ = states
 
     def add(self, name, seed):
@@ -122,8 +128,8 @@ class CudaRNGStatesTracker:
 
     @contextlib.contextmanager
     def fork(self, name=_MODEL_PARALLEL_RNG_TRACKER_NAME):
-        """Fork the cuda rng state, perform operations, and exit with
-        the original state."""
+        """Fork the cuda rng state, perform operations, and exit with the
+        original state."""
         # Check if we have added the state
         if name not in self.states_:
             raise Exception("cuda rng state {} is not added".format(name))
@@ -183,7 +189,7 @@ def model_parallel_cuda_manual_seed(seed):
 
 
 class CheckpointFunction(torch.autograd.Function):
-    """Checkpoint Function
+    """Checkpoint Function.
 
     This function is adapted from torch.utils.checkpoint with two main changes:
     1) torch.cuda.set_rng_state is replaced with `_set_cuda_rng_state`
@@ -268,5 +274,7 @@ class CheckpointFunction(torch.autograd.Function):
 
 def checkpoint(function, distribute_saved_activations, *args):
     """Checkpoint a model or part of the model.
-    This has been directly copied from torch.utils.checkpoint."""
+
+    This has been directly copied from torch.utils.checkpoint.
+    """
     return CheckpointFunction.apply(function, distribute_saved_activations, *args)

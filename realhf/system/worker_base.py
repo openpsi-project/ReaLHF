@@ -40,8 +40,10 @@ class WorkerException(Exception):
 
 
 class WorkerServerStatus(str, enum.Enum):
-    """List of all possible Server status. This is typically set by workers hosting the server, and
-    read by the controller.
+    """List of all possible Server status.
+
+    This is typically set by workers hosting the server, and read by the
+    controller.
     """
 
     READY = "READY"
@@ -97,7 +99,9 @@ class WorkerServer:
         trial_name,
         task_queue: WorkerServerTaskQueue,
     ):
-        """Specifies the name of the worker that WorkerControlPanel can used to find and manage.
+        """Specifies the name of the worker that WorkerControlPanel can used to
+        find and manage.
+
         Args:
             worker_name: Typically "<worker_type>/<worker_index>".
         """
@@ -136,7 +140,9 @@ class WorkerServer:
             )
 
     def register_handler(self, command, fn):
-        """Registers an RPC command. The handler `fn` shall be called when `self.handle_requests()` sees an
+        """Registers an RPC command.
+
+        The handler `fn` shall be called when `self.handle_requests()` sees an
         incoming command of the registered type.
         """
         if command in self.__handlers:
@@ -209,7 +215,8 @@ class WorkerControlPanelRequester:
 
 
 class WorkerControlPanel:
-    """A class that defines the management utilities to all the workers of an experiment trial."""
+    """A class that defines the management utilities to all the workers of an
+    experiment trial."""
 
     @dataclasses.dataclass
     class Response:
@@ -260,8 +267,11 @@ class WorkerControlPanel:
 
     @property
     def worker_names(self) -> List[str]:
-        """Returns current connected workers. A WorkerControlPanel initializes with no connected workers.
-        Workers are connected via either self.connect(names), or self.auto_connect().
+        """Returns current connected workers.
+
+        A WorkerControlPanel initializes with no connected workers.
+        Workers are connected via either self.connect(names), or
+        self.auto_connect().
         """
         return list(self.__worker_addresses.keys())
 
@@ -273,7 +283,8 @@ class WorkerControlPanel:
         reconnect=False,
         progress=False,
     ) -> List[str]:
-        """Waits until all the workers specified by the given names are ready for receiving commands.
+        """Waits until all the workers specified by the given names are ready
+        for receiving commands.
 
         Args:
             worker_names: A list of workers to connect.
@@ -322,7 +333,8 @@ class WorkerControlPanel:
         return rs
 
     def auto_connect(self) -> List[str]:
-        """Auto-detects available workers belonging to the experiment trial, and connects to them.
+        """Auto-detects available workers belonging to the experiment trial,
+        and connects to them.
 
         Returns:
             Names of successfully connected workers.
@@ -351,7 +363,8 @@ class WorkerControlPanel:
         wait_response=True,
         **kwargs,
     ) -> List[Response]:
-        """Requests selected workers, or all connected workers if not specified.
+        """Requests selected workers, or all connected workers if not
+        specified.
 
         Args:
             command: RPC command.
@@ -420,6 +433,7 @@ class WorkerControlPanel:
 
     def get_worker_status(self, worker_name) -> WorkerServerStatus:
         """Get status of a connected worker.
+
         Raises:
             ValueError if worker is not connected.
         """
@@ -521,7 +535,10 @@ class Worker:
         raise NotImplementedError()
 
     def _stats(self) -> Dict[str, Any]:
-        """Implemented by sub-classes. For wandb logging only"""
+        """Implemented by sub-classes.
+
+        For wandb logging only
+        """
         return {}
 
     def configure(self, config):
@@ -653,7 +670,9 @@ class Worker:
 
 class MappingThread:
     """Wrapped of a mapping thread.
-    A mapping thread gets from up_stream_queue, process data, and puts to down_stream_queue.
+
+    A mapping thread gets from up_stream_queue, process data, and puts
+    to down_stream_queue.
     """
 
     def __init__(

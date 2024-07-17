@@ -91,7 +91,9 @@ class DeviceMesh:
         return np.all(self.mapping & other.mapping == other.mapping)
 
     def sub_device_meshes(self, min_n_gpus: int = 4) -> List["DeviceMesh"]:
-        """Find sub device meshes of this device mesh with at least min_n_gpus gpus.
+        """Find sub device meshes of this device mesh with at least min_n_gpus
+        gpus.
+
         Sub device meshes have following constraints:
             1. Sub device meshes have the same cluster mesh.
             2. Sub device meshes of multiple nodes must contain consecutive nodes
@@ -293,12 +295,12 @@ class AllocationConfig:
 
     :param parallel: Parallelism strategy configuration.
     :type parallel: ParallelismConfig
-    :param device_mesh: String representation for device mesh.
-        If it is composed of multiple nodes, it should be in the form of
-        slurm nodelist, e.g., node[01-02] or node01,node02.
-        If it is a slice on a single node,
-        we restrict it occupies 1, 2, 4, or 8 contiguous GPUs in the node.
-        In this case, the string representation is similar to the MPI hostfile, e.g.,
+    :param device_mesh: String representation for device mesh. If it is
+        composed of multiple nodes, it should be in the form of slurm
+        nodelist, e.g., node[01-02] or node01,node02. If it is a slice
+        on a single node, we restrict it occupies 1, 2, 4, or 8
+        contiguous GPUs in the node. In this case, the string
+        representation is similar to the MPI hostfile, e.g.,
         "node01:0,1,2,3" for the first 4 GPUs on node01.
     :type device_mesh: str
     """

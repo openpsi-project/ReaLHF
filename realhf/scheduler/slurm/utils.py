@@ -165,7 +165,8 @@ class SlurmResource:
 
 @dataclasses.dataclass
 class SlurmLaunchInfo:
-    """A SlurmLaunchInfo contains all informantion required to **launch** a slurm job.
+    """A SlurmLaunchInfo contains all informantion required to **launch** a
+    slurm job.
 
     Matching one `TasksGroup` in `SchedulingConfig` and one slurm job.
 
@@ -243,7 +244,7 @@ class SlurmLaunchInfo:
     job_info: Optional[JobInfo] = None
 
     def __post_init__(self):
-        """resolve fractional GPU resource requirement"""
+        """Resolve fractional GPU resource requirement."""
         gpu_per_worker = self.resource_requirement.gpu
         # assert gpu_per_worker <= 1 and gpu_per_worker >= 0
         if gpu_per_worker < 1 and gpu_per_worker > 0:
@@ -679,8 +680,9 @@ def available_hostnames(
 
 
 def get_all_node_resources() -> Dict[str, SlurmResource]:
-    """Execute `scontrol show node` to get all node resources
-    available in the slurm cluster.
+    """Execute `scontrol show node` to get all node resources available in the
+    slurm cluster.
+
     Return a list of SlurmResource
     """
     o = subprocess.check_output(["scontrol", "show", "node"]).decode("utf-8")
@@ -734,9 +736,8 @@ def allocate_resources(
     # strategy: Literal["pack", "plane"] = "pack",
 ) -> List[SlurmLaunchInfo]:
     """Allocate all slurm task specs, fill in the hostfile field of the specs
-    Only support simple greedy strategy now, which allocates tasks to node with the most
-    available resources without considering other tasks.
-    """
+    Only support simple greedy strategy now, which allocates tasks to node with
+    the most available resources without considering other tasks."""
     all_resources = get_all_node_resources()
     # all_resources = sorted([(k, v) for k, v in all_resources.items()],
     #                 key=lambda x: x[1],

@@ -279,8 +279,8 @@ class SequenceSample:
 
         :param samples: A list of SequenceSample to be gathered.
         :type samples: List[SequenceSample]
-        :param keys: The keys to be gathered. Can only gather a subset of keys.
-            If None, use the keys of the first sample.
+        :param keys: The keys to be gathered. Can only gather a subset
+            of keys. If None, use the keys of the first sample.
         :type keys: Optional[List[str]]
         """
         if keys is None:
@@ -332,12 +332,13 @@ class SequenceSample:
     def get_split_spec(
         self, k: int, key: Optional[str] = None, min_size: int = 1
     ) -> SequenceSplitSpec:
-        """Get the partition spec for splitting the data into k parts.
-        It runs a DP algorithm to find the best-possible balanced partitioning.
+        """Get the partition spec for splitting the data into k parts. It runs
+        a DP algorithm to find the best-possible balanced partitioning.
 
         :param k: The number of parts to split the data.
         :type k: int
-        :param key: The key to be used for splitting. If None, use the key with the largest total sequence length.
+        :param key: The key to be used for splitting. If None, use the
+            key with the largest total sequence length.
         :type key: Optional[str]
         :param min_size: The minimum size of each partition.
         :type min_size: int
@@ -402,7 +403,8 @@ class SequenceSample:
 
         :param k: The number of parts to split the data.
         :type k: int
-        :param key: The key to be used for splitting. If None, use the key with the largest total sequence length.
+        :param key: The key to be used for splitting. If None, use the
+            key with the largest total sequence length.
         :type key: Optional[str]
         :param min_size: The minimum size of each partition.
         :type min_size: int
@@ -442,6 +444,7 @@ class SequenceSample:
 
     def update_(self, other: "SequenceSample"):
         """Inplace update data from another SequenceSample.
+
         Used to amend newly produced data after a model function call.
         """
         self.keys = self.keys.union(other.keys)
@@ -556,8 +559,8 @@ class SequenceSample:
     def remap_keys_(self, remap: Dict[str, str]):
         """Inplace remap keys of the data.
 
-        Useful for reusing the same interface implementation in different algorithms,
-        where the data can be named differently.
+        Useful for reusing the same interface implementation in
+        different algorithms, where the data can be named differently.
         """
         for k in self.keys:
             if k in remap:

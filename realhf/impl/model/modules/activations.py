@@ -67,8 +67,10 @@ def gelu_fwd(x):
 
 @torch.jit.script
 def new_gelu_activation(input: torch.Tensor) -> torch.Tensor:
-    """
-    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
+    """Implementation of the GELU activation function currently in Google BERT
+    repo (identical to OpenAI GPT).
+
+    Also see
     the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
     """
     return (

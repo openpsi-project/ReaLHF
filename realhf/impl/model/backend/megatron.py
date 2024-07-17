@@ -156,8 +156,8 @@ class MegatronEngine:
 class OptimizerParamScheduler(object):
     """Anneals learning rate and weight decay.
 
-    Adopted from Megatron-LM. This class is not included in megatron.core,
-    so we have to copy-paste it here.
+    Adopted from Megatron-LM. This class is not included in
+    megatron.core, so we have to copy-paste it here.
     """
 
     def __init__(
@@ -218,7 +218,7 @@ class OptimizerParamScheduler(object):
             logger.info(msg)
 
     def get_wd(self):
-        """Weight decay incr functions"""
+        """Weight decay incr functions."""
         if self.num_steps > self.wd_incr_steps:
             return self.end_wd
 
@@ -536,8 +536,8 @@ def _flatten_dense_tensors(tensors):
 
 
 def _unflatten_dense_tensors(flat, tensors):
-    """View a flat buffer using the sizes of tensors. Assume that tensors are of
-    same dense type, and that flat is given by _flatten_dense_tensors.
+    """View a flat buffer using the sizes of tensors. Assume that tensors are
+    of same dense type, and that flat is given by _flatten_dense_tensors.
 
     Args:
         flat (Tensor): flattened dense tensors to unflatten.

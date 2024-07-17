@@ -50,7 +50,8 @@ class ClusterSpec:
         return self.__cluster_name
 
     def node_type_from_node_name(self, node_name: str) -> str:
-        """mapping nodename to slurm node type, including "g1", "g2", "g8", "a100" """
+        """Mapping nodename to slurm node type, including "g1", "g2", "g8",
+        "a100"."""
         if self.__cluster_type != "slurm":
             raise NotImplementedError(
                 "Only slurm cluster uses node_type_from_node_name."
@@ -62,7 +63,8 @@ class ClusterSpec:
         raise NotImplementedError()
 
     def gpu_type_from_node_name(self, node_name: str) -> str:
-        """mapping nodename to slurm GPU type, including "geforce" and "tesla" """
+        """Mapping nodename to slurm GPU type, including "geforce" and
+        "tesla"."""
         if self.__cluster_type != "slurm":
             raise NotImplementedError(
                 "Only slurm cluster uses gpu_type_from_node_name."
@@ -76,15 +78,17 @@ class ClusterSpec:
     @property
     def fileroot(self) -> str:
         """Return the root directory of the file system in the cluster.
-        When running experiments, files such as logs, checkpoints, caches
-        will be saved under this directory.
+
+        When running experiments, files such as logs, checkpoints,
+        caches will be saved under this directory.
         """
         assert self.__loaded
         return self.__fileroot
 
     @property
     def default_mount(self) -> str:
-        """Directories that should be mounted to container that runs workers."""
+        """Directories that should be mounted to container that runs
+        workers."""
         assert self.__loaded
         return self.__default_mount
 
@@ -102,7 +106,7 @@ class ClusterSpec:
 
     @property
     def node_name_prefix(self) -> str:
-        """Return the prefix of node names in slurm format"""
+        """Return the prefix of node names in slurm format."""
         assert self.__loaded
         return self.__node_name_prefix
 

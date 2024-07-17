@@ -64,9 +64,9 @@ def terminate_process_and_children(pid: int, signal: Optional[Union[str, int]] =
 
 
 class LocalSchedulerClient(SchedulerClient):
-    """Instead of talking to the scheduler server (the typical behaviour), this client starts jobs directly
-    on the local host and keeps a collection of job processes.
-    """
+    """Instead of talking to the scheduler server (the typical behaviour), this
+    client starts jobs directly on the local host and keeps a collection of job
+    processes."""
 
     def log_path_of(self, worker_type) -> str:
         return os.path.join(

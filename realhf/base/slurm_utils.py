@@ -62,9 +62,7 @@ def are_ones_contiguous(binary_array: np.ndarray):
 
 
 def slurm_hostname_key(hostname):
-    """
-    Custom sorting key function to sort Slurm hostnames.
-    """
+    """Custom sorting key function to sort Slurm hostnames."""
     # Extract node number from hostname
     match = re.match(r"(\D+)(\d+)", hostname)
     if match:

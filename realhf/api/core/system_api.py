@@ -71,7 +71,9 @@ class Scheduling:
 
 @dataclasses.dataclass
 class WorkerInformation:
-    """The basic information of an worker. To improve config readability, the experiment starter will fill the
+    """The basic information of an worker.
+
+    To improve config readability, the experiment starter will fill the
     fields, instead of letting the users do so in experiment configs.
     """
 
@@ -109,7 +111,8 @@ class WorkerInformation:
         worker_index,
         worker_count,
     ):
-        """Setup system related worker information, while leaving the rest untouched."""
+        """Setup system related worker information, while leaving the rest
+        untouched."""
         self.experiment_name = experiment_name
         self.trial_name = trial_name
         self.worker_type = worker_type
@@ -526,7 +529,8 @@ class Experiment:
         raise NotImplementedError()
 
     def initial_setup(self, config) -> ExperimentConfig:
-        """Returns a list of workers to create when a trial of the experiment is initialized."""
+        """Returns a list of workers to create when a trial of the experiment
+        is initialized."""
         raise NotImplementedError()
 
 

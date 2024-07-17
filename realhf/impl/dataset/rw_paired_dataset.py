@@ -19,7 +19,8 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
     ):
-        """Dataset used for reward modeling. Each sample consists of a prompt, several positive answers, and several negative answers.
+        """Dataset used for reward modeling. Each sample consists of a prompt,
+        several positive answers, and several negative answers.
 
         Args:
             util (api.data.DatasetUtility): Dataset utility.

@@ -1,27 +1,30 @@
-Configurations
-=============================
+################
+ Configurations
+################
 
 .. note::
 
-    This page serves as a reference manual for the configuration objects,
-    i.e., you can check which attributes can be modified and their default values.
-    You don't need to read through this page before running experiments!
+   This page serves as a reference manual for the configuration objects,
+   i.e., you can check which attributes can be modified and their
+   default values. You don't need to read through this page before
+   running experiments!
 
-    Please check the :doc:`quickstart` and :doc:`customization` sections for concrete examples
-    of running experiments.
+   Please check the :doc:`quickstart` and :doc:`customization` sections
+   for concrete examples of running experiments.
 
 We illustrate configurations for quickstart experiments in this page.
-Each type of experiment (e.g., SFT, PPO) corresponds to a specific 
+Each type of experiment (e.g., SFT, PPO) corresponds to a specific
 configuration object (e.g., :class:`realhf.SFTConfig` for SFT).
 
-Since ReaL uses `Hydra <https://hydra.cc/>`_ for configuration management,
-users can override these options provided by the class recursively
-with command line arguments.
+Since ReaL uses `Hydra <https://hydra.cc/>`_ for configuration
+management, users can override these options provided by the class
+recursively with command line arguments.
 
 .. currentmodule:: realhf
 
-Experiment Configurations
---------------------------
+***************************
+ Experiment Configurations
+***************************
 
 .. autoclass:: ExperimentSaveEvalControl
 
@@ -41,8 +44,9 @@ Experiment Configurations
 
 .. autoclass:: GenerationConfig
 
-Model Configurations
----------------------
+**********************
+ Model Configurations
+**********************
 
 .. autoclass:: ModelFamily
 
@@ -56,8 +60,9 @@ Model Configurations
 
 .. autoclass:: ReaLModelConfig
 
-Dataset Configurations
------------------------
+************************
+ Dataset Configurations
+************************
 
 .. autoclass:: PromptAnswerDatasetConfig
 
@@ -65,13 +70,15 @@ Dataset Configurations
 
 .. autoclass:: PromptOnlyDatasetConfig
 
-Data Structure for Interfaces and Datasets
------------------------------------------------
+********************************************
+ Data Structure for Interfaces and Datasets
+********************************************
 
 .. autoclass:: realhf.SequenceSample
-    :members:
+   :members:
 
-Dataflow Graph
------------------
+****************
+ Dataflow Graph
+****************
 
 .. autoclass:: realhf.MFCDef

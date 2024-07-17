@@ -182,8 +182,8 @@ class CommonExperimentConfig(Experiment):
     def rpcs(self) -> Dict[str, MFCDef]:
         """A dict mapping from model function call names to the MFCDef objects.
 
-        Note that model function call names are different from model names.
-        Should be implemented in all subclasses.
+        Note that model function call names are different from model
+        names. Should be implemented in all subclasses.
         """
         raise NotImplementedError(f"rpcs is not implemented in {self.__class__}")
 
@@ -218,9 +218,9 @@ class CommonExperimentConfig(Experiment):
     def eval_dataloader(self) -> DataLoaderAbstraction:
         """The dataloader configuration used for evaluation.
 
-        Reserved to changed the evaluation batch size.
-        Training does not require this property because the batch size
-        is handled in MFC definitions.
+        Reserved to changed the evaluation batch size. Training does not
+        require this property because the batch size is handled in MFC
+        definitions.
         """
         return DataLoaderAbstraction("packed_eval", args=dict(batch_size=128))
 
@@ -238,8 +238,8 @@ class CommonExperimentConfig(Experiment):
     def max_prompt_len(self) -> int:
         """The maximum prompt length for generation.
 
-        Used by CUDAGraph-enabled generation.
-        If no generation is used in the algorithm, this property can be None.
+        Used by CUDAGraph-enabled generation. If no generation is used
+        in the algorithm, this property can be None.
         """
         return None
 
@@ -279,8 +279,8 @@ class CommonExperimentConfig(Experiment):
     def scheduling_setup(self) -> ExperimentScheduling:
         """The resourced occupied by each worker.
 
-        The resource requirements will be sent to SLURM or Ray,
-        while being ignored in the local mode.
+        The resource requirements will be sent to SLURM or Ray, while
+        being ignored in the local mode.
         """
         return ExperimentScheduling(
             master_worker=TasksGroup(

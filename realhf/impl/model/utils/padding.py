@@ -248,9 +248,11 @@ def pad_input(hidden_states, indices, batch, seqlen):
 def pad_sequence_parallel_input(
     packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int
 ):
-    """Sequence parallel requires packed_input_ids has a shape of 1 dimension [total_seq_len], and
-    total_seq_len should be divisible by model_parallel_world_size. This function is used to pad packed_input_ids
-    to suitable length with an empty sequence, and return new packed_input_ids, cu_seqlens and max_seqlen.
+    """Sequence parallel requires packed_input_ids has a shape of 1 dimension
+    [total_seq_len], and total_seq_len should be divisible by
+    model_parallel_world_size. This function is used to pad packed_input_ids to
+    suitable length with an empty sequence, and return new packed_input_ids,
+    cu_seqlens and max_seqlen.
 
     Args:
         packed_input_ids (torch.Tensor): unpadded packed_input_ids
@@ -277,9 +279,11 @@ def pad_sequence_parallel_input(
 def pad_sequence_parallel_generate_input(
     packed_input_ids: torch.Tensor, cu_seqlens: torch.Tensor, max_seqlen: int
 ):
-    """Only for pipeline generate input when model+seq parallel is enabled. To make sure inputs for seq parallel model
-    have a shape with first dimension divisible by model_parallel_world_size, the packed_input_ids should have length
-    divisible by model_parallel_world_size, and contains number of sequences divisible by model_parallel_world_size.
+    """Only for pipeline generate input when model+seq parallel is enabled. To
+    make sure inputs for seq parallel model have a shape with first dimension
+    divisible by model_parallel_world_size, the packed_input_ids should have
+    length divisible by model_parallel_world_size, and contains number of
+    sequences divisible by model_parallel_world_size.
 
     Args:
         packed_input_ids (torch.Tensor): unpadded packed_input_ids

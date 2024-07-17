@@ -55,9 +55,9 @@ class ModelName:
 
     :param role: The role of the model, e.g. "actor", "critic".
     :type role: str
-    :param replica_id: The replica id of the model.
-        Different replicas of the same role have the same
-        set of parameters with different memory locations.
+    :param replica_id: The replica id of the model. Different replicas
+        of the same role have the same set of parameters with different
+        memory locations.
     :type replica_id: int
     """
 

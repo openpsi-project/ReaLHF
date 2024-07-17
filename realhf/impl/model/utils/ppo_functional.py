@@ -737,7 +737,8 @@ def cugae2d_olp_func(
     gamma: float,
     lam: float,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
-    """Compute GAE over batched sequences with variable lengths, assuming overlapped sequences.
+    """Compute GAE over batched sequences with variable lengths, assuming
+    overlapped sequences.
 
     This function assumes that rewards and values are batched as 2D tensors.
     The first dimension is batch_size and the second dimension is the number of collected timesteps.
@@ -796,7 +797,8 @@ def cugae2d_nolp_func(
     gamma: float,
     lam: float,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
-    """Compute GAE over batched sequences with variable lengths, assuming non-overlapped sequences.
+    """Compute GAE over batched sequences with variable lengths, assuming non-
+    overlapped sequences.
 
     This function assumes that rewards and values are batched as 2D tensors.
     The first dimension is batch_size and the second dimension is the number of collected timesteps.
