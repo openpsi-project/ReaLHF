@@ -20,6 +20,10 @@ RUN pip3 install torch
 COPY ./requirements.txt /requirements.txt
 RUN pip3 install -r /requirements.txt && rm /requirements.txt
 
+COPY . /realhf
+RUN REAL_CUDA=0 pip3 install -e /realhf --no-build-isolation
+WORKDIR /realhf
+
 # >>>>>> Documentation images
 # FROM cpu AS docs-builder
 # RUN pip install -U sphinx sphinx-nefertiti -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -28,10 +32,6 @@ FROM nginx:alpine AS docs
 COPY ./docs/build/html /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
-
-COPY . /realhf
-RUN REAL_CUDA=0 pip3 install -e /realhf --no-build-isolation
-WORKDIR /realhf
 
 # >>>>>> GPU image
 FROM ${REAL_GPU_BASE_IMAGE} AS gpu
