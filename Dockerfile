@@ -67,3 +67,9 @@ COPY ./dist/$TE_WHL_NAME /$TE_WHL_NAME
 RUN pip3 install /$TE_WHL_NAME --no-dependencies && rm /$TE_WHL_NAME
 COPY ./dist/$FLA_WHL_NAME /$FLA_WHL_NAME
 RUN pip3 install /$FLA_WHL_NAME && rm /$FLA_WHL_NAME
+# Install grouped_gemm for MoE acceleration
+RUN pip3 install grouped_gemm
+
+COPY . /realhf
+RUN REAL_CUDA=1 pip3 install -e /realhf --no-build-isolation
+WORKDIR /realhf
