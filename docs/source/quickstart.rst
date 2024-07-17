@@ -213,9 +213,13 @@ model. Therefore, we can pass the path of the saved SFT model as
 ``model.path``. Using the pre-trained LLaMA checkpoint is also feasible,
 but it may not perform as well as the SFT checkpoint.
 
-In reward modeling, the batch size is the number of paired comparisons.
-With a batch size of 512, there will be 512 positive samples and 512
-negative samples in each batch.
+The output head of the loaded LLM will be replaced by a newly
+initialized linear layer, which outputs a scalar as the reward.
+
+In reward modeling, the batch size is the number of prompts. With a
+batch size of 512, there will be at most 512 * max_pairs_per_prompt
+positive samples and 512 * max_pairs_per_prompt negative samples in each
+batch.
 
 .. code:: console
 
@@ -228,8 +232,10 @@ negative samples in each batch.
 The log and checkpoint paths are similar to that of SFT, except that the
 experiment name and trial name can be changed. Note that the saved RW
 checkpoint is not loadable by HuggingFace or vLLM, because the
-projection head has been replaced by a linear layer that outputs a
-scalar.
+projection head has been changed.
+
+Please check ``examples/load_and_eval_rw.py`` as an example to load and
+use the trained reward model in a standalone script.
 
 .. image:: images/rw_loss.svg
    :align: center
@@ -280,7 +286,7 @@ Run the following command to train using DPO:
        dataset.valid_bs_n_seqs=512
 
 Note that there's a major difference between DPO and SFT/RM. DPO
-involves two different models, the *actor* and the *reference*. The
+involves **two** different models, the *actor* and the *reference*. The
 former is the primary LLM to be trained and the latter is the frozen SFT
 model to provide KL regularizations.
 
@@ -355,7 +361,7 @@ Run the following command to train using PPO:
 .. note::
 
    You can also pass in the trained DPO checkpoint to initialize the PPO
-   policy.
+   actor.
 
 The configuration options of PPO are the most complex among the three
 stages. PPO involves four different models: *Actor*, *Critic*,
@@ -409,3 +415,14 @@ minutes. Summing up the time of the three stages, we can finish the RLHF
 process **within half an hour!** This efficiency can largely help
 algorithm developers to search for the best hyperparameters and iterate
 on the algorithm design.
+
+***************
+ The Next Step
+***************
+
+You have now figured out how to run built-in experiments and how to
+manage training hyperparameters, logs, and checkpoints within ReaL.
+Next, you can follow the :doc:`distributed` section to set up your
+experiments in a large cluster, or proceed to the :doc:`customization`
+section to learn how to customize the datasets, models, and algorithms
+in ReaL.
