@@ -21,11 +21,6 @@ from realhf.impl.model.comm.param_realloc import (
     _derive_reparallelize_comm_plan,
     is_trainable,
 )
-from realhf.impl.model.nn.flatten_param import (
-    recursive_getattr,
-    set_intervals,
-    slice_intervals,
-)
 from realhf.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from realhf.impl.model.utils.padding import pad_input, unpad_input
 
