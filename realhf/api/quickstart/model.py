@@ -42,6 +42,16 @@ class ParallelismConfig:
             logger.warning("Sequence parallelism requires model parallelism.")
             self.use_sequence_parallel = False
 
+    def degree_eq(self, other):
+        # NOTE: We only want to know whether the degree or the sharding strategy is the same
+        # for parameter reallocation. We use this function to decide whether to use different
+        # model names.
+        return (
+            (self.model_parallel_size == other.model_parallel_size)
+            and (self.pipeline_parallel_size == other.pipeline_parallel_size)
+            and (self.data_parallel_size == other.data_parallel_size)
+        )
+
     def __str__(self):
         return (
             f"Parallel(mp={self.model_parallel_size},"
