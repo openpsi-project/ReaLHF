@@ -45,10 +45,6 @@ class GenerationHyperparameters:
     :type top_p: float
     :param temperature: The temperature of the sampling process.
     :type temperature: float
-    :param num_samples: The number of samples to generate.
-        Should only be enabled for pure generation.
-        Must be 1 for PPO generation.
-    :type num_samples: int
     :param use_cuda_graph: Whether to use CUDA graph to reduce kernel launch overhead
         during generation. Recommended for pure generation.
     :type use_cuda_graph: bool
@@ -60,7 +56,6 @@ class GenerationHyperparameters:
     top_p: float = 0.9
     top_k: int = 200
     temperature: float = 1.0
-    num_samples: int = 1
     use_cuda_graph: bool = False
 
     def __post_init__(self):

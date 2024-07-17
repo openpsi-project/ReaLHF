@@ -486,10 +486,10 @@ class CommonExperimentConfig(Experiment):
                 )
             if not check_is_realhf_native_model_interface(
                 rpc.interface_impl.type_
-            ) and self.allocation_mode in ["search", "heuristic"]:
+            ) and self.allocation_mode in ["search"]:
                 raise ValueError(
                     f"RPC {rpc.name} interface is not a realhf native implementation. "
-                    f"Search and heuristic allocation mode are not available."
+                    f"The search allocation mode are not available."
                 )
             if self.allocation_mode == "manual" and rpc_name not in self.allocations:
                 if rpc_name not in self.allocations:

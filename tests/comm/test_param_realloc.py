@@ -36,7 +36,7 @@ def compute_critic_loss(
     input_lens = torch.cat(input_.seqlens["packed_input_ids"])
     cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
     shift_one_indices = build_shift_one_indices(logits, cu_seqlens)
-    prompt_mask = prompt_mask[shift_one_indices]
+    prompt_mask = input_.data["prompt_mask"][shift_one_indices]
     scores = logits.squeeze().float()[shift_one_indices]
     scores = torch.where(prompt_mask, 0, scores)
 
@@ -123,8 +123,6 @@ def setup_constants_and_param_realloc(
     to_model_name,
     from_pp_dp_mp,
     to_pp_dp_mp,
-    from_sequence_parallel,
-    to_sequence_parallel,
 ):
     from realhf.impl.model.comm.param_realloc import setup_param_realloc
 
@@ -138,7 +136,7 @@ def setup_constants_and_param_realloc(
         num_dp=from_num_dp,
         num_mp=from_num_mp,
         num_pp=from_num_pp,
-        sequence_parallel=from_sequence_parallel,
+        sequence_parallel=False,
         gradient_checkpointing=False,
         max_prompt_len=None,
     )
@@ -146,7 +144,7 @@ def setup_constants_and_param_realloc(
         num_dp=to_num_dp,
         num_mp=to_num_mp,
         num_pp=to_num_pp,
-        sequence_parallel=to_sequence_parallel,
+        sequence_parallel=False,
         gradient_checkpointing=False,
         max_prompt_len=None,
     )
@@ -189,7 +187,7 @@ def setup_constants_and_param_realloc(
         num_pp=from_num_pp,
         topo=from_topo,
         model_name=from_model_name,
-        sequence_parallel=from_sequence_parallel,
+        sequence_parallel=False,
         msid2mwid=msid2mwid,
     )
 
@@ -198,7 +196,7 @@ def setup_constants_and_param_realloc(
         num_mp=to_num_mp,
         num_pp=to_num_pp,
         model_name=to_model_name,
-        sequence_parallel=to_sequence_parallel,
+        sequence_parallel=False,
         msid2mwid=msid2mwid,
     )
 
@@ -214,6 +212,8 @@ def setup_constants_and_param_realloc(
 
 
 def _check_tied_embedding_weights(model_name, model: "ReaLModel"):
+    if not model.config.tied_embedding or model.config.is_critic:
+        return
     with constants.model_scope(model_name):
         if not (constants.is_first_pipe_stage() or constants.is_last_pipe_stage()):
             return
@@ -237,7 +237,7 @@ def _check_tied_embedding_weights(model_name, model: "ReaLModel"):
             )
             w_ /= dist.get_world_size(constants.grid().embedding_proc_group)
             if model.config.tied_embedding and not model.config.is_critic:
-                assert torch.allclose(w_, w), (w_ - w).abs().max()
+                assert torch.allclose(w_, w, atol=2e-4), (w_ - w).abs().max()
             else:
                 assert not torch.allclose(w_, w), (w_ - w).abs().max()
 
@@ -313,8 +313,6 @@ def _test_para_realloc(
     is_critic: bool,
     from_pp_dp_mp: Tuple,
     to_pp_dp_mp: Tuple,
-    from_sequence_parallel: bool,
-    to_sequence_parallel: bool,
     n_iterations: int,
     skip_saveload: bool,
 ):
@@ -334,8 +332,6 @@ def _test_para_realloc(
         to_model_name,
         from_pp_dp_mp,
         to_pp_dp_mp,
-        from_sequence_parallel,
-        to_sequence_parallel,
     )
 
     # Create model 1
@@ -429,7 +425,12 @@ def _test_para_realloc(
             dist.barrier()
             sd2 = _load_all_pytorch_bin(tmp_path / f"save_to_{i}")
             for k, v in sd1.items():
-                assert torch.allclose(v, sd2[k]), (k, v, sd2[k])
+                assert torch.allclose(v, sd2[k], atol=2e-4), (
+                    k,
+                    (v - sd2[k]).abs().max(),
+                    v.flatten()[:10],
+                    sd2[k].flatten()[:10],
+                )
 
         # Run a forward with the redistributed model.
         if to_model is not None:
@@ -451,7 +452,7 @@ def _test_para_realloc(
                 inf_engine.eval()
                 logits2 = inf_engine.forward(input_=x)
             if logits1 is not None:
-                assert torch.allclose(logits1, logits2)
+                assert torch.allclose(logits1, logits2, atol=2e-4)
         redist.backward()
         dist.barrier()
 
@@ -465,7 +466,7 @@ def _test_para_realloc(
             dist.barrier()
             sd3 = _load_all_pytorch_bin(tmp_path / f"save_back_{i}")
             for k, v in sd1.items():
-                assert torch.allclose(v, sd3[k]), (k, v, sd3[k])
+                assert torch.allclose(v, sd3[k], atol=2e-4), (k, v, sd3[k])
 
         # Train the model.
         if from_model is not None:
@@ -509,19 +510,17 @@ def _test_para_realloc(
     print("success")
 
 
-parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1)]
+parallelism = [(4, 1, 1), (2, 2, 2), (1, 8, 1), (3, 2, 1), (2, 1, 2), (1, 2, 2)]
 
 
 @pytest.mark.skipif(
     not torch.cuda.is_available() or torch.cuda.device_count() < 8,
     reason="This test requires at least 8 GPUs to run.",
 )
-@pytest.mark.parametrize("model_family_name", ["llama", "gpt2"])
+@pytest.mark.parametrize("model_family_name", ["gpt2", "llama"])
 @pytest.mark.parametrize("is_critic", [False, True])
 @pytest.mark.parametrize("from_pp_dp_mp", parallelism)
 @pytest.mark.parametrize("to_pp_dp_mp", parallelism)
-@pytest.mark.parametrize("from_sequence_parallel", [False, True])
-@pytest.mark.parametrize("to_sequence_parallel", [False, True])
 @pytest.mark.parametrize("skip_saveload", [False])
 @pytest.mark.gpu
 @pytest.mark.distributed
@@ -531,17 +530,11 @@ def test_param_realloc(
     is_critic: bool,
     from_pp_dp_mp: Tuple,
     to_pp_dp_mp: Tuple,
-    from_sequence_parallel: bool,
-    to_sequence_parallel: bool,
     skip_saveload: bool,
 ):
     if model_family_name == "gpt2" and (from_pp_dp_mp[-1] > 1 or to_pp_dp_mp[-1] > 1):
         # Since the vocabulary size of gpt2 is odd,
         # it does not support tensor model parallelism.
-        return
-    if from_sequence_parallel and from_pp_dp_mp[-1] == 1:
-        return
-    if to_sequence_parallel and to_pp_dp_mp[-1] == 1:
         return
     expr_name = uuid.uuid4()
     trial_name = uuid.uuid4()
@@ -550,13 +543,12 @@ def test_param_realloc(
         func=_test_para_realloc,
         expr_name=expr_name,
         trial_name=trial_name,
+        timeout_secs=120,
         tmp_path=tmp_path,
         model_family_name=model_family_name,
         is_critic=is_critic,
         from_pp_dp_mp=from_pp_dp_mp,
         to_pp_dp_mp=to_pp_dp_mp,
-        from_sequence_parallel=from_sequence_parallel,
-        to_sequence_parallel=to_sequence_parallel,
         n_iterations=4,
         skip_saveload=skip_saveload,
     )

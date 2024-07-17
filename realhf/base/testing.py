@@ -49,6 +49,7 @@ class StandaloneTestingProcess(mp.Process):
         func: Callable,
         *args,
         expr_name: str = None,
+        dist_backend: Optional[str] = None,
         trial_name: str = None,
         **kwargs,
     ):
@@ -80,8 +81,11 @@ class StandaloneTestingProcess(mp.Process):
         self.barrier.wait()
         from realhf.impl.model.comm.global_comm import setup_global_comm
 
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
-        setup_global_comm(self.expr_name, self.trial_name, self.rank, backend=backend)
+        if dist_backend is None:
+            dist_backend = "gloo" if not torch.cuda.is_available() else "nccl"
+        setup_global_comm(
+            self.expr_name, self.trial_name, self.rank, backend=dist_backend
+        )
         # NOTE: The import must be here.
         import deepspeed
 
@@ -120,6 +124,8 @@ class LocalMultiProcessTest:
         *args,
         expr_name: str = None,
         trial_name: str = None,
+        dist_backend: Optional[str] = None,
+        timeout_secs: int = 300,
         **kwargs,
     ):
         self.barrier = mp.Barrier(world_size)
@@ -129,6 +135,7 @@ class LocalMultiProcessTest:
             os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
             os.environ["GPU_DEVICES_ISOLATED"] = str(1)
         clear_name_resolve(expr_name, trial_name)
+        self.timeout_secs = timeout_secs
         self.processes = []
         for rank in range(world_size):
             if torch.cuda.is_available():
@@ -142,12 +149,14 @@ class LocalMultiProcessTest:
                 *args,
                 expr_name=expr_name,
                 trial_name=trial_name,
+                dist_backend=dist_backend,
                 **kwargs,
             )
             p.start()
             self.processes.append(p)
 
     def launch(self):
+        tik = time.time()
         while any([p.is_alive() for p in self.processes]):
             try:
                 err = self.err_queue.get_nowait()
@@ -155,6 +164,9 @@ class LocalMultiProcessTest:
                 raise err
             except queue.Empty:
                 time.sleep(0.1)
+            if time.time() - tik > self.timeout_secs:
+                [p.terminate() for p in self.processes]
+                raise TimeoutError("Timeout")
         [p.join() for p in self.processes]
 
 
