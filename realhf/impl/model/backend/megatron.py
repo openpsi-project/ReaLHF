@@ -840,7 +840,8 @@ class MegatronTrainBackend(model_api.ModelBackend):
                 config=get_megatron_transformer_config(module.config),
                 module=module,
                 data_parallel_group=constants.data_parallel_group(),
-                accumulate_allreduce_grads_in_fp32=self.accumulate_allreduce_grads_in_fp32,
+                accumulate_allreduce_grads_in_fp32=self.enable_fp16
+                or self.accumulate_allreduce_grads_in_fp32,
                 overlap_grad_reduce=self.overlap_grad_reduce,
                 use_distributed_optimizer=self.use_zero_optimization,
                 expert_data_parallel_group=None,
