@@ -430,7 +430,7 @@ class moe_scatter(torch.autograd.Function):
 
 
 # logging related
-aux_loss_names = ["aux_loss", "z_loss"]
+aux_loss_names = ["load_balancing_loss", "z_loss"]
 
 
 def update_aux_losses_tracker(
@@ -453,18 +453,9 @@ def update_aux_losses_tracker(
     )
 
 
-def avg_aux_loss_across_pipeline_parallel(stats_key):
+def avg_aux_loss(stats_key):
     loss: torch.Tensor = constants.get_from_global_stats_tracker(stats_key)
     dist.all_reduce(loss, group=constants.pipe_parallel_group())
-    constants.save_to_global_stats_tracker(stats_key, loss.mean())
-
-
-def avg_aux_loss_across_data_parallel(stats_key):
-    loss: torch.Tensor = constants.get_from_global_stats_tracker(stats_key)
-    dist.all_reduce(loss, op=dist.ReduceOp.AVG, group=constants.data_parallel_group())
-    constants.save_to_global_stats_tracker(stats_key, loss)
-
-
-def avg_aux_loss(stats_key):
-    avg_aux_loss_across_pipeline_parallel(stats_key)
-    avg_aux_loss_across_data_parallel(stats_key)
+    loss = loss.mean()
+    dist.all_reduce(loss, op=dist.ReduceOp.SUM, group=constants.data_parallel_group())
+    constants.save_to_global_stats_tracker(stats_key, float(loss))

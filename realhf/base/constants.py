@@ -470,10 +470,11 @@ def log_global_stats_tracker(
         if hook is not None:
             hook(**hook_kwargs)
 
-    res = {key: value for key, value in stats.items()}
+    res = {}
     if not return_dict:
         logger.info(f"Logging global stats tracker:")
     for key, value in stats.items():
+        res[key] = value
         if not return_dict:
             logger.info(f"{key}: {value}")
 

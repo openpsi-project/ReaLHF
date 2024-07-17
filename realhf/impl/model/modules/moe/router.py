@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Callable
 
 import torch
+import torch.distributed as dist
 import torch.nn.init as init
 
 import realhf.base.constants as constants
@@ -34,7 +35,6 @@ class TopKRouter(torch.nn.Module):
         super().__init__()
         self.config = config
         self.num_experts = self.config.num_experts
-        self.use_sequence_parallel = constants.sequence_parallel()
         self.hidden_dim = config.hidden_dim
 
         # Initialize the gate weights.
@@ -120,12 +120,20 @@ class TopKRouter(torch.nn.Module):
         """
         moe_aux_loss_coeff = self.config.aux_loss_coeff
         moe_aux_loss_coeff /= constants.model_parallel_world_size()
+        scale_for_logging = 1.0
+        if constants.sequence_parallel():
+            scale_for_logging *= constants.model_parallel_world_size()
+
         aux_loss = switch_load_balancing_loss_func(
             probs,
             num_local_tokens_per_expert,
             self.config.moe_top_k,
             moe_aux_loss_coeff,
-            sequence_partition_group=None,
+            sequence_partition_group=(
+                constants.model_parallel_group()
+                if constants.sequence_parallel()
+                else None
+            ),
         )
 
         update_aux_losses_tracker(
@@ -147,7 +155,7 @@ class TopKRouter(torch.nn.Module):
         Returns:
             torch.Tensor: The logits after applying the z-loss.
         """
-        if self.config.z_loss_coeff is not None:
+        if self.config.z_loss_coeff > 0:
             moe_z_loss_coeff = (
                 self.config.z_loss_coeff / constants.model_parallel_world_size()
             )

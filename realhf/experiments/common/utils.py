@@ -11,6 +11,7 @@ from realhf.api.quickstart.device_mesh import RPCAllocation
 from realhf.api.quickstart.model import (
     ModelTrainEvalConfig,
     ParallelismConfig,
+    degree_eq,
     get_real_model_config,
 )
 from realhf.base import logging
@@ -132,9 +133,9 @@ def resolve_replica_ids(rpc_allocs: List[RPCAllocation]):
             first_device_mesh[rpc.role] = alloc.device_mesh
             first_parallel[rpc.role] = alloc.parallel
             continue
-        if alloc.device_mesh != first_device_mesh[
-            rpc.role
-        ] or not alloc.parallel.degree_eq(first_parallel[rpc.role]):
+        if alloc.device_mesh != first_device_mesh[rpc.role] or not degree_eq(
+            alloc.parallel, first_parallel[rpc.role]
+        ):
             role_cnt[rpc.role] += 1
             rpc.model_name = ModelName(rpc.role, role_cnt[rpc.role])
 
@@ -156,7 +157,7 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                 if rpc.role != other.rpc.role:
                     continue
                 if (
-                    parallel.degree_eq(other.parallel)
+                    degree_eq(parallel, other.parallel)
                     and device_mesh == other.device_mesh
                 ):
                     continue
