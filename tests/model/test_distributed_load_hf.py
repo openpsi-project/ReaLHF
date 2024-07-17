@@ -160,6 +160,7 @@ def test_save_then_load(
         func=_save_then_load,
         expr_name=expr_name,
         trial_name=trial_name,
+        dist_backend="gloo",
         model_family_name=model_family_name,
         is_critic=is_critic,
         init_critic_from_actor=init_critic_from_actor,

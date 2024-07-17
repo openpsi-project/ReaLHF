@@ -122,14 +122,6 @@ def make_model_config(cfg: ModelTrainEvalConfig):
     )
 
 
-def parallel_eq(a: ParallelismConfig, b: ParallelismConfig) -> bool:
-    return (
-        a.model_parallel_size == b.model_parallel_size
-        and a.pipeline_parallel_size == b.pipeline_parallel_size
-        and a.data_parallel_size == b.data_parallel_size
-    )
-
-
 def resolve_replica_ids(rpc_allocs: List[RPCAllocation]):
     role_cnt = collections.defaultdict(int)
     first_device_mesh = dict()

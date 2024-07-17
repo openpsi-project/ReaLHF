@@ -38,7 +38,6 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
 
         seqs = [x["prompt"] + x["answer"] + tokenizer.eos_token for x in data]
         self.ids = [x["id"] for x in data]
-        self.ids = list(range(len(data)))
         prompts = [x["prompt"] for x in data]
 
         self.tokens = tokenizer(
