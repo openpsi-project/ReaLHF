@@ -90,6 +90,69 @@ class SequenceSplitSpec:
 
 @pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
 class SequenceSample:
+    """The data structure we use to represent sequence data.
+
+    We assume that each piece of data has serval "keys" (like a dict),
+    and each key can correspond to multiple sequences.
+
+    For example, when running PPO, we can generate multiple responses
+    for each prompt. Say we have 2 prompts and each with 3 responses,
+    the batch can look like:
+
+    .. code-block:: console
+
+        >>> s = SequenceSample(...)
+        >>> s.keys
+        {'resp', 'prompt'}
+        >>> s.seqlens
+        {'prompt': [tensor([13]), tensor([6])], 'resp': [tensor([ 6, 17, 15]), tensor([13, 15, 13])]}
+        >>> s.data
+        {'prompt': torch.tensor([...]), 'resp': torch.tensor([...])}
+
+    Keypoints:
+
+    - Pieces of data can have different lengths (e.g., the first prompt has a length of 13
+      while the second has a length of 6).
+
+    - Inside a piece of data, a key ("response")
+      can correspond to multiple sequences with different lengths.
+
+    - No matter what is the batch size and how many sequences we store for each key,
+      the data is concatenated as a 1D tensor. The outter dimension is the batch size
+      and the inner dimension is the number of sequences for the key.
+
+    With such a data structure, we can easily gather, split,
+    and transfer non-padded batches among different GPUs.
+
+    :param keys: The keys of the data.
+    :type keys: Set[str]
+    :param trailing_shapes: The trailing shapes of the data,
+        ignoring the first dimension, which must be the sequence length.
+        Used to construct the receiving buffer for data transfer.
+    :type trailing_shapes: Dict[str, torch.Size | Tuple | None]
+    :param dtypes: The types of the data. Used to construct
+        the receiving buffer for data transfer.
+    :type dtypes: Dict[str, torch.dtype | None]
+    :param ids: Unique identifiers for each piece of data.
+        Should be provided in the dataset implementation.
+        Used to amend new data into the buffer after a model function call.
+    :type ids: List[Hashable]
+    :param seqlens: The sequence lengths of each sequence in the data. For a given key,
+        it should be a list of 1D ``torch.IntTensor``,
+        with the list length equal to the batch size
+        and the size of the tensor equal to the number of sequences for this key.
+    :type seqlens: Dict[str, List[torch.Tensor]]
+    :param data: The actual concatenated data. If it is None,
+        the sample is a metadata-only sample used by the master worker.
+        The spec of the data should be consistent with the seqlens,
+        dtypes, and trailing_shapes.
+    :type data: Optional[Dict[str, torch.Tensor | None]]
+    :param metadata: Metadata of the sample. It should be a
+        dict of lists and provided in the dataset implementation
+        Adding metadata can slow down data transfer.
+    :type metadata: Dict[str, List[Any]]
+    """
+
     keys: Set[str]
     trailing_shapes: Dict[str, torch.Size | Tuple | None]
     dtypes: Dict[str, torch.dtype | None]
@@ -212,6 +275,14 @@ class SequenceSample:
 
     @classmethod
     def gather(cls, samples: List["SequenceSample"], keys: Optional[List[str]] = None):
+        """Gather a list of SequenceSample into a single batch.
+
+        :param samples: A list of SequenceSample to be gathered.
+        :type samples: List[SequenceSample]
+        :param keys: The keys to be gathered. Can only gather a subset of keys.
+            If None, use the keys of the first sample.
+        :type keys: Optional[List[str]]
+        """
         if keys is None:
             for sample in samples:
                 if sample.keys != samples[0].keys:
@@ -261,6 +332,16 @@ class SequenceSample:
     def get_split_spec(
         self, k: int, key: Optional[str] = None, min_size: int = 1
     ) -> SequenceSplitSpec:
+        """Get the partition spec for splitting the data into k parts.
+        It runs a DP algorithm to find the best-possible balanced partitioning.
+
+        :param k: The number of parts to split the data.
+        :type k: int
+        :param key: The key to be used for splitting. If None, use the key with the largest total sequence length.
+        :type key: Optional[str]
+        :param min_size: The minimum size of each partition.
+        :type min_size: int
+        """
         if key is None:
             key = self._get_split_key()
         lens = [lens.sum() for lens in self.seqlens[key]]
@@ -268,6 +349,7 @@ class SequenceSample:
         return SequenceSplitSpec(partitions=partitions)
 
     def split_with_spec(self, spec: SequenceSplitSpec) -> List["SequenceSample"]:
+        """Split the data according to the given spec."""
         samples = []
         data_offset = {k: 0 for k in self.keys}
         for start, end in spec.partitions:
@@ -316,13 +398,24 @@ class SequenceSample:
         key: Optional[str] = None,
         min_size: int = 1,
     ) -> List["SequenceSample"]:
+        """Split the data into k parts.
+
+        :param k: The number of parts to split the data.
+        :type k: int
+        :param key: The key to be used for splitting. If None, use the key with the largest total sequence length.
+        :type key: Optional[str]
+        :param min_size: The minimum size of each partition.
+        :type min_size: int
+        """
         spec = self.get_split_spec(k, key, min_size)
         return self.split_with_spec(spec)
 
     def unpack(self):
+        """Unpack a batch of data into individual pieces of data."""
         return self.split(self.bs, min_size=1)
 
     def cuda(self):
+        """Move the data to GPU inplace."""
         if self.data is None:
             return self
         self.data = {
@@ -332,6 +425,7 @@ class SequenceSample:
 
     @property
     def bs(self):
+        """The batch size or the number of data pieces in the sample."""
         return len(self.ids)
 
     def meta(self) -> "SequenceSample":
@@ -347,6 +441,9 @@ class SequenceSample:
         )
 
     def update_(self, other: "SequenceSample"):
+        """Inplace update data from another SequenceSample.
+        Used to amend newly produced data after a model function call.
+        """
         self.keys = self.keys.union(other.keys)
         self.trailing_shapes.update(other.trailing_shapes)
         self.dtypes.update(other.dtypes)
@@ -408,6 +505,28 @@ class SequenceSample:
         data: Dict[str, torch.Tensor],
         metadata: Optional[Dict[str, Any]] = None,
     ):
+        """A helper function to construct the SequenceSample object.
+
+        This is designed for the special case where each piece of data has
+        a single sequence length (e.g., a single response for each prompt).
+        Sequence length of different keys will be resolved automatically
+        according to the rules in ``_resolve_seqlen_from_key``.
+        This function can reduce the boilerplate code but introduce potential bugs.
+        Please use this function with caution.
+
+        :param seqlens: The sequence lengths of each piece of data.
+            This is the length of the main attribute, i.e., packed_input_ids.
+            Sequence lengths for other attributes, e.g., rewards and logprobs,
+            will be computed from this parameter. It is **NOT** the actual length
+            of rewards or logprobs even if it is the only key in data.
+        :type seqlens: List[int]
+        :param ids: Unique identifiers for each piece of data.
+        :type ids: List[Hashable]
+        :param data: The actual data.
+        :type data: Dict[str, torch.Tensor]
+        :param metadata: Metadata of the sample.
+        :type metadata: Optional[Dict[str, Any]]
+        """
         if metadata is None:
             metadata = {}
         for k, v in metadata.items():
@@ -435,6 +554,11 @@ class SequenceSample:
         )
 
     def remap_keys_(self, remap: Dict[str, str]):
+        """Inplace remap keys of the data.
+
+        Useful for reusing the same interface implementation in different algorithms,
+        where the data can be named differently.
+        """
         for k in self.keys:
             if k in remap:
                 new_k = remap[k]

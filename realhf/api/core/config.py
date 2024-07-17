@@ -75,10 +75,10 @@ class ModelFamily:
 
     :param _class: The class of the model, e.g. "llama".
         It's the registered name in the ``register_hf_family`` function.
-        Please check files in ``realhf/api/from_hf``.
+        Please check files in ``realhf/api/from_hf`` for all supported models.
     :type _class: str
     :param size: The size of the model. Only be used by the ``search``
-        allocation mode. Can be 0 otherwise.
+        allocation mode. Will be ignored otherwise.
     :type size: int
     :param is_critic: Whether the model is a critic or reward
         instead of a normal LLM.

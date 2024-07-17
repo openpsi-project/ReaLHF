@@ -12,20 +12,19 @@ To pull the images, run:
 
 .. code-block:: console
 
-   $ export REAL_VERSION="0.1.0"
    $ docker pull docker.io/garrett4wade/real-cpu:22.04-${REAL_VERSION}
    $ docker pull docker.io/garrett4wade/real-gpu:23.10-py3-${REAL_VERSION}
 
 The CPU image is built from "ubuntu:22.04" and the GPU image is built from "nvcr.io/nvidia/pytorch:23.10-py3".
-The current package version is "0.1.0".
+You can check the latest package version `here <https://github.com/openpsi-project/ReaLHF/releases>`_.
 
 After pulling the Docker images, run your Docker container locally on a GPU node with the following command:
 
 .. code-block:: console
 
-   $ docker run -it --gpus all garrett4wade/real-gpu:23.10-py3-0.1.0 bash
+   $ docker run -it --rm --gpus all garrett4wade/real-gpu:23.10-py3-${REAL_VERSION} bash
 
-The source code is available at /realhf inside the container.
+The source code is available at ``/realhf`` inside the container.
 This is an editable installation, so you can modify the code or run experiments directly.
 
 If you want to develop the code outside a Docker container,
@@ -33,9 +32,9 @@ you should mount the code directory to the container, e.g.,
 
 .. code-block:: console
 
-   $ docker run -it --gpus all --mount type=bind,src=/path/outside/container,dst=/realhf garrett4wade/real-gpu:23.10-py3-0.1.0 bash
+   $ docker run -it --rm --gpus all --mount type=bind,src=/path/outside/container,dst=/realhf garrett4wade/real-gpu:23.10-py3-${REAL_VERSION} bash
 
-If your destination path is not /realhf,
+If your destination path is not ``/realhf``,
 remember to rerun the editable installation command after mounting:
 
 .. code-block:: console
@@ -51,7 +50,7 @@ Install From PyPI or Source
 ----------------------------
 
 If you prefer not to use the provided Docker image,
-you can also start with an image provided by NVIDA (e.g., nvcr.io/nvidia/pytorch:23.10-py3)
+you can also start with an image provided by NVIDA (e.g., ``nvcr.io/nvidia/pytorch:23.10-py3``)
 and install ReaL from PyPI or from the source.
 
 .. note::
@@ -61,6 +60,8 @@ and install ReaL from PyPI or from the source.
 
    The CUDA extention will be installed only if ``REAL_CUDA`` is set to 1.
    No extention will be installed if ``REAL_NO_EXT`` is set to 1.
+
+   If you don't want to compile the extensions, please use the provided Docker images.
 
 First, clone the repository and install all dependencies:
 

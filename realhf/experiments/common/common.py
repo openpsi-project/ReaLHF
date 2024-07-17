@@ -88,9 +88,13 @@ class CommonExperimentConfig(Experiment):
 
     - ``pipe_model``\: identical parallelization (like DSChat) with pipe+model parallelism. A world size under 8 will use tensor-model parallelism only.
 
-    :param experiment_name: Name of the experiment. Arbitrary string without "-" and "/", e.g., ``ultra-chat-llama``.
+    :param experiment_name: Name of the experiment.
+        Arbitrary string without "_" and "/", e.g., ``ultra-chat-llama``.
+        Must be provided.
     :type experiment_name: str
-    :param trial_name: Name of the trial. Arbitrary string without "-" and "/", e.g., ``lr1e-3wd0.05``.
+    :param trial_name: Name of the trial.
+        Arbitrary string without "-" and "/", e.g., ``lr1e-3wd0.05``.
+        Must be provided.
     :type trial_name: str
     :param mode: Experiment launching mode. "local", "ray", or "slurm" are supported.
         "ray" mode requires launching the ray cluster with CLI.

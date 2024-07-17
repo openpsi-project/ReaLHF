@@ -6,8 +6,8 @@
 Welcome to ReaL's documentation!
 ====================================
 
-Get Started
--------------
+🚀 Get Started 🚀
+------------------------
 
 For users new to ReaL, we recommend starting with the :doc:`quickstart` section 
 to learn how to run simple experiments on a local node. 
@@ -26,8 +26,8 @@ but understanding the system-wide implementation (e.g., model workers) is not ma
 Besides these tutorials, we present the reference manual of various configuration objects
 in the :doc:`expconfig` section, and a brief overview of the system architecture in the :doc:`intro` section.
 
-Contents
-----------------
+⭐ Contents ⭐
+-------------------
 
 .. toctree::
    :maxdepth: 3

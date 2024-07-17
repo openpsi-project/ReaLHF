@@ -1,6 +1,9 @@
 Introduction
 ----------------
 
+Limitations of Existing Systems
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 We observe two major limitations based on our profiling
 of the previous RLHF systems, as shown in the :ref:`timeline`.
 
@@ -15,14 +18,15 @@ of the previous RLHF systems, as shown in the :ref:`timeline`.
 
 First, when models are distributed
 to every GPU node that applies the same parallelization
-strategy, such as in DeepSpeed-Chat, it is often over-parallelized.
+strategy, such as in `DeepSpeed-Chat <https://github.com/microsoft/DeepSpeedExamples/tree/master/applications/DeepSpeed-Chat>`_,
+it is often over-parallelized.
 Over-parallelization leads to
 substantial synchronization and communication overhead
 (the light purple bars).
 
 An alternative way is to assign different
 models to different GPU nodes, where models can execute
-concurrently, such as OpenRLHF.
+concurrently, such as `OpenRLHF <https://github.com/OpenRLHF/OpenRLHF>`_.
 However, our second observation is that such
 asymmetric parallelization often causes under-utilization of
 the GPUs (e.g., the gray areas) because
@@ -41,6 +45,8 @@ we can eliminate redundant communication while maximizing GPU utilization,
 effectively addressing the limitations of
 prior solutions.
 
+Performance Comparison
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We show throughput comparison with the state-of-the-art open-source systems
 in the following figure.
@@ -48,8 +54,6 @@ in the following figure.
 (In the following figure, as the number of GPUs increases, the model size scales up from LLaMA 7B, LLaMA 13B, and CodeLLaMA 34B, to the largest LLaMA 70B.)
 
 .. image:: images/vws.svg
-
-
 
 
 .. _est_time_table:
