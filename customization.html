@@ -206,8 +206,6 @@
 <li><p><a class="reference internal" href="expconfig.html#realhf.PairedComparisonDatasetConfig" title="realhf.PairedComparisonDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PairedComparisonDatasetConfig</span></code></a></p></li>
 <li><p><a class="reference internal" href="expconfig.html#realhf.PromptOnlyDatasetConfig" title="realhf.PromptOnlyDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptOnlyDatasetConfig</span></code></a></p></li>
 </ul>
-<p>Please refer to the respective configuration documentation for detailed
-instructions on how to use or modify these datasets.</p>
 <p>Datasets in ReaL are commonly used <a class="reference external" href="https://pytorch.org/docs/stable/data.html#map-style-datasets">PyTorch map-style datasets</a>. Users
 need to implement a <code class="docutils literal notranslate"><span class="pre">__getitem__</span></code> method in the dataset class, which
 returns a <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a> object containing the data of a
@@ -215,26 +213,83 @@ single sample and its sequence length. The sequence length is necessary
 because ReaL uses variable-length inputs without padding to save GPU
 memory.</p>
 </section>
+<section id="the-data-structure-realhf-sequencesample">
+<h3>The Data Structure: <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a><a class="headerlink" href="#the-data-structure-realhf-sequencesample" title="Link to this heading">¶</a></h3>
+<p>ReaL follows <a class="reference external" href="https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/flash_attn_interface.py#L1053">the API of flash_attn_varlen_func</a>
+to handle variable-length inputs without padding. The class
+<a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a> is used to store the lengths and data of
+sequences, facilitating gather, split, and data transfer operations on
+these variable-length datasets.</p>
+<p>The core fields of <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a> are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ids</span></code>: A list of unique hashable identifiers for each data piece.
+The length of <code class="docutils literal notranslate"><span class="pre">ids</span></code> corresponds to the batch size.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">keys</span></code>: A set of strings representing the keys loaded from the
+dataset or produced by model function calls. Each key can contain
+multiple sequences, such as multiple responses generated from the
+same prompt. Sequences with the same key are packed together, with a
+vector representing their lengths.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">seqlens</span></code>: A dictionary of lists, where each list corresponds to
+the sequence lengths of the data specified by the key. The length of
+the lists should be equal to the batch size. The elements in the list
+should be 1D <code class="docutils literal notranslate"><span class="pre">torch.IntTensor</span></code>. The tensor size equals the number
+of sequences packed for each key. For example, if there are K
+responses for each prompt, each tensor in the “response” list should
+have size (K,), and each tensor in the “prompt” list should have size
+(1,).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">data</span></code>: A dictionary of PyTorch tensors. All data are packed into
+1D tensors with size (total_seqlen, ). The outer packing dimension
+represents the batch size, while the inner packing dimension
+represents the number of sequences for each key.</p></li>
+</ul>
+<p>Below is an example implementation of the dataset used for reward
+modeling:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+     <span class="o">...</span>
+     <span class="k">return</span> <span class="n">data_api</span><span class="o">.</span><span class="n">SequenceSample</span><span class="p">(</span>
+         <span class="n">keys</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;packed_input_ids&quot;</span><span class="p">,</span> <span class="s2">&quot;prompt_lens&quot;</span><span class="p">],</span>
+         <span class="n">data</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span>
+               <span class="n">packed_input_ids</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">packed_input_ids</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">long</span><span class="p">),</span>
+               <span class="n">prompt_lens</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="n">prompt_len</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">),</span>
+         <span class="p">),</span>
+         <span class="o">...</span>
+         <span class="n">ids</span><span class="o">=</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">ids</span><span class="p">[</span><span class="n">idx</span><span class="p">]],</span>
+         <span class="n">seqlens</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span>
+             <span class="n">packed_input_ids</span><span class="o">=</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">input_lens</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">)],</span>
+             <span class="n">prompt_lens</span><span class="o">=</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">([</span><span class="mi">1</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">)],</span>
+         <span class="p">),</span>
+     <span class="p">)</span>
+</pre></div>
+</div>
+<p>In this example, the returned sample has a batch size of 1, with two
+keys: “packed_input_ids” and “prompt_lens”. The “packed_input_ids” key
+contains packed positive and negative responses, with their lengths
+specified by the vector “input_lens”. The “prompt_lens” key contains a
+scalar tensor representing the length of the prompt, with a length of 1.</p>
+<p>Note that the <code class="docutils literal notranslate"><span class="pre">ids</span></code> and <code class="docutils literal notranslate"><span class="pre">seqlens</span></code> fields are wrapped in length-1
+lists, indicating that the batch size is 1.</p>
+<p>For more details, please refer to <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a> and the
+implementation of datasets under the <code class="docutils literal notranslate"><span class="pre">realhf/impl/dataset</span></code> folder.</p>
+</section>
 <section id="how-dataset-configuration-is-parsed">
 <h3>How Dataset Configuration is Parsed<a class="headerlink" href="#how-dataset-configuration-is-parsed" title="Link to this heading">¶</a></h3>
 <p>We will use the SFT experiment as an example.</p>
 <p>The <a class="reference internal" href="expconfig.html#realhf.PromptAnswerDatasetConfig" title="realhf.PromptAnswerDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code></a> object will be converted
 to a dataset configuration under the system API, specifically
-<code class="docutils literal notranslate"><span class="pre">realhf.api.core.system_api.Dataset</span></code>. Refer to the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method
-of <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> for more details. This object includes a
+<code class="docutils literal notranslate"><span class="pre">realhf.api.core.config.DatasetAbstraction</span></code>. This object includes a
 dataset name (in this case, “prompt_answer”) and corresponding arguments
 that are passed to the dataset class’s constructor:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@property</span>
-<span class="k">def</span> <span class="nf">datasets</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-    <span class="k">return</span> <span class="p">[</span>
-        <span class="n">Dataset</span><span class="p">(</span>
-            <span class="s2">&quot;prompt_answer&quot;</span><span class="p">,</span>
-            <span class="n">args</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span>
-                <span class="n">max_length</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">max_seqlen</span><span class="p">,</span>
-                <span class="n">dataset_path</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">train_path</span><span class="p">,</span>
-            <span class="p">),</span>
-        <span class="p">)</span>
-    <span class="p">]</span>
+ <span class="k">def</span> <span class="nf">datasets</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+     <span class="k">return</span> <span class="p">[</span>
+         <span class="n">DatasetAbstraction</span><span class="p">(</span>
+             <span class="s2">&quot;prompt_answer&quot;</span><span class="p">,</span>
+             <span class="n">args</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span>
+                 <span class="n">max_length</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">max_seqlen</span><span class="p">,</span>
+                 <span class="n">dataset_path</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">train_path</span><span class="p">,</span>
+             <span class="p">),</span>
+         <span class="p">)</span>
+     <span class="p">]</span>
 </pre></div>
 </div>
 <p>At the end of <code class="docutils literal notranslate"><span class="pre">realhf.impl.dataset.prompt_answer_dataset</span></code>, we find the
@@ -242,12 +297,12 @@ following line:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">data_api</span><span class="o">.</span><span class="n">register_dataset</span><span class="p">(</span><span class="s2">&quot;prompt_answer&quot;</span><span class="p">,</span> <span class="n">PromptAnswerDataset</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>This line registers the dataset class with the system API. When this
-name is provided to the system API, ReaL can locate this dataset
-implementation and construct it. The <code class="docutils literal notranslate"><span class="pre">args</span></code> field in
-<code class="docutils literal notranslate"><span class="pre">realhf.api.core.system_api.Dataset</span></code> will be passed to the
-<code class="docutils literal notranslate"><span class="pre">__init__</span></code> method of the dataset class, except that ReaL reserves a
-<code class="docutils literal notranslate"><span class="pre">util</span></code> field to store some utility objects.</p>
+<p>This line registers the dataset class with the system API. When the name
+“prompt_answer” name is provided to the system API, ReaL can locate this
+dataset implementation and construct it. The <code class="docutils literal notranslate"><span class="pre">args</span></code> field in
+<code class="docutils literal notranslate"><span class="pre">DatasetAbstraction</span></code> will be passed to the <code class="docutils literal notranslate"><span class="pre">__init__</span></code> method of the
+dataset class, except that ReaL reserves a <code class="docutils literal notranslate"><span class="pre">util</span></code> field to store some
+utility objects.</p>
 </section>
 <section id="steps-for-implementing-a-new-dataset">
 <h3>Steps for Implementing a New Dataset<a class="headerlink" href="#steps-for-implementing-a-new-dataset" title="Link to this heading">¶</a></h3>
@@ -257,14 +312,18 @@ implementation and construct it. The <code class="docutils literal notranslate">
 method. This method should return a <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a>
 object containing the sequence length as metadata.</p></li>
 <li><p>Register the class with <code class="docutils literal notranslate"><span class="pre">data_api.register_dataset</span></code> at the end of
-the file, using the name “my-dataset”.</p></li>
+the file, e.g., using the name “my-dataset”.</p></li>
+<li><p>Check your dataset implementation by running the unit test in
+<code class="docutils literal notranslate"><span class="pre">tests/data/test_load_data.py</span></code>. Please implement a new test
+function for your customized dataset class by imitating existing
+ones.</p></li>
 <li><p>Update the name of the dataset in experiment configurations, for
-example, in the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method of <code class="docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code>, to
+example, in the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method of <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a>, to
 “my-dataset”.</p></li>
 <li><p>If you need to pass additional arguments to construct the dataset
 class, modify the quickstart configuration class (in this case,
 <code class="docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code>) as well as the <code class="docutils literal notranslate"><span class="pre">args</span></code> field
-in the system API dataset object.</p></li>
+in the <code class="docutils literal notranslate"><span class="pre">DatasetAbstraction</span></code> object.</p></li>
 </ol>
 </section>
 </section>
@@ -288,12 +347,19 @@ convertible HuggingFace model, the user should implement:</p>
 <li><p>Two functions to convert model configs between HuggingFace and
 <a class="reference internal" href="expconfig.html#realhf.ReaLModelConfig" title="realhf.ReaLModelConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ReaLModelConfig</span></code></a>.</p></li>
 <li><p>Two functions to convert model state dicts between HuggingFace and
-ReaL, primarily involving key remapping.</p></li>
+ReaL, primarily involving key remapping. Importantly, these functions
+should be able to <em>remap any subset of model parameters</em> due to the
+use of 3D parallelism in ReaL.</p></li>
 <li><p>Three functions specifying the names of parameters in the embedding
 layer, transformer blocks, and the output layer, respectively. These
 functions are used to selectively load checkpoints with 3D
 parallelism.</p></li>
 </ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The actual save/load funcion is implemented in
+<code class="docutils literal notranslate"><span class="pre">realhf/impl/model/conversion/hf_registry.py</span></code>.</p>
+</div>
 </section>
 <section id="steps-to-support-a-new-huggingface-model">
 <h3>Steps to Support a New HuggingFace Model<a class="headerlink" href="#steps-to-support-a-new-huggingface-model" title="Link to this heading">¶</a></h3>
@@ -301,8 +367,8 @@ parallelism.</p></li>
 <li><p>Create a new model file under <code class="docutils literal notranslate"><span class="pre">api/from_hf/</span></code>.</p></li>
 <li><p>Implement the required helper functions as described above.</p></li>
 <li><p>Register the model with register_hf_family at the end of the file.</p></li>
-<li><p>(Optional) Test the consistency of the implemented model with scripts
-in <code class="docutils literal notranslate"><span class="pre">tests/test_cpu_inference.py</span></code>.</p></li>
+<li><p>Test the consistency of the implemented model with scripts in
+<code class="docutils literal notranslate"><span class="pre">tests/model/test_cpu_inference.py</span></code>.</p></li>
 </ul>
 </section>
 </section>
@@ -502,6 +568,7 @@ automatic evaluations.</p>
 <li><a class="reference internal" href="#">Customization</a><ul>
 <li><a class="reference internal" href="#customizing-datasets">Customizing Datasets</a><ul>
 <li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#the-data-structure-realhf-sequencesample">The Data Structure: <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a></li>
 <li><a class="reference internal" href="#how-dataset-configuration-is-parsed">How Dataset Configuration is Parsed</a></li>
 <li><a class="reference internal" href="#steps-for-implementing-a-new-dataset">Steps for Implementing a New Dataset</a></li>
 </ul>

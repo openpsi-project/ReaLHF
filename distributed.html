@@ -243,11 +243,15 @@ environment variable when launching experiments. For example:</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>If this variable is not set, the Ray mode will use a default fileroot
-<code class="docutils literal notranslate"><span class="pre">/home/user/.cache/realhf</span></code> and a default node prefix “NODE”. This
-means that the user should specify manual allocations like
-<code class="docutils literal notranslate"><span class="pre">NODE[01-02]</span></code>. It is the user’s responsibility to ensure that the
-fileroot is accessible by all nodes in the cluster.</p>
+<p>If the <code class="docutils literal notranslate"><span class="pre">CLUSTER_SPEC_PATH</span></code> variable is not set, the Ray mode will
+use a default fileroot <code class="docutils literal notranslate"><span class="pre">/home/$USER/.cache/realhf</span></code> and a default
+node prefix “NODE”.</p>
+<p>This means that logs and checkpoints will be saved to
+<code class="docutils literal notranslate"><span class="pre">/home/$USER/.cache/realhf</span></code> and that the user should specify manual
+allocations like <code class="docutils literal notranslate"><span class="pre">NODE[01-02]</span></code>.</p>
+<p>It is the user’s responsibility to ensure that the fileroot
+<code class="docutils literal notranslate"><span class="pre">/home/$USER/.cache/realhf</span></code> is accessible by all nodes in the
+cluster.</p>
 </div>
 </section>
 <section id="distributed-experiments-with-ray">
@@ -300,8 +304,7 @@ CLI:</p>
 </div>
 <p>This command will allocate 1 CPU core, 0 GPUs, and 10GB of memory for
 the head node. As a result, model workers and the master worker will not
-be scheduled on the head node. If the resource options are not given,
-Ray will detect the resources automatically. Check <a class="reference external" href="https://docs.ray.io/en/latest/cluster/cli.html">Ray’s documentation</a> for details.</p>
+be scheduled on the head node.</p>
 <p>ReaL will detect all available resources by calling <code class="docutils literal notranslate"><span class="pre">ray.init()</span></code> on
 the head node. The driver process that calls <code class="docutils literal notranslate"><span class="pre">ray.init()</span></code> does not
 consume any resources. Only the workers (i.e., model workers and the
@@ -318,9 +321,12 @@ the cluster to increase resources.</p>
 Currently, ReaL has an issue where, when the experiment terminates, it
 only kills the driver process, leaving the worker processes stale on
 remote nodes.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
 <p><strong>Users should manually kill the worker processes on the remote nodes
 using `ray stop`; otherwise, a new experiment on the same Ray cluster
 will get stuck.</strong></p>
+</div>
 </section>
 </section>
 <section id="distributed-experiments-with-slurm-pyxis">

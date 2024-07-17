@@ -67,11 +67,17 @@ environment variable when launching experiments. For example:
 
 .. note::
 
-   If this variable is not set, the Ray mode will use a default fileroot
-   ``/home/user/.cache/realhf`` and a default node prefix "NODE". This
-   means that the user should specify manual allocations like
-   ``NODE[01-02]``. It is the user's responsibility to ensure that the
-   fileroot is accessible by all nodes in the cluster.
+   If the ``CLUSTER_SPEC_PATH`` variable is not set, the Ray mode will
+   use a default fileroot ``/home/$USER/.cache/realhf`` and a default
+   node prefix "NODE".
+
+   This means that logs and checkpoints will be saved to
+   ``/home/$USER/.cache/realhf`` and that the user should specify manual
+   allocations like ``NODE[01-02]``.
+
+   It is the user's responsibility to ensure that the fileroot
+   ``/home/$USER/.cache/realhf`` is accessible by all nodes in the
+   cluster.
 
 **********************************
  Distributed Experiments with Ray
@@ -134,9 +140,7 @@ CLI:
 
 This command will allocate 1 CPU core, 0 GPUs, and 10GB of memory for
 the head node. As a result, model workers and the master worker will not
-be scheduled on the head node. If the resource options are not given,
-Ray will detect the resources automatically. Check `Ray's documentation
-<https://docs.ray.io/en/latest/cluster/cli.html>`_ for details.
+be scheduled on the head node.
 
 ReaL will detect all available resources by calling ``ray.init()`` on
 the head node. The driver process that calls ``ray.init()`` does not
@@ -157,9 +161,11 @@ Currently, ReaL has an issue where, when the experiment terminates, it
 only kills the driver process, leaving the worker processes stale on
 remote nodes.
 
-**Users should manually kill the worker processes on the remote nodes
-using `ray stop`; otherwise, a new experiment on the same Ray cluster
-will get stuck.**
+.. note::
+
+   **Users should manually kill the worker processes on the remote nodes
+   using `ray stop`; otherwise, a new experiment on the same Ray cluster
+   will get stuck.**
 
 ********************************************
  Distributed Experiments with SLURM + Pyxis

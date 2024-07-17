@@ -499,6 +499,12 @@ PPO.</p>
 <p class="admonition-title">Note</p>
 <p>You can also pass in the trained DPO checkpoint to initialize the PPO
 actor.</p>
+<p>If you want to direct initialize the critic model from a pre-trained
+actor model instead of the reward model, you can set
+<code class="docutils literal notranslate"><span class="pre">critic.init_critic_from_actor=True</span></code> and
+<code class="docutils literal notranslate"><span class="pre">reward.init_critic_from_actor=True</span></code>. This is also beneficial for
+benchmarking throughputs since checkpoints of SFT and reward modeling
+are not required.</p>
 </div>
 <p>The configuration options of PPO are the most complex among the three
 stages. PPO involves four different models: <em>Actor</em>, <em>Critic</em>,
@@ -540,11 +546,10 @@ on the algorithm design.</p>
 <section id="the-next-step">
 <h2>The Next Step<a class="headerlink" href="#the-next-step" title="Link to this heading">¶</a></h2>
 <p>You have now figured out how to run built-in experiments and how to
-manage training hyperparameters, logs, and checkpoints within ReaL.
-Next, you can follow the <a class="reference internal" href="distributed.html"><span class="doc">Setting Up Distributed Experiments</span></a> section to set up your
+manage training hyperparameters, logs, and checkpoints within ReaL.</p>
+<p>Next, you can follow the <a class="reference internal" href="distributed.html"><span class="doc">Setting Up Distributed Experiments</span></a> section to set up your
 experiments in a large cluster, or proceed to the <a class="reference internal" href="customization.html"><span class="doc">Customization</span></a>
-section to learn how to customize the datasets, models, and algorithms
-in ReaL.</p>
+section to learn how to customize the datasets, models, and algorithms.</p>
 </section>
 </section>
 
