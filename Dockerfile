@@ -53,6 +53,10 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib:/opt/hpcx/ucx/lib/"
 COPY ./requirements.txt /requirements.txt
 RUN pip3 install -r /requirements.txt && rm /requirements.txt
 
+COPY . /realhf
+RUN REAL_CUDA=0 pip3 install -e /realhf --no-build-isolation
+WORKDIR /realhf
+
 # NOTE: we should also install flash_attn and transformer_engine in the image
 # However, using `pip install flash_attn -no-build-isolation` will cause the
 # building process to get stuck forever, so we have to pre-compile the wheel
@@ -67,3 +71,7 @@ COPY ./dist/$TE_WHL_NAME /$TE_WHL_NAME
 RUN pip3 install /$TE_WHL_NAME --no-dependencies && rm /$TE_WHL_NAME
 COPY ./dist/$FLA_WHL_NAME /$FLA_WHL_NAME
 RUN pip3 install /$FLA_WHL_NAME && rm /$FLA_WHL_NAME
+
+COPY . /realhf
+RUN REAL_CUDA=0 pip3 install -e /realhf --no-build-isolation
+WORKDIR /realhf
