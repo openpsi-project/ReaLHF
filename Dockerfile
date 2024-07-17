@@ -20,6 +20,10 @@ RUN pip3 install torch
 COPY ./requirements.txt /requirements.txt
 RUN pip3 install -r /requirements.txt && rm /requirements.txt
 
+COPY . /realhf
+RUN REAL_CUDA=0 pip3 install -e /realhf --no-build-isolation
+WORKDIR /realhf
+
 # >>>>>> Documentation images
 # FROM cpu AS docs-builder
 # RUN pip install -U sphinx sphinx-nefertiti -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -67,3 +71,7 @@ COPY ./dist/$TE_WHL_NAME /$TE_WHL_NAME
 RUN pip3 install /$TE_WHL_NAME --no-dependencies && rm /$TE_WHL_NAME
 COPY ./dist/$FLA_WHL_NAME /$FLA_WHL_NAME
 RUN pip3 install /$FLA_WHL_NAME && rm /$FLA_WHL_NAME
+
+COPY . /realhf
+RUN REAL_CUDA=1 pip3 install -e /realhf --no-build-isolation
+WORKDIR /realhf
