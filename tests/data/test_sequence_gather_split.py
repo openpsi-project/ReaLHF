@@ -23,7 +23,7 @@ def _make_sample_single_sequence(bs, data_with_none=False):
         "prompt_mask",
     ]
     vocab_size = 150
-    slens = [torch.randint(1, 100, (1,)).int() for _ in range(bs)]
+    slens = [int(torch.randint(1, 100, (1,)).int()) for _ in range(bs)]
     input_ids = torch.cat([torch.randint(0, 150, (slen,)) for slen in slens])
     rewards = torch.cat([torch.randn(1) for _ in range(bs)])
     logprobs = torch.cat([torch.randn(slen - 1) for slen in slens])
@@ -51,7 +51,7 @@ def _make_sample_single_sequence(bs, data_with_none=False):
         ids=ids,
         seqlens=slens,
         data=data,
-        metadata=dict(a=1, b="abc"),
+        metadata=dict(a=[1 for _ in range(bs)], b=["abc" for _ in range(bs)]),
     )
 
 
@@ -96,7 +96,7 @@ def _make_sample_multiple_sequence(bs):
         trailing_shapes=trailing_shapes,
         dtypes=dtypes,
         data=data,
-        metadata=dict(a=1, b="abc"),
+        metadata=dict(a=[1 for _ in range(bs)], b=["abc" for _ in range(bs)]),
     )
 
 

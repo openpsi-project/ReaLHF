@@ -1,3 +1,4 @@
+import uuid
 from typing import Callable, Dict, List, Optional
 
 import torch.utils.data
@@ -63,6 +64,7 @@ class PromptDataset(torch.utils.data.Dataset):
             ids=[self.ids[idx]],
             seqlens=[self.prompt_lengths[idx]],
             data=dict(packed_prompts=torch.tensor(self.prompts[idx], dtype=torch.long)),
+            metadata=dict(random_id=[uuid.uuid4()]),
         )
 
 

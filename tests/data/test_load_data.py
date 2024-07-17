@@ -102,7 +102,15 @@ def _validate_dataset(cfg: config_api.DatasetAbstraction, tokenizer):
         for k, vs in x.seqlens.items():
             assert all(v.dtype == torch.int32 for v in vs)
         assert len(x.ids) == len(set(x.ids))
+        if x.metadata:
+            for k, v in x.metadata.items():
+                assert isinstance(v, list), k
         xs = x.split(bs)
+        for xx in xs:
+            if xx.metadata:
+                for k, v in xx.metadata.items():
+                    assert isinstance(v, list), k
+                    assert len(v) == 1
 
 
 @pytest.mark.parametrize("dataset_and_tokenizer", [(1000, 128, 512, 3)], indirect=True)

@@ -1,12 +1,11 @@
 import dataclasses
 import functools
+import os
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.utils.checkpoint
 import transformers
 
@@ -27,6 +26,7 @@ from realhf.impl.model.nn.flatten_param import (
     set_intervals,
     slice_intervals,
 )
+from realhf.impl.model.nn.flatten_param import set_intervals, slice_intervals
 from realhf.impl.model.utils.padding import pad_input, unpad_input
 
 from .flatten_param import build_param_spec, map_param_to_contigous_memory
@@ -698,6 +698,9 @@ class ReaLModel(nn.Module):
                     buf = slice_intervals(
                         self.contiguous_param,
                         step.sender_param_intervals_cpu,
+                        intervals_cuda=step.sender_param_intervals_cuda,
+                        max_interval_size=step.sender_max_interval_size,
+                        output_size=step.param_size,
                     )
                 else:
                     buf = torch.zeros(
@@ -709,7 +712,9 @@ class ReaLModel(nn.Module):
                     dict(
                         src=buf,
                         dst=to_contiguous_param,
-                        intervals=step.receiver_param_intervals_cpu,
+                        intervals_cpu=step.receiver_param_intervals_cpu,
+                        intervals_cuda=step.receiver_param_intervals_cuda,
+                        max_interval_size=step.receiver_max_interval_size,
                     )
                 )
 
@@ -721,6 +726,9 @@ class ReaLModel(nn.Module):
                     buf = slice_intervals(
                         self.contiguous_param,
                         step.param_intervals_cpu,
+                        intervals_cuda=step.param_intervals_cuda,
+                        max_interval_size=step.max_interval_size,
+                        output_size=step.param_size,
                     )
                     send_buf_specs.append(buf)
 
