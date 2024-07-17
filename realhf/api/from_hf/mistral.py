@@ -62,6 +62,7 @@ def config_to_mistral(config: ReaLModelConfig) -> transformers.MistralConfig:
         rope_theta=config.rotary_base,
         attention_dropout=config.attn_pdrop,
         sliding_window=config.sliding_window,
+        architectures=["MistralForCausalLM"],
     )
 
 
