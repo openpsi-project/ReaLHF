@@ -288,8 +288,7 @@ def _initialize_affine_weight_gpu(
     set_tensor_model_parallel_attributes(
         tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
     )
-    with get_cuda_rng_tracker().fork():
-        init_method(weight)
+    init_method(weight)
 
 
 def _initialize_affine_weight_cpu(
