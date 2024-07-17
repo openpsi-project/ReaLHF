@@ -44,6 +44,7 @@ overview of the system architecture in the :doc:`intro` section.
    quickstart
    distributed
    customization
-   .. arch
+   concept
+   arch
 
    contributing
