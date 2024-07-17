@@ -195,8 +195,10 @@
         <article id="content" class="nftt-content" role="main">
     <section id="introduction">
 <h1>Introduction<a class="headerlink" href="#introduction" title="Link to this heading">¶</a></h1>
-<p>We observe two major limitations based on our profiling
-of the previous RLHF systems, as shown in the <a class="reference internal" href="#timeline"><span class="std std-ref">Timeline Figure</span></a>.</p>
+<section id="limitations-of-existing-systems">
+<h2>Limitations of Existing Systems<a class="headerlink" href="#limitations-of-existing-systems" title="Link to this heading">¶</a></h2>
+<p>We observe two major limitations based on our profiling of the previous
+RLHF systems, as shown in the <a class="reference internal" href="#timeline"><span class="std std-ref">Timeline Figure</span></a>.</p>
 <figure class="align-default" id="id1">
 <span id="timeline"></span><img alt="timeline" src="_images/timeline.svg" /><figcaption>
 <p><span class="caption-text">Timeline Figure</span><a class="headerlink" href="#id1" title="Link to this image">¶</a></p>
@@ -205,33 +207,32 @@ of the previous RLHF systems, as shown in the <a class="reference internal" href
 </div>
 </figcaption>
 </figure>
-<p>First, when models are distributed
-to every GPU node that applies the same parallelization
-strategy, such as in DeepSpeed-Chat, it is often over-parallelized.
-Over-parallelization leads to
-substantial synchronization and communication overhead
-(the light purple bars).</p>
-<p>An alternative way is to assign different
-models to different GPU nodes, where models can execute
-concurrently, such as OpenRLHF.
-However, our second observation is that such
-asymmetric parallelization often causes under-utilization of
-the GPUs (e.g., the gray areas) because
-of the dependencies between tasks.</p>
-<p>The key idea of ReaL is to enable dynamic <strong>reallocation of
-model parameters</strong> between GPUs to improve the efficiency of
-the entire RLHF training process.</p>
-<p>By first choosing a parallelization strategy tailored for
-each computation workload
-(e.g., pipelining for Generation and tensor parallelism for Training)
-and then executing these calls concurrently with a smaller
-parallelization degree (e.g., Actor and Critic in Training),
-we can eliminate redundant communication while maximizing GPU utilization,
-effectively addressing the limitations of
-prior solutions.</p>
-<p>We show throughput comparison with the state-of-the-art open-source systems
-in the following figure.</p>
-<p>(In the following figure, as the number of GPUs increases, the model size scales up from LLaMA 7B, LLaMA 13B, and CodeLLaMA 34B, to the largest LLaMA 70B.)</p>
+<p>First, when models are distributed to every GPU node that applies the
+same parallelization strategy, such as in <a class="reference external" href="https://github.com/microsoft/DeepSpeedExamples/tree/master/applications/DeepSpeed-Chat">DeepSpeed-Chat</a>,
+it is often over-parallelized. Over-parallelization leads to substantial
+synchronization and communication overhead (the light purple bars).</p>
+<p>An alternative way is to assign different models to different GPU nodes,
+where models can execute concurrently, such as <a class="reference external" href="https://github.com/OpenRLHF/OpenRLHF">OpenRLHF</a>. However, our second
+observation is that such asymmetric parallelization often causes
+under-utilization of the GPUs (e.g., the gray areas) because of the
+dependencies between tasks.</p>
+<p>The key idea of ReaL is to enable dynamic <strong>reallocation of model
+parameters</strong> between GPUs to improve the efficiency of the entire RLHF
+training process.</p>
+<p>By first choosing a parallelization strategy tailored for each
+computation workload (e.g., pipelining for Generation and tensor
+parallelism for Training) and then executing these calls concurrently
+with a smaller parallelization degree (e.g., Actor and Critic in
+Training), we can eliminate redundant communication while maximizing GPU
+utilization, effectively addressing the limitations of prior solutions.</p>
+</section>
+<section id="performance-comparison">
+<h2>Performance Comparison<a class="headerlink" href="#performance-comparison" title="Link to this heading">¶</a></h2>
+<p>We show throughput comparison with the state-of-the-art open-source
+systems in the following figure.</p>
+<p>(In the following figure, as the number of GPUs increases, the model
+size scales up from LLaMA 7B, LLaMA 13B, and CodeLLaMA 34B, to the
+largest LLaMA 70B.)</p>
 <img alt="_images/vws.svg" src="_images/vws.svg" /><table class="docutils align-default" id="est-time-table">
 <thead>
 <tr class="row-odd"><th class="head"><p>System</p></th>
@@ -248,13 +249,34 @@ in the following figure.</p>
 </tr>
 </tbody>
 </table>
-<p>We also show the estimated time for
-completing the entire full-scale 4*70B RLHF training process,
-composed of 4 iterations with 400 steps for each iteration as for LLaMA-2.</p>
+<p>We also show the estimated time for completing the entire full-scale
+4*70B RLHF training process, composed of 4 iterations with 400 steps for
+each iteration as for LLaMA-2.</p>
+</section>
 </section>
 
 </article>
         <aside class="nftt-toc">
+          
+          <div class="mt-3 mb-1 my-lg-0 ps-xl-3 text-muted">
+            <button class="btn btn-link link-dark p-lg-0 mb-2 mb-lg-0 text-decoration-none nftt-toc-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#tocContents" aria-expanded="false" aria-controls="tocContents"
+            >On this page <i class="ms-2 bi bi-chevron-expand"></i></button>
+            <div class="title d-none d-lg-block">
+              <i class="bi bi-file-earmark-text"></i>&nbsp;&nbsp;<span class="small">On this page</span>
+            </div>
+            <div class="collapse nftt-toc-collapse" id="tocContents">
+              <nav id="TableOfContents">
+                <ul>
+<li><a class="reference internal" href="#">Introduction</a><ul>
+<li><a class="reference internal" href="#limitations-of-existing-systems">Limitations of Existing Systems</a></li>
+<li><a class="reference internal" href="#performance-comparison">Performance Comparison</a></li>
+</ul>
+</li>
+</ul>
+
+              </nav>
+            </div>
+          </div>
           
         </aside>
       </div>

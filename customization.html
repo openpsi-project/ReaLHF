@@ -199,26 +199,30 @@
 <h2>Customizing Datasets<a class="headerlink" href="#customizing-datasets" title="Link to this heading">¶</a></h2>
 <section id="overview">
 <h3>Overview<a class="headerlink" href="#overview" title="Link to this heading">¶</a></h3>
-<p>We provide three types of dataset implementations in <code class="docutils literal notranslate"><span class="pre">realhf/impl/dataset/</span></code> with the following configurations:</p>
+<p>We provide three types of dataset implementations in
+<code class="docutils literal notranslate"><span class="pre">realhf/impl/dataset/</span></code> with the following configurations:</p>
 <ul class="simple">
 <li><p><a class="reference internal" href="expconfig.html#realhf.PromptAnswerDatasetConfig" title="realhf.PromptAnswerDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code></a></p></li>
 <li><p><a class="reference internal" href="expconfig.html#realhf.PairedComparisonDatasetConfig" title="realhf.PairedComparisonDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PairedComparisonDatasetConfig</span></code></a></p></li>
 <li><p><a class="reference internal" href="expconfig.html#realhf.PromptOnlyDatasetConfig" title="realhf.PromptOnlyDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptOnlyDatasetConfig</span></code></a></p></li>
 </ul>
-<p>Please refer to the respective configuration documentation for detailed instructions on how to use or modify these datasets.</p>
-<p>Datasets in ReaL are commonly used
-<a class="reference external" href="https://pytorch.org/docs/stable/data.html#map-style-datasets">PyTorch map-style datasets</a>.
-Users need to implement a <code class="docutils literal notranslate"><span class="pre">__getitem__</span></code> method in the dataset class,
-which returns a <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a> object containing the data of a single sample and its sequence length.
-The sequence length is necessary because ReaL uses variable-length inputs without padding to save GPU memory.</p>
+<p>Please refer to the respective configuration documentation for detailed
+instructions on how to use or modify these datasets.</p>
+<p>Datasets in ReaL are commonly used <a class="reference external" href="https://pytorch.org/docs/stable/data.html#map-style-datasets">PyTorch map-style datasets</a>. Users
+need to implement a <code class="docutils literal notranslate"><span class="pre">__getitem__</span></code> method in the dataset class, which
+returns a <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a> object containing the data of a
+single sample and its sequence length. The sequence length is necessary
+because ReaL uses variable-length inputs without padding to save GPU
+memory.</p>
 </section>
 <section id="how-dataset-configuration-is-parsed">
 <h3>How Dataset Configuration is Parsed<a class="headerlink" href="#how-dataset-configuration-is-parsed" title="Link to this heading">¶</a></h3>
 <p>We will use the SFT experiment as an example.</p>
-<p>The <a class="reference internal" href="expconfig.html#realhf.PromptAnswerDatasetConfig" title="realhf.PromptAnswerDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code></a> object will be converted to a dataset configuration
-under the system API, specifically <code class="docutils literal notranslate"><span class="pre">realhf.api.core.system_api.Dataset</span></code>.
-Refer to the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method of <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> for more details.
-This object includes a dataset name (in this case, “prompt_answer”) and corresponding arguments
+<p>The <a class="reference internal" href="expconfig.html#realhf.PromptAnswerDatasetConfig" title="realhf.PromptAnswerDatasetConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code></a> object will be converted
+to a dataset configuration under the system API, specifically
+<code class="docutils literal notranslate"><span class="pre">realhf.api.core.system_api.Dataset</span></code>. Refer to the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method
+of <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> for more details. This object includes a
+dataset name (in this case, “prompt_answer”) and corresponding arguments
 that are passed to the dataset class’s constructor:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@property</span>
 <span class="k">def</span> <span class="nf">datasets</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
@@ -233,23 +237,34 @@ that are passed to the dataset class’s constructor:</p>
     <span class="p">]</span>
 </pre></div>
 </div>
-<p>At the end of <code class="docutils literal notranslate"><span class="pre">realhf.impl.dataset.prompt_answer_dataset</span></code>, we find the following line:</p>
+<p>At the end of <code class="docutils literal notranslate"><span class="pre">realhf.impl.dataset.prompt_answer_dataset</span></code>, we find the
+following line:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">data_api</span><span class="o">.</span><span class="n">register_dataset</span><span class="p">(</span><span class="s2">&quot;prompt_answer&quot;</span><span class="p">,</span> <span class="n">PromptAnswerDataset</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>This line registers the dataset class with the system API. When this name is provided to the system API,
-ReaL can locate this dataset implementation and construct it.
-The <code class="docutils literal notranslate"><span class="pre">args</span></code> field in <code class="docutils literal notranslate"><span class="pre">realhf.api.core.system_api.Dataset</span></code> will be passed to the <code class="docutils literal notranslate"><span class="pre">__init__</span></code>
-method of the dataset class, except that ReaL reserves a <code class="docutils literal notranslate"><span class="pre">util</span></code> field to store some utility objects.</p>
+<p>This line registers the dataset class with the system API. When this
+name is provided to the system API, ReaL can locate this dataset
+implementation and construct it. The <code class="docutils literal notranslate"><span class="pre">args</span></code> field in
+<code class="docutils literal notranslate"><span class="pre">realhf.api.core.system_api.Dataset</span></code> will be passed to the
+<code class="docutils literal notranslate"><span class="pre">__init__</span></code> method of the dataset class, except that ReaL reserves a
+<code class="docutils literal notranslate"><span class="pre">util</span></code> field to store some utility objects.</p>
 </section>
 <section id="steps-for-implementing-a-new-dataset">
 <h3>Steps for Implementing a New Dataset<a class="headerlink" href="#steps-for-implementing-a-new-dataset" title="Link to this heading">¶</a></h3>
 <ol class="arabic simple">
 <li><p>Create a new dataset file under <code class="docutils literal notranslate"><span class="pre">realhf/impl/dataset/</span></code>.</p></li>
-<li><p>Implement a map-style PyTorch dataset class with a <code class="docutils literal notranslate"><span class="pre">__getitem__</span></code> method. This method should return a <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a> object containing the sequence length as metadata.</p></li>
-<li><p>Register the class with <code class="docutils literal notranslate"><span class="pre">data_api.register_dataset</span></code> at the end of the file, using the name “my-dataset”.</p></li>
-<li><p>Update the name of the dataset in experiment configurations, for example, in the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method of <code class="docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code>, to “my-dataset”.</p></li>
-<li><p>If you need to pass additional arguments to construct the dataset class, modify the quickstart configuration class (in this case, <code class="docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code>) as well as the <code class="docutils literal notranslate"><span class="pre">args</span></code> field in the system API dataset object.</p></li>
+<li><p>Implement a map-style PyTorch dataset class with a <code class="docutils literal notranslate"><span class="pre">__getitem__</span></code>
+method. This method should return a <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a>
+object containing the sequence length as metadata.</p></li>
+<li><p>Register the class with <code class="docutils literal notranslate"><span class="pre">data_api.register_dataset</span></code> at the end of
+the file, using the name “my-dataset”.</p></li>
+<li><p>Update the name of the dataset in experiment configurations, for
+example, in the <code class="docutils literal notranslate"><span class="pre">datasets</span></code> method of <code class="docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code>, to
+“my-dataset”.</p></li>
+<li><p>If you need to pass additional arguments to construct the dataset
+class, modify the quickstart configuration class (in this case,
+<code class="docutils literal notranslate"><span class="pre">realhf.PromptAnswerDatasetConfig</span></code>) as well as the <code class="docutils literal notranslate"><span class="pre">args</span></code> field
+in the system API dataset object.</p></li>
 </ol>
 </section>
 </section>
@@ -257,21 +272,27 @@ method of the dataset class, except that ReaL reserves a <code class="docutils l
 <h2>Customizing Models<a class="headerlink" href="#customizing-models" title="Link to this heading">¶</a></h2>
 <section id="id1">
 <h3>Overview<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h3>
-<p>For efficiency reasons, ReaL does not support every transformer
-model from the HuggingFace model hub.
-In ReaL, we implement the <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.impl.model.nn.real_llm_api.ReaLModel</span></code>
-class that wraps the HuggingFace model and provides micro-batched pipelining,
-offload, and parameter reallocation functionalities.
-It’s a decoder-only transformer model.</p>
-<p>There are helper functions in the model API used to convert HuggingFace models back and forth,
-such as <code class="docutils literal notranslate"><span class="pre">from_llama</span></code> and <code class="docutils literal notranslate"><span class="pre">to_llama</span></code>.
-These helper functions are generated automatically by registering conversion functions in the <code class="docutils literal notranslate"><span class="pre">api/from_hf/</span></code> folder.</p>
-<p>For example, consider <code class="docutils literal notranslate"><span class="pre">api/from_hf/llama.py</span></code>.
-To register a convertible HuggingFace model, the user should implement:</p>
+<p>For efficiency reasons, ReaL does not support every transformer model
+from the HuggingFace model hub. In ReaL, we implement the
+<code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.impl.model.nn.real_llm_api.ReaLModel</span></code> class that wraps
+the HuggingFace model and provides micro-batched pipelining, offload,
+and parameter reallocation functionalities. It’s a decoder-only
+transformer model.</p>
+<p>There are helper functions in the model API used to convert HuggingFace
+models back and forth, such as <code class="docutils literal notranslate"><span class="pre">from_llama</span></code> and <code class="docutils literal notranslate"><span class="pre">to_llama</span></code>. These
+helper functions are generated automatically by registering conversion
+functions in the <code class="docutils literal notranslate"><span class="pre">api/from_hf/</span></code> folder.</p>
+<p>For example, consider <code class="docutils literal notranslate"><span class="pre">api/from_hf/llama.py</span></code>. To register a
+convertible HuggingFace model, the user should implement:</p>
 <ul class="simple">
-<li><p>Two functions to convert model configs between HuggingFace and <a class="reference internal" href="expconfig.html#realhf.ReaLModelConfig" title="realhf.ReaLModelConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ReaLModelConfig</span></code></a>.</p></li>
-<li><p>Two functions to convert model state dicts between HuggingFace and ReaL, primarily involving key remapping.</p></li>
-<li><p>Three functions specifying the names of parameters in the embedding layer, transformer blocks, and the output layer, respectively. These functions are used to selectively load checkpoints with 3D parallelism.</p></li>
+<li><p>Two functions to convert model configs between HuggingFace and
+<a class="reference internal" href="expconfig.html#realhf.ReaLModelConfig" title="realhf.ReaLModelConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ReaLModelConfig</span></code></a>.</p></li>
+<li><p>Two functions to convert model state dicts between HuggingFace and
+ReaL, primarily involving key remapping.</p></li>
+<li><p>Three functions specifying the names of parameters in the embedding
+layer, transformer blocks, and the output layer, respectively. These
+functions are used to selectively load checkpoints with 3D
+parallelism.</p></li>
 </ul>
 </section>
 <section id="steps-to-support-a-new-huggingface-model">
@@ -280,7 +301,8 @@ To register a convertible HuggingFace model, the user should implement:</p>
 <li><p>Create a new model file under <code class="docutils literal notranslate"><span class="pre">api/from_hf/</span></code>.</p></li>
 <li><p>Implement the required helper functions as described above.</p></li>
 <li><p>Register the model with register_hf_family at the end of the file.</p></li>
-<li><p>(Optional) Test the consistency of the implemented model with scripts in <code class="docutils literal notranslate"><span class="pre">tests/test_cpu_inference.py</span></code>.</p></li>
+<li><p>(Optional) Test the consistency of the implemented model with scripts
+in <code class="docutils literal notranslate"><span class="pre">tests/test_cpu_inference.py</span></code>.</p></li>
 </ul>
 </section>
 </section>
@@ -288,17 +310,17 @@ To register a convertible HuggingFace model, the user should implement:</p>
 <h2>Customizing Algorithms<a class="headerlink" href="#customizing-algorithms" title="Link to this heading">¶</a></h2>
 <section id="id2">
 <h3>Overview<a class="headerlink" href="#id2" title="Link to this heading">¶</a></h3>
-<p>In ReaL, algorithms are represented as dataflow graphs.
-Each node in the graph corresponds to a model function call (MFC),
-which can be a generate, inference, or train request applied to a
-specific model (e.g., Actor or Critic).
-The edges in the graph indicate data or
-parameter version dependencies between nodes.</p>
+<p>In ReaL, algorithms are represented as dataflow graphs. Each node in the
+graph corresponds to a model function call (MFC), which can be a
+generate, inference, or train request applied to a specific model (e.g.,
+Actor or Critic). The edges in the graph indicate data or parameter
+version dependencies between nodes.</p>
 <p>The following figure illustrates the dataflow graph of PPO:</p>
-<img alt="Dataflow graph of RLHF." class="align-center" src="_images/rlhf_dfg.svg" /><p>A node is represented by a <a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> object.
-Each node has a <code class="docutils literal notranslate"><span class="pre">model_name</span></code> field and an <code class="docutils literal notranslate"><span class="pre">interface_type</span></code>
-field, which specify what the node should conceptually do during execution.
-The <code class="docutils literal notranslate"><span class="pre">interface_impl</span></code> field specifies the actual implementation of the model interface.</p>
+<img alt="Dataflow graph of RLHF." class="align-center" src="_images/rlhf_dfg.svg" /><p>A node is represented by a <a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> object. Each node has
+a <code class="docutils literal notranslate"><span class="pre">model_name</span></code> field and an <code class="docutils literal notranslate"><span class="pre">interface_type</span></code> field, which specify
+what the node should conceptually do during execution. The
+<code class="docutils literal notranslate"><span class="pre">interface_impl</span></code> field specifies the actual implementation of the
+model interface.</p>
 <p>The interface class has the following signature:</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="realhf.ModelInterface">
@@ -331,23 +353,32 @@ The <code class="docutils literal notranslate"><span class="pre">interface_impl<
 
 </dd></dl>
 
-<p>During the execution of an MFC node,
-the model identified by <code class="docutils literal notranslate"><span class="pre">model_name</span></code> is passed into this interface object,
-along with the data specified in the MFC node.</p>
+<p>During the execution of an MFC node, the model identified by
+<code class="docutils literal notranslate"><span class="pre">model_name</span></code> is passed into this interface object, along with the data
+specified in the MFC node.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Similar to datasets, model interfaces are registered and constructed by the system API. Please check <code class="docutils literal notranslate"><span class="pre">impl/model/interface/sft_interface.py</span></code> for an example. The <code class="docutils literal notranslate"><span class="pre">SFTInterface</span></code> is registered at the end of this file and constructed by <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> (see the <code class="docutils literal notranslate"><span class="pre">rpcs</span></code> method).</p>
+<p>Similar to datasets, model interfaces are registered and constructed
+by the system API. Please check
+<code class="docutils literal notranslate"><span class="pre">impl/model/interface/sft_interface.py</span></code> for an example. The
+<code class="docutils literal notranslate"><span class="pre">SFTInterface</span></code> is registered at the end of this file and
+constructed by <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> (see the <code class="docutils literal notranslate"><span class="pre">rpcs</span></code> method).</p>
 </div>
-<p>Running algorithms in ReaL involves executing a large dataflow
-graph that concatenates all the training iterations.
-The <em>MasterWorker</em> monitors the state of this graph and
-issues MFC requests to <em>ModelWorkers</em> once the dependencies are satisfied.</p>
+<p>Running algorithms in ReaL involves executing a large dataflow graph
+that concatenates all the training iterations. The <em>MasterWorker</em>
+monitors the state of this graph and issues MFC requests to
+<em>ModelWorkers</em> once the dependencies are satisfied.</p>
 </section>
 <section id="example-a-customized-reward-function-for-ppo">
 <h3>Example: A Customized Reward Function for PPO<a class="headerlink" href="#example-a-customized-reward-function-for-ppo" title="Link to this heading">¶</a></h3>
-<p>In this example, we demonstrate how to use a customized reward model from HuggingFace in a PPO experiment when the model is not supported by <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code>.</p>
-<p>The example code can be found in <code class="docutils literal notranslate"><span class="pre">examples/ppo_sentiment.py</span></code>, where we replace the trained reward model for sentiment generation with a BERT-like sentiment analysis model from HuggingFace.</p>
-<p>First, we need to implement a new model interface class for our customized use:</p>
+<p>In this example, we demonstrate how to use a customized reward model
+from HuggingFace in a PPO experiment when the model is not supported by
+<code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code>.</p>
+<p>The example code can be found in <code class="docutils literal notranslate"><span class="pre">examples/ppo_sentiment.py</span></code>, where we
+replace the trained reward model for sentiment generation with a
+BERT-like sentiment analysis model from HuggingFace.</p>
+<p>First, we need to implement a new model interface class for our
+customized use:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
 <span class="k">class</span> <span class="nc">SentimentScoringInterface</span><span class="p">(</span><span class="n">model_api</span><span class="o">.</span><span class="n">ModelInterface</span><span class="p">):</span>
 
@@ -368,9 +399,7 @@ issues MFC requests to <em>ModelWorkers</em> once the dependencies are satisfied
         <span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">:</span> <span class="n">model_api</span><span class="o">.</span><span class="n">Model</span><span class="p">,</span> <span class="n">input_</span><span class="p">:</span> <span class="n">SequenceSample</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SequenceSample</span><span class="p">:</span>
         <span class="c1"># Re-tokenize the texts.</span>
-        <span class="n">texts</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">tokenizer</span><span class="o">.</span><span class="n">batch_decode</span><span class="p">(</span>
-            <span class="n">input_ids</span><span class="p">,</span> <span class="n">skip_special_tokens</span><span class="o">=</span><span class="kc">True</span>
-        <span class="p">)</span>
+        <span class="n">texts</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">tokenizer</span><span class="o">.</span><span class="n">batch_decode</span><span class="p">(</span><span class="n">input_ids</span><span class="p">,</span> <span class="n">skip_special_tokens</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
         <span class="n">encoding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">score_tokenizer</span><span class="p">(</span>
             <span class="n">texts</span><span class="p">,</span> <span class="n">return_tensors</span><span class="o">=</span><span class="s2">&quot;pt&quot;</span><span class="p">,</span> <span class="n">padding</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">truncation</span><span class="o">=</span><span class="kc">True</span>
         <span class="p">)</span>
@@ -394,14 +423,18 @@ issues MFC requests to <em>ModelWorkers</em> once the dependencies are satisfied
 </div>
 <p>Key points in this code:</p>
 <ul class="simple">
-<li><p>During interface initialization, we load a HuggingFace model and its tokenizer.</p></li>
-<li><p>During inference, we re-tokenize the generated output from the Actor, compute the score, and return it.</p></li>
+<li><p>During interface initialization, we load a HuggingFace model and its
+tokenizer.</p></li>
+<li><p>During inference, we re-tokenize the generated output from the Actor,
+compute the score, and return it.</p></li>
 </ul>
 <p>Now, we need to register this interface in the system API:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">model_api</span><span class="o">.</span><span class="n">register_interface</span><span class="p">(</span><span class="s2">&quot;sentiment_scoring&quot;</span><span class="p">,</span> <span class="n">SentimentScoringInterface</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>To use our customized interface implementation in PPO, we need to change the <code class="docutils literal notranslate"><span class="pre">interface_impl</span></code> field of the reward model in the MFC nodes of PPO:</p>
+<p>To use our customized interface implementation in PPO, we need to change
+the <code class="docutils literal notranslate"><span class="pre">interface_impl</span></code> field of the reward model in the MFC nodes of
+PPO:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">MyPPOConfig</span><span class="p">(</span><span class="n">PPOConfig</span><span class="p">):</span>
 
     <span class="k">def</span> <span class="nf">initial_setup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ExperimentConfig</span><span class="p">:</span>
@@ -424,16 +457,20 @@ issues MFC requests to <em>ModelWorkers</em> once the dependencies are satisfied
                 <span class="k">break</span>
             <span class="n">idx</span> <span class="o">+=</span> <span class="mi">1</span>
         <span class="n">inf_reward_rpc</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">model_rpcs</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
-        <span class="n">inf_reward_rpc</span><span class="o">.</span><span class="n">interface_impl</span> <span class="o">=</span> <span class="n">config_api</span><span class="o">.</span><span class="n">ModelInterfaceAbstraction</span><span class="p">(</span><span class="s2">&quot;sentiment_scoring&quot;</span><span class="p">)</span>
+        <span class="n">inf_reward_rpc</span><span class="o">.</span><span class="n">interface_impl</span> <span class="o">=</span> <span class="n">config_api</span><span class="o">.</span><span class="n">ModelInterfaceAbstraction</span><span class="p">(</span>
+            <span class="s2">&quot;sentiment_scoring&quot;</span>
+        <span class="p">)</span>
         <span class="n">inf_reward_rpc</span><span class="o">.</span><span class="n">post_hooks</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="k">return</span> <span class="n">cfg</span>
 </pre></div>
 </div>
-<p>Don’t forget to register your customized experiment configuration so that ReaL can launch it with the quickstart command line options:</p>
+<p>Don’t forget to register your customized experiment configuration so
+that ReaL can launch it with the quickstart command line options:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">register_quickstart_exp</span><span class="p">(</span><span class="s2">&quot;my-ppo&quot;</span><span class="p">,</span> <span class="n">MyPPOConfig</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>Finally, let’s run the customized experiment with the quickstart command:</p>
+<p>Finally, let’s run the customized experiment with the quickstart
+command:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp"># </span>Note<span class="w"> </span>that<span class="w"> </span>we<span class="w"> </span>change<span class="w"> </span>the<span class="w"> </span>name<span class="w"> </span><span class="s2">&quot;ppo&quot;</span><span class="w"> </span>to<span class="w"> </span><span class="s2">&quot;my-ppo&quot;</span>
 <span class="go">python3 -m realhf.apps.quickstart my-ppo \</span>
 <span class="go">    experiment_name=sentiment-ppo \</span>
@@ -443,7 +480,9 @@ issues MFC requests to <em>ModelWorkers</em> once the dependencies are satisfied
 <span class="go">    ...</span>
 </pre></div>
 </div>
-<p>This example is also applicable for scenarios where you want to use an external reward, such as a signal from a compiler or other online automatic evaluations.</p>
+<p>This example is also applicable for scenarios where you want to use an
+external reward, such as a signal from a compiler or other online
+automatic evaluations.</p>
 </section>
 </section>
 </section>

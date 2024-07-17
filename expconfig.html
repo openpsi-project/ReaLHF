@@ -195,19 +195,21 @@
         <article id="content" class="nftt-content" role="main">
     <section id="configurations">
 <h1>Configurations<a class="headerlink" href="#configurations" title="Link to this heading">¶</a></h1>
-<p>We illustrate configurations for quickstart experiments in this page.
-Each type of experiment (e.g., SFT, PPO) corresponds to a specific
-configuration object (e.g., <a class="reference internal" href="#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> for SFT).</p>
-<p>Since ReaL uses <a class="reference external" href="https://hydra.cc/">Hydra</a> for configuration management,
-users can override these options provided by the class recursively
-with command line arguments.
-Please check <a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a> for concrete examples.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>This page serves as a reference manual for the configuration objects,
-i.e., you can check which attributes can be modified and their default values.
-You don’t need to read through this page before running experiments!</p>
+i.e., you can check which attributes can be modified and their
+default values. You don’t need to read through this page before
+running experiments!</p>
+<p>Please check the <a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a> and <a class="reference internal" href="customization.html"><span class="doc">Customization</span></a> sections
+for concrete examples of running experiments.</p>
 </div>
+<p>We illustrate configurations for quickstart experiments in this page.
+Each type of experiment (e.g., SFT, PPO) corresponds to a specific
+configuration object (e.g., <a class="reference internal" href="#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a> for SFT).</p>
+<p>Since ReaL uses <a class="reference external" href="https://hydra.cc/">Hydra</a> for configuration
+management, users can override these options provided by the class
+recursively with command line arguments.</p>
 <section id="experiment-configurations">
 <h2>Experiment Configurations<a class="headerlink" href="#experiment-configurations" title="Link to this heading">¶</a></h2>
 <dl class="py class">
@@ -273,8 +275,12 @@ Normal checkpointing is usually sufficient for most cases.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>experiment_name</strong> (<em>str</em>) – Name of the experiment. Arbitrary string without “-” and “/”, e.g., <code class="docutils literal notranslate"><span class="pre">ultra-chat-llama</span></code>.</p></li>
-<li><p><strong>trial_name</strong> (<em>str</em>) – Name of the trial. Arbitrary string without “-” and “/”, e.g., <code class="docutils literal notranslate"><span class="pre">lr1e-3wd0.05</span></code>.</p></li>
+<li><p><strong>experiment_name</strong> (<em>str</em>) – Name of the experiment.
+Arbitrary string without “_” and “/”, e.g., <code class="docutils literal notranslate"><span class="pre">ultra-chat-llama</span></code>.
+Must be provided.</p></li>
+<li><p><strong>trial_name</strong> (<em>str</em>) – Name of the trial.
+Arbitrary string without “-” and “/”, e.g., <code class="docutils literal notranslate"><span class="pre">lr1e-3wd0.05</span></code>.
+Must be provided.</p></li>
 <li><p><strong>mode</strong> (<em>str</em>) – Experiment launching mode. “local”, “ray”, or “slurm” are supported.
 “ray” mode requires launching the ray cluster with CLI.
 “slurm” mode requires the pyxis plugin with enroot container enabled.
@@ -396,14 +402,13 @@ can be faster for inference.</p></li>
 <dt class="sig sig-object py" id="realhf.GenerationHyperparameters">
 <em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">GenerationHyperparameters</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">max_new_tokens</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_new_tokens</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">greedy</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_p</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.9</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">200</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">temperature</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_cuda_graph</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.GenerationHyperparameters" title="Link to this definition">¶</a></dt>
 <dd><p>Generation hyperparameters.</p>
-<p>We implement a customized generation function instead of
-using HuggingFace’s to support pipelined generation.
-As a result, advanced generation techniques like
-diversity-promoting sampling or repeatition penalty
-are not supported during PPO training.
-However, we don’t find it to be a problem in practice.
-Increasing the sampling temperature and enabling
-top-k/top-p sampling can produce good models.</p>
+<p>We implement a customized generation function instead of using
+HuggingFace’s to support pipelined generation. As a result, advanced
+generation techniques like diversity-promoting sampling or
+repeatition penalty are not supported during PPO training. However,
+we don’t find it to be a problem in practice. Increasing the
+sampling temperature and enabling top-k/top-p sampling can produce
+good models.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -411,10 +416,12 @@ top-k/top-p sampling can produce good models.</p>
 <li><p><strong>min_new_tokens</strong> (<em>int</em>) – The minimum number of new tokens to generate.</p></li>
 <li><p><strong>greedy</strong> (<em>bool</em>) – Whether to use greedy decoding.</p></li>
 <li><p><strong>top_k</strong> (<em>int</em>) – The number of highest probability tokens to keep.</p></li>
-<li><p><strong>top_p</strong> (<em>float</em>) – The cumulative probability of the highest probability tokens to keep.</p></li>
+<li><p><strong>top_p</strong> (<em>float</em>) – The cumulative probability of the highest probability
+tokens to keep.</p></li>
 <li><p><strong>temperature</strong> (<em>float</em>) – The temperature of the sampling process.</p></li>
-<li><p><strong>use_cuda_graph</strong> (<em>bool</em>) – Whether to use CUDA graph to reduce kernel launch overhead
-during generation. Recommended for pure generation.</p></li>
+<li><p><strong>use_cuda_graph</strong> (<em>bool</em>) – Whether to use CUDA graph to reduce kernel
+launch overhead during generation. Recommended for pure
+generation.</p></li>
 </ul>
 </dd>
 </dl>
@@ -564,9 +571,9 @@ so all CLI options in the base class are available.</p>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>_class</strong> (<em>str</em>) – The class of the model, e.g. “llama”.
 It’s the registered name in the <code class="docutils literal notranslate"><span class="pre">register_hf_family</span></code> function.
-Please check files in <code class="docutils literal notranslate"><span class="pre">realhf/api/from_hf</span></code>.</p></li>
+Please check files in <code class="docutils literal notranslate"><span class="pre">realhf/api/from_hf</span></code> for all supported models.</p></li>
 <li><p><strong>size</strong> (<em>int</em>) – The size of the model. Only be used by the <code class="docutils literal notranslate"><span class="pre">search</span></code>
-allocation mode. Can be 0 otherwise.</p></li>
+allocation mode. Will be ignored otherwise.</p></li>
 <li><p><strong>is_critic</strong> (<em>bool</em>) – Whether the model is a critic or reward
 instead of a normal LLM.</p></li>
 </ul>
@@ -622,20 +629,21 @@ critic/reward model from a saved LM checkpoint.</p></li>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>type</strong> (<em>str</em>) – Optimizer type. Currently only adam and empty optimizer are supported.</p></li>
+<li><p><strong>type</strong> (<em>str</em>) – Optimizer type. Currently only adam and empty optimizer
+are supported.</p></li>
 <li><p><strong>lr</strong> (<em>float</em>) – Learning rate.</p></li>
 <li><p><strong>weight_decay</strong> (<em>float</em>) – Weight decay.</p></li>
 <li><p><strong>beta1</strong> (<em>float</em>) – Adam beta1.</p></li>
 <li><p><strong>beta2</strong> (<em>float</em>) – Adam beta2.</p></li>
 <li><p><strong>eps</strong> (<em>float</em>) – Adam epsilon in the denominator.</p></li>
-<li><p><strong>min_lr_ratio</strong> (<em>float</em>) – Minimum learning rate ratio after learning rate annealing.
-Should be in the interval of [0.0, 1.0].</p></li>
-<li><p><strong>lr_scheduler_type</strong> (<em>str</em>) – Learning rate scheduler type.
-One of “linear”, “cosine”, “constant”.</p></li>
-<li><p><strong>warmup_steps_proportion</strong> (<em>float</em>) – Proportion of total training steps to warm up.
-Should be in the interval of [0.0, 1.0].</p></li>
-<li><p><strong>offload</strong> (<em>bool</em>) – Whether to offload optimizer to CPU.
-Only valid for the deepspeed backend.</p></li>
+<li><p><strong>min_lr_ratio</strong> (<em>float</em>) – Minimum learning rate ratio after learning rate
+annealing. Should be in the interval of [0.0, 1.0].</p></li>
+<li><p><strong>lr_scheduler_type</strong> (<em>str</em>) – Learning rate scheduler type. One of
+“linear”, “cosine”, “constant”.</p></li>
+<li><p><strong>warmup_steps_proportion</strong> (<em>float</em>) – Proportion of total training steps
+to warm up. Should be in the interval of [0.0, 1.0].</p></li>
+<li><p><strong>offload</strong> (<em>bool</em>) – Whether to offload optimizer to CPU. Only valid for
+the deepspeed backend.</p></li>
 </ul>
 </dd>
 </dl>
@@ -649,10 +657,12 @@ Only valid for the deepspeed backend.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>model_parallel_size</strong> (<em>int</em>) – Tensor-model parallelism size.</p></li>
-<li><p><strong>pipeline_parallel_size</strong> (<em>int</em>) – The number of pipeline parallelism stages.</p></li>
-<li><p><strong>data_parallel_size</strong> (<em>int</em>) – Data parallelism size for ZeRO optimization.</p></li>
-<li><p><strong>use_sequence_parallel</strong> (<em>bool</em>) – Whether to use sequence parallelism
-in Megatron combined with tensor-model parallelism.</p></li>
+<li><p><strong>pipeline_parallel_size</strong> (<em>int</em>) – The number of pipeline parallelism
+stages.</p></li>
+<li><p><strong>data_parallel_size</strong> (<em>int</em>) – Data parallelism size for ZeRO
+optimization.</p></li>
+<li><p><strong>use_sequence_parallel</strong> (<em>bool</em>) – Whether to use sequence parallelism in
+Megatron combined with tensor-model parallelism.</p></li>
 </ul>
 </dd>
 </dl>
@@ -666,12 +676,12 @@ in Megatron combined with tensor-model parallelism.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>parallel</strong> (<a class="reference internal" href="#realhf.ParallelismConfig" title="realhf.ParallelismConfig"><em>ParallelismConfig</em></a>) – Parallelism strategy configuration.</p></li>
-<li><p><strong>device_mesh</strong> (<em>str</em>) – String representation for device mesh.
-If it is composed of multiple nodes, it should be in the form of
-slurm nodelist, e.g., node[01-02] or node01,node02.
-If it is a slice on a single node,
-we restrict it occupies 1, 2, 4, or 8 contiguous GPUs in the node.
-In this case, the string representation is similar to the MPI hostfile, e.g.,
+<li><p><strong>device_mesh</strong> (<em>str</em>) – String representation for device mesh. If it is
+composed of multiple nodes, it should be in the form of slurm
+nodelist, e.g., node[01-02] or node01,node02. If it is a slice
+on a single node, we restrict it occupies 1, 2, 4, or 8
+contiguous GPUs in the node. In this case, the string
+representation is similar to the MPI hostfile, e.g.,
 “node01:0,1,2,3” for the first 4 GPUs on node01.</p></li>
 </ul>
 </dd>
@@ -757,15 +767,13 @@ Sequences longer than this will be truncated.</p></li>
 <dl class="py class">
 <dt class="sig sig-object py" id="realhf.PairedComparisonDatasetConfig">
 <em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">PairedComparisonDatasetConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">train_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">valid_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_pairs_per_prompt</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">2</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_seqlen</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1024</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">train_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">valid_bs_n_seqs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">256</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.PairedComparisonDatasetConfig" title="Link to this definition">¶</a></dt>
-<dd><p>Datasets used for paired-comparison reward modeling and DPO.</p>
+<dd><p>Datasets used for paired-comparison reward modeling, DPO and SimPO.</p>
 <p>The raw data must be a json or jsonl file, where each piece of data is a dictionary
 with keys <cite>prompt</cite>, <cite>pos_answers</cite>, and <cite>neg_answers</cite>. <cite>prompt</cite> is a string.
-<cite>pos_answers</cite> and <cite>neg_answers</cite> are lists of strings. They must have the same size.</p>
-<p>Answer pairs of the same prompt will be sampled in the same batch. Hence, the number of sequences
-in each batch must be even, in the form of [P1A1+, P1A1-, P1A2+, P1A2-, P2A1+, P2A1-, P2A2+, P2A2-, …],
-where <cite>P</cite> means prompt, <cite>A</cite> means answer, <cite>+</cite> means positive, and <cite>-</cite> means negative.</p>
+<cite>pos_answers</cite> and <cite>neg_answers</cite> are lists of strings. The lists must have the same size.</p>
 <p>The raw dataset may contain multiple answer pairs for each prompt. We will randomly sample
-<cite>max_pairs_per_prompt</cite> answer pairs for each prompt in each epoch.</p>
+<cite>max_pairs_per_prompt</cite> answer pairs for each prompt in each epoch, so the maximum batch size
+(in terms of #seqs) of each step is <cite>train_bs_n_seqs</cite> * <cite>max_pairs_per_prompt</cite>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -799,16 +807,181 @@ Prompts longer than this will be truncated.</p></li>
 </dd></dl>
 
 </section>
-<section id="sequencesample">
-<h2><code class="docutils literal notranslate"><span class="pre">SequenceSample</span></code><a class="headerlink" href="#sequencesample" title="Link to this heading">¶</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">SequenceSample</span></code> is an object we use in model function calls.</p>
+<section id="data-structure-for-interfaces-and-datasets">
+<h2>Data Structure for Interfaces and Datasets<a class="headerlink" href="#data-structure-for-interfaces-and-datasets" title="Link to this heading">¶</a></h2>
 <dl class="py class">
 <dt class="sig sig-object py" id="realhf.SequenceSample">
 <em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">SequenceSample</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="pre">keys:</span> <span class="pre">~typing.Set[str],</span> <span class="pre">trailing_shapes:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~torch.Size</span> <span class="pre">|</span> <span class="pre">~typing.Tuple</span> <span class="pre">|</span> <span class="pre">None],</span> <span class="pre">dtypes:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~torch.dtype</span> <span class="pre">|</span> <span class="pre">None],</span> <span class="pre">ids:</span> <span class="pre">~typing.List[~typing.Hashable],</span> <span class="pre">seqlens:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~typing.List[~torch.Tensor]],</span> <span class="pre">data:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~torch.Tensor</span> <span class="pre">|</span> <span class="pre">None]</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None,</span> <span class="pre">metadata:</span> <span class="pre">~typing.Dict[str,</span> <span class="pre">~typing.List[~typing.Any]]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SequenceSample" title="Link to this definition">¶</a></dt>
-<dd><dl class="py method">
+<dd><p>The data structure we use to represent sequence data.</p>
+<p>We assume that each piece of data has serval “keys” (like a dict),
+and each key can correspond to multiple sequences.</p>
+<p>For example, when running PPO, we can generate multiple responses
+for each prompt. Say we have 2 prompts and each with 3 responses,
+the batch can look like:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">&gt;&gt;&gt; s = SequenceSample(...)</span>
+<span class="go">&gt;&gt;&gt; s.keys</span>
+<span class="go">{&#39;resp&#39;, &#39;prompt&#39;}</span>
+<span class="go">&gt;&gt;&gt; s.seqlens</span>
+<span class="go">{&#39;prompt&#39;: [tensor([13]), tensor([6])], &#39;resp&#39;: [tensor([ 6, 17, 15]), tensor([13, 15, 13])]}</span>
+<span class="go">&gt;&gt;&gt; s.data</span>
+<span class="go">{&#39;prompt&#39;: torch.tensor([...]), &#39;resp&#39;: torch.tensor([...])}</span>
+</pre></div>
+</div>
+<p>Keypoints:</p>
+<ul class="simple">
+<li><p>Pieces of data can have different lengths (e.g., the first prompt has a length of 13
+while the second has a length of 6).</p></li>
+<li><p>Inside a piece of data, a key (“response”)
+can correspond to multiple sequences with different lengths.</p></li>
+<li><p>No matter what is the batch size and how many sequences we store for each key,
+the data is concatenated as a 1D tensor. The outter dimension is the batch size
+and the inner dimension is the number of sequences for the key.</p></li>
+</ul>
+<p>With such a data structure, we can easily gather, split,
+and transfer non-padded batches among different GPUs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>keys</strong> (<em>Set</em><em>[</em><em>str</em><em>]</em>) – The keys of the data.</p></li>
+<li><p><strong>trailing_shapes</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>torch.Size</em><em> | </em><em>Tuple</em><em> | </em><em>None</em><em>]</em>) – The trailing shapes of the data,
+ignoring the first dimension, which must be the sequence length.
+Used to construct the receiving buffer for data transfer.</p></li>
+<li><p><strong>dtypes</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>torch.dtype</em><em> | </em><em>None</em><em>]</em>) – The types of the data. Used to construct
+the receiving buffer for data transfer.</p></li>
+<li><p><strong>ids</strong> (<em>List</em><em>[</em><em>Hashable</em><em>]</em>) – Unique identifiers for each piece of data.
+Should be provided in the dataset implementation.
+Used to amend new data into the buffer after a model function call.</p></li>
+<li><p><strong>seqlens</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>List</em><em>[</em><em>torch.Tensor</em><em>]</em><em>]</em>) – The sequence lengths of each sequence in the data. For a given key,
+it should be a list of 1D <code class="docutils literal notranslate"><span class="pre">torch.IntTensor</span></code>,
+with the list length equal to the batch size
+and the size of the tensor equal to the number of sequences for this key.</p></li>
+<li><p><strong>data</strong> (<em>Optional</em><em>[</em><em>Dict</em><em>[</em><em>str</em><em>, </em><em>torch.Tensor</em><em> | </em><em>None</em><em>]</em><em>]</em>) – The actual concatenated data. If it is None,
+the sample is a metadata-only sample used by the master worker.
+The spec of the data should be consistent with the seqlens,
+dtypes, and trailing_shapes.</p></li>
+<li><p><strong>metadata</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>List</em><em>[</em><em>Any</em><em>]</em><em>]</em>) – Metadata of the sample. It should be a
+dict of lists and provided in the dataset implementation
+Adding metadata can slow down data transfer.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py property">
+<dt class="sig sig-object py" id="realhf.SequenceSample.bs">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">bs</span></span><a class="headerlink" href="#realhf.SequenceSample.bs" title="Link to this definition">¶</a></dt>
+<dd><p>The batch size or the number of data pieces in the sample.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.cuda">
+<span class="sig-name descname"><span class="pre">cuda</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SequenceSample.cuda" title="Link to this definition">¶</a></dt>
+<dd><p>Move the data to GPU inplace.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.from_default">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_default</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">seqlens</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ids</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Hashable</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">metadata</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SequenceSample.from_default" title="Link to this definition">¶</a></dt>
+<dd><p>A helper function to construct the SequenceSample object.</p>
+<p>This is designed for the special case where each piece of data has
+a single sequence length (e.g., a single response for each prompt).
+Sequence length of different keys will be resolved automatically
+according to the rules in <code class="docutils literal notranslate"><span class="pre">_resolve_seqlen_from_key</span></code>.
+This function can reduce the boilerplate code but introduce potential bugs.
+Please use this function with caution.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>seqlens</strong> (<em>List</em><em>[</em><em>int</em><em>]</em>) – The sequence lengths of each piece of data.
+This is the length of the main attribute, i.e., packed_input_ids.
+Sequence lengths for other attributes, e.g., rewards and logprobs,
+will be computed from this parameter. It is <strong>NOT</strong> the actual length
+of rewards or logprobs even if it is the only key in data.</p></li>
+<li><p><strong>ids</strong> (<em>List</em><em>[</em><em>Hashable</em><em>]</em>) – Unique identifiers for each piece of data.</p></li>
+<li><p><strong>data</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>torch.Tensor</em><em>]</em>) – The actual data.</p></li>
+<li><p><strong>metadata</strong> (<em>Optional</em><em>[</em><em>Dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>]</em><em>]</em>) – Metadata of the sample.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.gather">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">gather</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">samples</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keys</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SequenceSample.gather" title="Link to this definition">¶</a></dt>
+<dd><p>Gather a list of SequenceSample into a single batch.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>samples</strong> (<em>List</em><em>[</em><a class="reference internal" href="#realhf.SequenceSample" title="realhf.SequenceSample"><em>SequenceSample</em></a><em>]</em>) – A list of SequenceSample to be gathered.</p></li>
+<li><p><strong>keys</strong> (<em>Optional</em><em>[</em><em>List</em><em>[</em><em>str</em><em>]</em><em>]</em>) – The keys to be gathered. Can only gather a subset
+of keys. If None, use the keys of the first sample.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.get_split_spec">
+<span class="sig-name descname"><span class="pre">get_split_spec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">k</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">SequenceSplitSpec</span></span></span><a class="headerlink" href="#realhf.SequenceSample.get_split_spec" title="Link to this definition">¶</a></dt>
+<dd><p>Get the partition spec for splitting the data into k parts. It runs
+a DP algorithm to find the best-possible balanced partitioning.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>k</strong> (<em>int</em>) – The number of parts to split the data.</p></li>
+<li><p><strong>key</strong> (<em>Optional</em><em>[</em><em>str</em><em>]</em>) – The key to be used for splitting. If None, use the
+key with the largest total sequence length.</p></li>
+<li><p><strong>min_size</strong> (<em>int</em>) – The minimum size of each partition.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="realhf.SequenceSample.meta">
 <span class="sig-name descname"><span class="pre">meta</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></span><a class="headerlink" href="#realhf.SequenceSample.meta" title="Link to this definition">¶</a></dt>
 <dd><p>Create a new SequenceSample that does not contain any data.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.remap_keys_">
+<span class="sig-name descname"><span class="pre">remap_keys_</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">remap</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SequenceSample.remap_keys_" title="Link to this definition">¶</a></dt>
+<dd><p>Inplace remap keys of the data.</p>
+<p>Useful for reusing the same interface implementation in
+different algorithms, where the data can be named differently.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.split">
+<span class="sig-name descname"><span class="pre">split</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">k</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">min_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#realhf.SequenceSample.split" title="Link to this definition">¶</a></dt>
+<dd><p>Split the data into k parts.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>k</strong> (<em>int</em>) – The number of parts to split the data.</p></li>
+<li><p><strong>key</strong> (<em>Optional</em><em>[</em><em>str</em><em>]</em>) – The key to be used for splitting. If None, use the
+key with the largest total sequence length.</p></li>
+<li><p><strong>min_size</strong> (<em>int</em>) – The minimum size of each partition.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.split_with_spec">
+<span class="sig-name descname"><span class="pre">split_with_spec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">SequenceSplitSpec</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#realhf.SequenceSample.split_with_spec" title="Link to this definition">¶</a></dt>
+<dd><p>Split the data according to the given spec.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.unpack">
+<span class="sig-name descname"><span class="pre">unpack</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SequenceSample.unpack" title="Link to this definition">¶</a></dt>
+<dd><p>Unpack a batch of data into individual pieces of data.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="realhf.SequenceSample.update_">
+<span class="sig-name descname"><span class="pre">update_</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.SequenceSample.update_" title="Link to this definition">¶</a></dt>
+<dd><p>Inplace update data from another SequenceSample.</p>
+<p>Used to amend newly produced data after a model function call.</p>
 </dd></dl>
 
 </dd></dl>
@@ -905,9 +1078,19 @@ Can be omited if the search engine is not used.</p></li>
 <li><a class="reference internal" href="#realhf.PromptOnlyDatasetConfig"><code class="docutils literal notranslate"><span class="pre">PromptOnlyDatasetConfig</span></code></a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#sequencesample"><code class="docutils literal notranslate"><span class="pre">SequenceSample</span></code></a><ul>
+<li><a class="reference internal" href="#data-structure-for-interfaces-and-datasets">Data Structure for Interfaces and Datasets</a><ul>
 <li><a class="reference internal" href="#realhf.SequenceSample"><code class="docutils literal notranslate"><span class="pre">SequenceSample</span></code></a><ul>
+<li><a class="reference internal" href="#realhf.SequenceSample.bs"><code class="docutils literal notranslate"><span class="pre">SequenceSample.bs</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.cuda"><code class="docutils literal notranslate"><span class="pre">SequenceSample.cuda()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.from_default"><code class="docutils literal notranslate"><span class="pre">SequenceSample.from_default()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.gather"><code class="docutils literal notranslate"><span class="pre">SequenceSample.gather()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.get_split_spec"><code class="docutils literal notranslate"><span class="pre">SequenceSample.get_split_spec()</span></code></a></li>
 <li><a class="reference internal" href="#realhf.SequenceSample.meta"><code class="docutils literal notranslate"><span class="pre">SequenceSample.meta()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.remap_keys_"><code class="docutils literal notranslate"><span class="pre">SequenceSample.remap_keys_()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.split"><code class="docutils literal notranslate"><span class="pre">SequenceSample.split()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.split_with_spec"><code class="docutils literal notranslate"><span class="pre">SequenceSample.split_with_spec()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.unpack"><code class="docutils literal notranslate"><span class="pre">SequenceSample.unpack()</span></code></a></li>
+<li><a class="reference internal" href="#realhf.SequenceSample.update_"><code class="docutils literal notranslate"><span class="pre">SequenceSample.update_()</span></code></a></li>
 </ul>
 </li>
 </ul>

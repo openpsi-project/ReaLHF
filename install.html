@@ -197,49 +197,58 @@
 <h1>Installation<a class="headerlink" href="#installation" title="Link to this heading">¶</a></h1>
 <section id="docker-images">
 <h2>Docker Images<a class="headerlink" href="#docker-images" title="Link to this heading">¶</a></h2>
-<p>The easiest way to run ReaL is by using the provided Docker images.
-We offer a CPU-only image for launching experiments and a runtime GPU
-image for deployment in a cluster. The Dockerfile is also available in the repository.</p>
+<p>The easiest way to run ReaL is by using the provided Docker images. We
+offer a CPU-only image for launching experiments and a runtime GPU image
+for deployment in a cluster. The Dockerfile is also available in the
+repository.</p>
 <p>To pull the images, run:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">REAL_VERSION</span><span class="o">=</span><span class="s2">&quot;0.1.0&quot;</span>
-<span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-cpu:22.04-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-cpu:22.04-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span>
 <span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-gpu:23.10-py3-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span>
 </pre></div>
 </div>
-<p>The CPU image is built from “ubuntu:22.04” and the GPU image is built from “nvcr.io/nvidia/pytorch:23.10-py3”.
-The current package version is “0.1.0”.</p>
-<p>After pulling the Docker images, run your Docker container locally on a GPU node with the following command:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--gpus<span class="w"> </span>all<span class="w"> </span>garrett4wade/real-gpu:23.10-py3-0.1.0<span class="w"> </span>bash
+<p>The CPU image is built from “ubuntu:22.04” and the GPU image is built
+from “nvcr.io/nvidia/pytorch:23.10-py3”. You can check the latest
+package version <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/releases">here</a>.</p>
+<p>After pulling the Docker images, run your Docker container locally on a
+GPU node with the following command:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--rm<span class="w"> </span>--gpus<span class="w"> </span>all<span class="w"> </span>garrett4wade/real-gpu:23.10-py3-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span><span class="w"> </span>bash
 </pre></div>
 </div>
-<p>The source code is available at /realhf inside the container.
-This is an editable installation, so you can modify the code or run experiments directly.</p>
-<p>If you want to develop the code outside a Docker container,
-you should mount the code directory to the container, e.g.,</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--gpus<span class="w"> </span>all<span class="w"> </span>--mount<span class="w"> </span><span class="nv">type</span><span class="o">=</span>bind,src<span class="o">=</span>/path/outside/container,dst<span class="o">=</span>/realhf<span class="w"> </span>garrett4wade/real-gpu:23.10-py3-0.1.0<span class="w"> </span>bash
+<p>The source code is available at <code class="docutils literal notranslate"><span class="pre">/realhf</span></code> inside the container. This
+is an editable installation, so you can modify the code or run
+experiments directly.</p>
+<p>If you want to develop the code outside a Docker container, you should
+mount the code directory to the container, e.g.,</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--rm<span class="w"> </span>--gpus<span class="w"> </span>all<span class="w"> </span>--mount<span class="w"> </span><span class="nv">type</span><span class="o">=</span>bind,src<span class="o">=</span>/path/outside/container,dst<span class="o">=</span>/realhf<span class="w"> </span>garrett4wade/real-gpu:23.10-py3-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span><span class="w"> </span>bash
 </pre></div>
 </div>
-<p>If your destination path is not /realhf,
-remember to rerun the editable installation command after mounting:</p>
+<p>If your destination path is not <code class="docutils literal notranslate"><span class="pre">/realhf</span></code>, remember to rerun the
+editable installation command after mounting:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">REAL_CUDA</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/your/mounted/code/path<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>The <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> environment variable is used to install the CUDA extension.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> environment variable is used to install the CUDA
+extension.</p>
 </div>
 </section>
 <section id="install-from-pypi-or-source">
 <h2>Install From PyPI or Source<a class="headerlink" href="#install-from-pypi-or-source" title="Link to this heading">¶</a></h2>
-<p>If you prefer not to use the provided Docker image,
-you can also start with an image provided by NVIDA (e.g., nvcr.io/nvidia/pytorch:23.10-py3)
-and install ReaL from PyPI or from the source.</p>
+<p>If you prefer not to use the provided Docker image, you can also start
+with an image provided by NVIDA (e.g.,
+<code class="docutils literal notranslate"><span class="pre">nvcr.io/nvidia/pytorch:23.10-py3</span></code>) and install ReaL from PyPI or from
+the source.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>We don’t upload a pre-built wheel to PyPI, so the installation will require compiling the C++ and CUDA extensions.
-Control whether to install the extentions with environment variables <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> and <code class="docutils literal notranslate"><span class="pre">REAL_NO_EXT</span></code>.</p>
-<p>The CUDA extention will be installed only if <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> is set to 1.
-No extention will be installed if <code class="docutils literal notranslate"><span class="pre">REAL_NO_EXT</span></code> is set to 1.</p>
+<p>We don’t upload a pre-built wheel to PyPI, so the installation will
+require compiling the C++ and CUDA extensions. Control whether to
+install the extentions with environment variables <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> and
+<code class="docutils literal notranslate"><span class="pre">REAL_NO_EXT</span></code>.</p>
+<p>The CUDA extention will be installed only if <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> is set to
+1. No extention will be installed if <code class="docutils literal notranslate"><span class="pre">REAL_NO_EXT</span></code> is set to 1.</p>
+<p>If you don’t want to compile the extensions, please use the provided
+Docker images.</p>
 </div>
 <p>First, clone the repository and install all dependencies:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>-U<span class="w"> </span>pip
@@ -256,9 +265,10 @@ No extention will be installed if <code class="docutils literal notranslate"><sp
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p><code class="docutils literal notranslate"><span class="pre">MAX_JOBS</span></code> sets the number of parallel jobs for compilation.
-A larger value will consume more memory (and potentially lead to OOM stuck) and CPU resources.
-Adjust the value according to your machine’s specifications.</p>
+<p><code class="docutils literal notranslate"><span class="pre">MAX_JOBS</span></code> sets the number of parallel jobs for compilation. A
+larger value will consume more memory (and potentially lead to OOM
+stuck) and CPU resources. Adjust the value according to your
+machine’s specifications.</p>
 </div>
 <p>Install ReaLHF from source (recommended, for the latest build):</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/openpsi-project/ReaLHF
@@ -270,8 +280,9 @@ Adjust the value according to your machine’s specifications.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">REAL_CUDA</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>realhf<span class="w"> </span>--no-build-isolation
 </pre></div>
 </div>
-<p>The PyPI package allows you to launch existing experiments with the quickstart command.
-If you want to modify the code, you must clone the source code and install it from the source.</p>
+<p>The PyPI package allows you to launch existing experiments with the
+quickstart command. If you want to modify the code, you must clone the
+source code and install it from the source.</p>
 <p>Next, check <a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a> for instructions on running experiments.</p>
 </section>
 </section>

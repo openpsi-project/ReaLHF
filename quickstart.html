@@ -197,22 +197,22 @@
 <h1>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">¶</a></h1>
 <section id="installation">
 <h2>Installation<a class="headerlink" href="#installation" title="Link to this heading">¶</a></h2>
-<p>First, clone the ReaL repository from GitHub and follow the installation instructions in <a class="reference internal" href="install.html"><span class="doc">Installation</span></a>.
-The following tutorial will run on a GPU machine in the repository directory.</p>
+<p>First, clone the ReaL repository from GitHub and follow the installation
+instructions in <a class="reference internal" href="install.html"><span class="doc">Installation</span></a>.</p>
 </section>
 <section id="rlhf-with-4x-llama-7b-in-30min">
 <h2>RLHF with 4x LLaMA-7B in 30min<a class="headerlink" href="#rlhf-with-4x-llama-7b-in-30min" title="Link to this heading">¶</a></h2>
-<p>If you are not familiar with the procedure of RLHF,
-please refer to the <a class="reference external" href="https://arxiv.org/abs/2203.02155">InstrctGPT paper</a>.
-This tutorial will cover the main stages of RLHF,
-including SFT, reward modeling, and PPO.</p>
+<p>If you are not familiar with the procedure of RLHF, please refer to the
+<a class="reference external" href="https://arxiv.org/abs/2203.02155">InstrctGPT paper</a>. This tutorial
+will cover the main stages of RLHF, including SFT, reward modeling, and
+PPO.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>If you have not prepared a dataset for your application, you can download our
-<a class="reference external" href="https://drive.google.com/drive/folders/1xWIJ9DRLNQZxDrkCfAPE12euLLuWQGE-?usp=sharing">sample dataset</a>
-to follow this tutorial.
-The sample dataset is used for controlled sentiment generation,
-where the LLM learns to generate positive movie comments given a context.</p>
+<p>If you have not prepared a dataset for your application, you can
+download our <a class="reference external" href="https://drive.google.com/drive/folders/1xWIJ9DRLNQZxDrkCfAPE12euLLuWQGE-?usp=sharing">sample dataset</a>
+to follow this tutorial. The sample dataset is used for controlled
+sentiment generation, where the LLM learns to generate positive movie
+comments given a context.</p>
 <p>All example scripts with detailed explanations can be found in the
 <code class="docutils literal notranslate"><span class="pre">examples/scripts/</span></code> directory.</p>
 <p>If you want to find more details about the configuration options,
@@ -220,17 +220,17 @@ please check <a class="reference internal" href="expconfig.html"><span class="do
 </div>
 <section id="stage-1-supervised-fine-tuning">
 <h3>Stage 1: Supervised Fine-Tuning<a class="headerlink" href="#stage-1-supervised-fine-tuning" title="Link to this heading">¶</a></h3>
-<p>Prepare your customized dataset in a JSON or JSONL format,
-where each entry is a dictionary with two keys: “prompt” and “answer”.
-For example:</p>
+<p>Prepare your customized dataset in a JSON or JSONL format, where each
+entry is a dictionary with two keys: “prompt” and “answer”. For example:</p>
 <div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="nt">&quot;prompt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;What is the capital of France?&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;answer&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The capital of France is ...&quot;</span><span class="p">}</span>
 <span class="p">{</span><span class="nt">&quot;prompt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Please make a travel plan for visiting Berlin?&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;answer&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">}</span>
 </pre></div>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>In our provided sample,
-<code class="docutils literal notranslate"><span class="pre">sft_pos-train.jsonl</span></code> and <code class="docutils literal notranslate"><span class="pre">sft_pos-valid.jsonl</span></code> are the training and validation sets for SFT, respectively.</p>
+<p>In our provided sample, <code class="docutils literal notranslate"><span class="pre">sft_pos-train.jsonl</span></code> and
+<code class="docutils literal notranslate"><span class="pre">sft_pos-valid.jsonl</span></code> are the training and validation sets for SFT,
+respectively.</p>
 </div>
 <p>Run the following command to fine-tune the model on your dataset:</p>
 <div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>sft<span class="w"> </span><span class="se">\</span>
@@ -256,22 +256,23 @@ For example:</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>ReaL adopts <a class="reference external" href="https://hydra.cc/docs/tutorials/structured_config/intro/">structured configurations</a>
-in <a class="reference external" href="https://hydra.cc/">Hydra</a> to manage command line options.
-The options in the above command correspond to a Python
-dataclass object: <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a>.
-The attributes, including the model type, learning rate, and parallel strategy,
-can be recursively overwritten via command line options.
-Please check <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a> for more details.</p>
-<p>As a reminder, the value <cite>null</cite> should represent <cite>None</cite> in Python.</p>
+<p>ReaL adopts <a class="reference external" href="https://hydra.cc/docs/tutorials/structured_config/intro/">structured configurations</a> in
+<a class="reference external" href="https://hydra.cc/">Hydra</a> to manage command line options. The
+options in the above command correspond to a Python dataclass object:
+<a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a>. The attributes, including the model type,
+learning rate, and parallel strategy, can be recursively overwritten
+via command line options. Please check <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a> to see all
+the fields that can be overwritten.</p>
+<p>As a reminder, the value <cite>null</cite> in the Hydra option represents <cite>None</cite>
+in Python.</p>
 </div>
-<p>The user can specify the number of nodes and the parallel strategy to use with
-the above command, in addition to paths and hyperparameters.
-In the given example, the experiment will use 1 node
-(assuming each node has 8 GPUs, implicitly set by the <code class="docutils literal notranslate"><span class="pre">n_gpus_per_node</span></code> attribute),
-with a parallel strategy (pipe=1, tensor=2, data=4) and a batch size of 512.</p>
-<p>After the experiment has been successfully launched,
-you will see the training logs in the console like this:</p>
+<p>The user can specify the number of nodes and the parallel strategy to
+use with the above command, in addition to paths and hyperparameters. In
+the given example, the experiment will use 1 node (assuming each node
+has 8 GPUs, implicitly set by the <code class="docutils literal notranslate"><span class="pre">n_gpus_per_node</span></code> attribute), with a
+parallel strategy (pipe=1, tensor=2, data=4) and a batch size of 512.</p>
+<p>After the experiment has been successfully launched, you will see the
+training logs in the console like this:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">20240618-03:10:56.216 quickstart INFO: Running sft experiment.</span>
 <span class="go">20240618-03:10:56.216 quickstart INFO: Logs will be dumped to /lustre/aigc/llm/logs/fw/quickstart-sft/release</span>
 <span class="go">20240618-03:10:56.216 quickstart INFO: Model checkpoints will be saved to /lustre/aigc/llm/checkpoints/fw/quickstart-sft/release</span>
@@ -279,8 +280,8 @@ you will see the training logs in the console like this:</p>
 </pre></div>
 </div>
 <p>The above output shows the log and checkpoint paths of this experiment,
-according to the given <code class="docutils literal notranslate"><span class="pre">experiment_name</span></code> and <code class="docutils literal notranslate"><span class="pre">trial_name</span></code>.
-You can check the logs:</p>
+according to the given <code class="docutils literal notranslate"><span class="pre">experiment_name</span></code> and <code class="docutils literal notranslate"><span class="pre">trial_name</span></code>. You can
+check the logs:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>ls<span class="w"> </span>/lustre/aigc/llm/logs/fw/quickstart-sft/release/
 <span class="go">ctl-0            master_worker-0  time_marks0.pkl  time_marks2.pkl  time_marks4.pkl  time_marks6.pkl</span>
 <span class="go">hydra-outputs/   model_worker-0   time_marks1.pkl  time_marks3.pkl  time_marks5.pkl  time_marks7.pkl</span>
@@ -301,19 +302,22 @@ You can check the logs:</p>
 <span class="go">pytorch_model-00006-of-00014.bin  pytorch_model-00013-of-00014.bin</span>
 </pre></div>
 </div>
-<p>Here, <code class="docutils literal notranslate"><span class="pre">default</span></code> is the model name. Since we would save multiple models for algorithms like PPO,
-the model name is used to distinguish different models.
-SFT has a single model named <code class="docutils literal notranslate"><span class="pre">default</span></code>.</p>
-<p>The directory suffix indicates the step of this checkpoint.
-It’s the checkpoint after 50 training steps at step 5 of epoch 7 (we have set <code class="docutils literal notranslate"><span class="pre">save_freq_steps=50</span></code>).
-You can change the save frequency by modifying the <code class="docutils literal notranslate"><span class="pre">exp_ctrl</span></code> attribute in <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a>.</p>
+<p>Here, <code class="docutils literal notranslate"><span class="pre">default</span></code> is the model name. Since we would save multiple models
+for algorithms like PPO, the model name is used to distinguish different
+models. SFT has a single model named <code class="docutils literal notranslate"><span class="pre">default</span></code>.</p>
+<p>The directory suffix indicates the step of this checkpoint. It’s the
+checkpoint after 50 training steps at step 5 of epoch 7 (we have set
+<code class="docutils literal notranslate"><span class="pre">save_freq_steps=50</span></code>). You can change the save frequency by modifying
+the <code class="docutils literal notranslate"><span class="pre">exp_ctrl</span></code> attribute in <a class="reference internal" href="expconfig.html#realhf.SFTConfig" title="realhf.SFTConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SFTConfig</span></code></a>.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>ReaL directly loads from HuggingFace models and also saves checkpoints
-as HuggingFace models, making it convenient to use pre-trained checkpoints
-and to deploy trained models with inference frameworks like vLLM.</p>
+<p>ReaL directly loads from HuggingFace models and also saves
+checkpoints as HuggingFace models, making it convenient to use
+pre-trained checkpoints and to deploy trained models with inference
+frameworks like vLLM.</p>
 <p>You can directly pass the path of the above checkpoint to
-<code class="docutils literal notranslate"><span class="pre">transformers.AutoModelForCausalLM.from_pretrained</span></code> or vLLM to load the model.</p>
+<code class="docutils literal notranslate"><span class="pre">transformers.AutoModelForCausalLM.from_pretrained</span></code> or vLLM to load
+the model.</p>
 </div>
 <img alt="_images/sft_loss.svg" class="align-center" src="_images/sft_loss.svg" /><div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>cat<span class="w"> </span>/lustre/aigc/llm/logs/fw/quickstart-sft/release/master_worker-0
 <span class="go">...</span>
@@ -324,22 +328,21 @@ and to deploy trained models with inference frameworks like vLLM.</p>
 <span class="go">0: 20240618-13:32:34.906 master worker INFO: Training complete! Yeah!!!</span>
 </pre></div>
 </div>
-<p>The SFT experiment will take about 10 minutes to finish
-using our provided dataset and configuration.
-Let’s move on to the next stage.</p>
+<p>The SFT experiment will take about 10 minutes to finish using our
+provided dataset and configuration. Let’s move on to the next stage.</p>
 </section>
 <section id="stage-2-1-reward-modeling-rm">
 <h3>Stage 2.1: Reward Modeling (RM)<a class="headerlink" href="#stage-2-1-reward-modeling-rm" title="Link to this heading">¶</a></h3>
-<p>Prepare your customized dataset in a JSON or JSONL format,
-where each entry is a dictionary with three keys:
-“prompt”, “pos_answer”, and “neg_answers”.</p>
-<p>“prompt” should be a string, while “pos_answer” and “neg_answers”
-should be lists of strings of the same size, forming pairwise comparisons.</p>
+<p>Prepare your customized dataset in a JSON or JSONL format, where each
+entry is a dictionary with three keys: “prompt”, “pos_answer”, and
+“neg_answers”.</p>
+<p>“prompt” should be a string, while “pos_answer” and “neg_answers” should
+be lists of strings of the same size, forming pairwise comparisons.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>In our provided sample,
-<code class="docutils literal notranslate"><span class="pre">rm_paired-train.jsonl</span></code> and <code class="docutils literal notranslate"><span class="pre">rm_paired-valid.jsonl</span></code> are the
-training and validation sets for reward modeling, respectively.</p>
+<p>In our provided sample, <code class="docutils literal notranslate"><span class="pre">rm_paired-train.jsonl</span></code> and
+<code class="docutils literal notranslate"><span class="pre">rm_paired-valid.jsonl</span></code> are the training and validation sets for
+reward modeling, respectively.</p>
 </div>
 <p>Run the following command to train the reward model:</p>
 <div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>rw<span class="w"> </span><span class="se">\</span>
@@ -364,12 +367,16 @@ training and validation sets for reward modeling, respectively.</p>
 <span class="w">    </span>dataset.valid_bs_n_seqs<span class="o">=</span><span class="m">512</span>
 </pre></div>
 </div>
-<p>It’s a common practice to use the SFT model to initialize the reward model.
-Therefore, we can pass the path of the saved SFT model as <code class="docutils literal notranslate"><span class="pre">model.path</span></code>.
-Using the pre-trained LLaMA checkpoint is also feasible, but it may not
-perform as well as the SFT checkpoint.</p>
-<p>In reward modeling, the batch size is the number of paired comparisons.
-With a batch size of 512, there will be 512 positive samples and 512 negative samples in each batch.</p>
+<p>It’s a common practice to use the SFT model to initialize the reward
+model. Therefore, we can pass the path of the saved SFT model as
+<code class="docutils literal notranslate"><span class="pre">model.path</span></code>. Using the pre-trained LLaMA checkpoint is also feasible,
+but it may not perform as well as the SFT checkpoint.</p>
+<p>The output head of the loaded LLM will be replaced by a newly
+initialized linear layer, which outputs a scalar as the reward.</p>
+<p>In reward modeling, the batch size is the number of prompts. With a
+batch size of 512, there will be at most 512 * max_pairs_per_prompt
+positive samples and 512 * max_pairs_per_prompt negative samples in each
+batch.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>bash<span class="w"> </span>examples/scripts/rw.sh
 <span class="go">0: 20240618-13:52:00.094 master worker INFO: Running rw experiment.</span>
 <span class="go">0: 20240618-13:52:00.094 master worker INFO: Logs will be dumped to /lustre/aigc/llm/logs/fw/quickstart-rw/release</span>
@@ -377,22 +384,24 @@ With a batch size of 512, there will be 512 positive samples and 512 negative sa
 <span class="go">...</span>
 </pre></div>
 </div>
-<p>The log and checkpoint paths are similar to that of SFT,
-except that the experiment name and trial name can be changed.
-Note that the saved RW checkpoint is not loadable by HuggingFace or vLLM,
-because the projection head has been replaced by a linear layer that outputs a scalar.</p>
-<img alt="_images/rw_loss.svg" class="align-center" src="_images/rw_loss.svg" /><p>Training the reward model to convergence can be very fast.
-In the given example, we can stop the training after 15 steps,
-which takes approximately 5 minutes.</p>
+<p>The log and checkpoint paths are similar to that of SFT, except that the
+experiment name and trial name can be changed. Note that the saved RW
+checkpoint is not loadable by HuggingFace or vLLM, because the
+projection head has been changed.</p>
+<p>Please check <code class="docutils literal notranslate"><span class="pre">examples/load_and_eval_rw.py</span></code> as an example to load and
+use the trained reward model in a standalone script.</p>
+<img alt="_images/rw_loss.svg" class="align-center" src="_images/rw_loss.svg" /><p>Training the reward model to convergence can be very fast. In the given
+example, we can stop the training after 15 steps, which takes
+approximately 5 minutes.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">0: 20240618-13:53:00.094 master worker INFO: Epoch 1/1 step 15/26 (global step 15) finishes. ... Total time consumption: 294.393s.</span>
 </pre></div>
 </div>
 </section>
 <section id="stage-2-2-direct-preference-optimization-dpo">
 <h3>Stage 2.2: Direct Preference Optimization (DPO)<a class="headerlink" href="#stage-2-2-direct-preference-optimization-dpo" title="Link to this heading">¶</a></h3>
-<p>Besides the ordinary RLHF procedure with PPO,
-ReaL also supports the <a class="reference external" href="https://arxiv.org/abs/2305.18290">DPO algorithm</a>,
-which avoids reward modeling.</p>
+<p>Besides the ordinary RLHF procedure with PPO, ReaL also supports the
+<a class="reference external" href="https://arxiv.org/abs/2305.18290">DPO algorithm</a>, which avoids reward
+modeling.</p>
 <p>The dataset for DPO is exactly the same as for reward modeling.</p>
 <p>Run the following command to train using DPO:</p>
 <div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>dpo<span class="w"> </span><span class="se">\</span>
@@ -420,32 +429,40 @@ which avoids reward modeling.</p>
 <span class="w">    </span>dataset.valid_bs_n_seqs<span class="o">=</span><span class="m">512</span>
 </pre></div>
 </div>
-<p>Note that there’s a major difference between DPO and SFT/RM.
-DPO involves two different models, the <em>actor</em> and the <em>reference</em>.
-The former is the primary LLM to be trained and the latter is the frozen SFT
+<p>Note that there’s a major difference between DPO and SFT/RM. DPO
+involves <strong>two</strong> different models, the <em>actor</em> and the <em>reference</em>. The
+former is the primary LLM to be trained and the latter is the frozen SFT
 model to provide KL regularizations.</p>
 <p>A training iteration of DPO is composed of two steps:</p>
 <ul class="simple">
-<li><p><em>RefInf</em>: The reference model performs a forward step to compute the log probabilities of positive and negative answers.</p></li>
-<li><p><em>ActorTrain</em>: Given the reference log probabilities, the actor model computes the DPO loss, runs the backward pass, and updates the parameters.</p></li>
+<li><p><em>RefInf</em>: The reference model performs a forward step to compute the
+log probabilities of positive and negative answers.</p></li>
+<li><p><em>ActorTrain</em>: Given the reference log probabilities, the actor model
+computes the DPO loss, runs the backward pass, and updates the
+parameters.</p></li>
 </ul>
-<p>In ReaL, these two steps can run with different parallel strategies, maximizing the efficiency of the individual workloads.
-These parallel strategies can be specified in the <code class="docutils literal notranslate"><span class="pre">ref_inf</span></code> and <code class="docutils literal notranslate"><span class="pre">actor_train</span></code> fields.
-Specifically, pipelined inference can be faster than tensor-paralleled inference due to
-the reduced communication overhead, so assigning a relatively large <code class="docutils literal notranslate"><span class="pre">pipeline_parallel_size</span></code>
-for <code class="docutils literal notranslate"><span class="pre">ref_inf</span></code> can be favorable.</p>
-<p>Moreover, ReaL can automatically <em>offload</em> the parameters of the reference model once <em>RefInf</em> is done.
-This offloading fully supports 3D parallelism and does not require DeepSpeed ZeRO-3 or any additional configurations.
-Consequently, <strong>ReaL’s DPO is as memory-efficient as training a single model like SFT!</strong></p>
+<p>In ReaL, these two steps can run with different parallel strategies,
+maximizing the efficiency of the individual workloads. These parallel
+strategies can be specified in the <code class="docutils literal notranslate"><span class="pre">ref_inf</span></code> and <code class="docutils literal notranslate"><span class="pre">actor_train</span></code>
+fields. Specifically, pipelined inference can be faster than
+tensor-paralleled inference due to the reduced communication overhead,
+so assigning a relatively large <code class="docutils literal notranslate"><span class="pre">pipeline_parallel_size</span></code> for
+<code class="docutils literal notranslate"><span class="pre">ref_inf</span></code> can be favorable.</p>
+<p>Moreover, ReaL can automatically <em>offload</em> the parameters of the
+reference model once <em>RefInf</em> is done. This offloading fully supports 3D
+parallelism and does not require DeepSpeed ZeRO-3 or any additional
+configurations. Consequently, <strong>ReaL’s DPO is as memory-efficient as
+training a single model like SFT!</strong></p>
 </section>
 <section id="stage-3-ppo">
 <h3>Stage 3: PPO<a class="headerlink" href="#stage-3-ppo" title="Link to this heading">¶</a></h3>
-<p>After the SFT and RM stages, we can proceed to the PPO stage.
-The dataset for PPO should be a JSON or JSONL file with each entry being a dictionary with a single key “prompt”.</p>
+<p>After the SFT and RM stages, we can proceed to the PPO stage. The
+dataset for PPO should be a JSON or JSONL file with each entry being a
+dictionary with a single key “prompt”.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>In our provided sample,
-<code class="docutils literal notranslate"><span class="pre">ppo_prompt.jsonl</span></code> is the training set for PPO.</p>
+<p>In our provided sample, <code class="docutils literal notranslate"><span class="pre">ppo_prompt.jsonl</span></code> is the training set for
+PPO.</p>
 </div>
 <p>Run the following command to train using PPO:</p>
 <div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>realhf.apps.quickstart<span class="w"> </span>ppo<span class="w"> </span><span class="se">\</span>
@@ -480,41 +497,54 @@ The dataset for PPO should be a JSON or JSONL file with each entry being a dicti
 </div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>You can also pass in the trained DPO checkpoint to initialize the PPO policy.</p>
+<p>You can also pass in the trained DPO checkpoint to initialize the PPO
+actor.</p>
 </div>
-<p>The configuration options of PPO are the most complex among the three stages.
-PPO involves four different models: <em>Actor</em>, <em>Critic</em>, <em>Reference</em>, and <em>Reward</em>.
-Each model can have different functionalities across a training iteration.
-For example, the <em>Actor</em> should first <em>generate</em> responses given prompts and then
-be <em>trained</em> given rewards, values, and KL regularizations.</p>
+<p>The configuration options of PPO are the most complex among the three
+stages. PPO involves four different models: <em>Actor</em>, <em>Critic</em>,
+<em>Reference</em>, and <em>Reward</em>. Each model can have different functionalities
+across a training iteration. For example, the <em>Actor</em> should first
+<em>generate</em> responses given prompts and then be <em>trained</em> given rewards,
+values, and KL regularizations.</p>
 <p>Training iterations of PPO can be illustrated as follows:</p>
-<img alt="Dataflow graph of RLHF." class="align-center" src="_images/rlhf_dfg.svg" /><p>We can see that there are six distinct <em>function calls</em> on these four models.
-In ReaL, these function calls can have independent <em>allocations</em> and <em>parallel strategies</em>.
-Each GPU can accommodate parameter shards of multiple models (e.g., both the Actor and the Reward).
-Between two function calls upon the same model, ReaL will automatically re-allocate
-model parameters between source and destination locations and properly remap
-parallel strategies.</p>
-<p>This technique can substantially reduce communication overhead caused by parallelization
-and improve GPU utilization.
-Please check <a class="reference internal" href="intro.html"><span class="doc">Introduction</span></a> for more details.</p>
+<img alt="Dataflow graph of RLHF." class="align-center" src="_images/rlhf_dfg.svg" /><p>We can see that there are six distinct <em>function calls</em> on these four
+models. In ReaL, these function calls can have independent <em>allocations</em>
+and <em>parallel strategies</em>. Each GPU can accommodate parameter shards of
+multiple models (e.g., both the Actor and the Reward). Between two
+function calls upon the same model, ReaL will automatically re-allocate
+model parameters between source and destination locations and properly
+remap parallel strategies.</p>
+<p>This technique can substantially reduce communication overhead caused by
+parallelization and improve GPU utilization. Please check <a class="reference internal" href="intro.html"><span class="doc">Introduction</span></a>
+for more details.</p>
 <p>In the above command, fields <code class="docutils literal notranslate"><span class="pre">actor</span></code>, <code class="docutils literal notranslate"><span class="pre">critic</span></code>, <code class="docutils literal notranslate"><span class="pre">ref</span></code>, and <code class="docutils literal notranslate"><span class="pre">rew</span></code>
-specify the configurations of the four models.
-The allocations and parallel strategies for function calls are automatically
-handled by the <code class="docutils literal notranslate"><span class="pre">heuristic</span></code> allocation mode.
-This is a near-optimal execution strategy found by the search engine in ReaL.</p>
-<p>For the details of PPO hyperparameters in the <code class="docutils literal notranslate"><span class="pre">ppo</span></code> field, please check
-<a class="reference internal" href="expconfig.html#realhf.PPOHyperparameters" title="realhf.PPOHyperparameters"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PPOHyperparameters</span></code></a> for a detailed explanation.</p>
+specify the configurations of the four models. The allocations and
+parallel strategies for function calls are automatically handled by the
+<code class="docutils literal notranslate"><span class="pre">heuristic</span></code> allocation mode. This is a near-optimal execution strategy
+found by the search engine in ReaL.</p>
+<p>For the details of PPO hyperparameters in the <code class="docutils literal notranslate"><span class="pre">ppo</span></code> field, please
+check <a class="reference internal" href="expconfig.html#realhf.PPOHyperparameters" title="realhf.PPOHyperparameters"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PPOHyperparameters</span></code></a> for a detailed explanation.</p>
 <img alt="_images/ppo_rwd.svg" class="align-center" src="_images/ppo_rwd.svg" /><div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">0: 20240618-14:46:38.007 master worker INFO: Epoch 1/1 step 39/39 (global step 39) finishes. ... Total time consumption: 574.312s. ...</span>
 <span class="go">...</span>
 <span class="go">0: 20240618-14:46:54.387 master worker INFO: Execution finished!</span>
 <span class="go">0: 20240618-14:46:54.387 master worker INFO: Training complete! Yeah!!!</span>
 </pre></div>
 </div>
-<p>We train PPO on 5000 prompts over 1 epoch, which consumes about 10 minutes.
-Summing up the time of the three stages, we can finish the RLHF process <strong>within half an hour!</strong>
-This efficiency can largely help algorithm developers to search for the best hyperparameters
-and iterate on the algorithm design.</p>
+<p>We train PPO on 5000 prompts over 1 epoch, which consumes about 10
+minutes. Summing up the time of the three stages, we can finish the RLHF
+process <strong>within half an hour!</strong> This efficiency can largely help
+algorithm developers to search for the best hyperparameters and iterate
+on the algorithm design.</p>
 </section>
+</section>
+<section id="the-next-step">
+<h2>The Next Step<a class="headerlink" href="#the-next-step" title="Link to this heading">¶</a></h2>
+<p>You have now figured out how to run built-in experiments and how to
+manage training hyperparameters, logs, and checkpoints within ReaL.
+Next, you can follow the <a class="reference internal" href="distributed.html"><span class="doc">Setting Up Distributed Experiments</span></a> section to set up your
+experiments in a large cluster, or proceed to the <a class="reference internal" href="customization.html"><span class="doc">Customization</span></a>
+section to learn how to customize the datasets, models, and algorithms
+in ReaL.</p>
 </section>
 </section>
 
@@ -539,6 +569,7 @@ and iterate on the algorithm design.</p>
 <li><a class="reference internal" href="#stage-3-ppo">Stage 3: PPO</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#the-next-step">The Next Step</a></li>
 </ul>
 </li>
 </ul>
