@@ -49,6 +49,7 @@ class StandaloneTestingProcess(mp.Process):
         func: Callable,
         *args,
         expr_name: str = None,
+        dist_backend: Optional[str] = None,
         trial_name: str = None,
         **kwargs,
     ):
@@ -80,8 +81,11 @@ class StandaloneTestingProcess(mp.Process):
         self.barrier.wait()
         from realhf.impl.model.comm.global_comm import setup_global_comm
 
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
-        setup_global_comm(self.expr_name, self.trial_name, self.rank, backend=backend)
+        if dist_backend is None:
+            dist_backend = "gloo" if not torch.cuda.is_available() else "nccl"
+        setup_global_comm(
+            self.expr_name, self.trial_name, self.rank, backend=dist_backend
+        )
         # NOTE: The import must be here.
         import deepspeed
 
@@ -120,6 +124,7 @@ class LocalMultiProcessTest:
         *args,
         expr_name: str = None,
         trial_name: str = None,
+        dist_backend: Optional[str] = None,
         timeout_secs: int = 300,
         **kwargs,
     ):
@@ -144,6 +149,7 @@ class LocalMultiProcessTest:
                 *args,
                 expr_name=expr_name,
                 trial_name=trial_name,
+                dist_backend=dist_backend,
                 **kwargs,
             )
             p.start()
