@@ -591,6 +591,10 @@ class ModelWorker(worker_base.Worker):
             elif request.handle_name == "clear_data_cache":
                 with cuda_tmarked("clear_data_cache", CUDATimeMarkType.misc):
                     ids = request.data
+                    if self.__worker_index == 0:
+                        blogger.info(
+                            f">>>>>>>> Model worker {self.__worker_index} clear IDs: {ids}"
+                        )
                     for _id in ids:
                         if _id in self.__data_storage:
                             del self.__data_storage[_id]
@@ -710,13 +714,19 @@ class ModelWorker(worker_base.Worker):
             data_transfer_info=self.__data_transfer_info,
         )
 
-        data_transfer_comm.run_data_transfer(
-            comm_plan=comm_plan,
-            meta_samples={x.ids[0]: x for x in meta_sample.unpack()},
-            storage=self.__data_storage,
-            sent_worker_idx_table=self.__data_sent_worker_indices,
-            received_worker_idx_table=self.__data_received_worker_indices,
-        )
+        try:
+            data_transfer_comm.run_data_transfer(
+                comm_plan=comm_plan,
+                meta_samples={x.ids[0]: x for x in meta_sample.unpack()},
+                storage=self.__data_storage,
+                sent_worker_idx_table=self.__data_sent_worker_indices,
+                received_worker_idx_table=self.__data_received_worker_indices,
+            )
+        except KeyError as e:
+            print(
+                f">>>>>>>>> {dist.get_rank()}, dataset? {self.__has_dataset}, early cache? {len(self.__early_arrived_data)}"
+            )
+            raise e
 
         if hook_data["target"] in self.__models:
             with constants.model_scope(hook_data["target"]):

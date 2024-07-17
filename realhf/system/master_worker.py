@@ -509,8 +509,6 @@ async def model_rpc_request_func(
             ctrl.used_hash_vals_this_epoch = ctrl.used_hash_vals_this_epoch.union(
                 sample.ids
             )
-        if rpc.is_dst and len(ctrl.ids_to_clear) < len(sample.ids):
-            ctrl.ids_to_clear = ctrl.ids_to_clear.union(sample.ids)
 
         # Record the data amount for each interface to compute FLOPs.
         # Since the user may arbitrarily specify input/output keys,
@@ -591,7 +589,7 @@ async def model_rpc_request_func(
             handlers=handlers,
         )
         await request_queue.put(
-            (buf_indices, req_ids, other_req_ids, time.perf_counter())
+            (buf_indices, sample.ids, req_ids, other_req_ids, time.perf_counter())
         )
         logger.info(f"Model rpc {rpc.name} requested.")
 
@@ -615,7 +613,7 @@ async def model_rpc_reply_func(
 
     while not ctrl.stop.is_set():
         # Wait for master worker's request.
-        buf_indices, req_ids, other_req_ids, tik = await request_queue.get()
+        buf_indices, ids, req_ids, other_req_ids, tik = await request_queue.get()
 
         # First, wait for all side-effect requests to finish.
         # Side-effect or empty requests are required for data transfer
@@ -665,6 +663,7 @@ async def model_rpc_reply_func(
         # update the train counter.
         # Otherwise, amend data in the buffer.
         if rpc.is_dst:
+            ctrl.ids_to_clear = ctrl.ids_to_clear.union(ids)
             await ctrl.train_count.put(1)
         else:
             logger.info(f"Amending RPC {rpc.name} output keys: {res.keys}")
