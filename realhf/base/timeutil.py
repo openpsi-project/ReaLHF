@@ -9,7 +9,8 @@ INFINITE_DURATION = 60 * 60 * 24 * 365 * 1000
 
 
 class FrequencyControl:
-    """An utility to control the execution of code with a time or/and step frequency."""
+    """An utility to control the execution of code with a time or/and step
+    frequency."""
 
     def __init__(
         self, frequency_seconds=None, frequency_steps=None, initial_value=False

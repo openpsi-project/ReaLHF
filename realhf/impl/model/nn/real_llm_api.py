@@ -190,8 +190,8 @@ class ReaLModel(nn.Module):
     def instantiate(self):
         """Instantiate the model parameters.
 
-        Note that users can append hooks to this method
-        to do more processing, such as loading from HuggingFace models.
+        Note that users can append hooks to this method to do more
+        processing, such as loading from HuggingFace models.
         """
         assert not self._instantiated
         layers = []
@@ -223,7 +223,8 @@ class ReaLModel(nn.Module):
 
     @property
     def num_layers(self):
-        """Return the number of embedding or transformer layers in this pipeline stage."""
+        """Return the number of embedding or transformer layers in this
+        pipeline stage."""
         return self.layer_idx_end - self.layer_idx_start
 
     @property
@@ -627,7 +628,8 @@ class ReaLModel(nn.Module):
         to_model_config: model_api.ReaLModelConfig,
         pg_info: NCCLProcessGroupInfo,
     ) -> Tuple[nn.ModuleList, torch.Tensor, torch.Tensor]:
-        """Trigger the parameter realloaction from the source model to the target model."""
+        """Trigger the parameter realloaction from the source model to the
+        target model."""
 
         assert not (is_trainable(from_model_name) and is_trainable(to_model_name))
         assert is_trainable(from_model_name) or is_trainable(to_model_name)

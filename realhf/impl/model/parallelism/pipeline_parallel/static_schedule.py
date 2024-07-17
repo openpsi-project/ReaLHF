@@ -71,7 +71,8 @@ class PipeSchedule(ABC):
 
     @abstractmethod
     def steps(self):
-        """Yield a list of :class:`PipeInstruction` for each step in the schedule.
+        """Yield a list of :class:`PipeInstruction` for each step in the
+        schedule.
 
         .. note::
             Schedules must implement ``steps()`` to define the schedule.
@@ -105,22 +106,26 @@ class PipeSchedule(ABC):
 
     @property
     def num_stages(self):
-        """The number of total pipeline stages used to configure this schedule."""
+        """The number of total pipeline stages used to configure this
+        schedule."""
         return self.stages
 
     @property
     def num_micro_batches(self):
-        """The number of total micro_batches used to configure this schedule."""
+        """The number of total micro_batches used to configure this
+        schedule."""
         return self.micro_batches
 
     @property
     def is_first_stage(self):
-        """True if the configured ``stage_id`` is the first stage in the pipeline."""
+        """True if the configured ``stage_id`` is the first stage in the
+        pipeline."""
         return self.stage_id == 0
 
     @property
     def is_last_stage(self):
-        """True if the configured ``stage_id`` is the last stage in the pipeline."""
+        """True if the configured ``stage_id`` is the last stage in the
+        pipeline."""
         return self.stage_id == self.stages - 1
 
     def _buffer_idx(self, micro_batch_id):
@@ -189,8 +194,10 @@ class InferenceSchedule(PipeSchedule):
 
 class GenerateSchedule(PipeSchedule):
     """A schedule for generate.
-    Difference between this schedule and InferenceSchedule is that last stage will not load data,
-    and the last stage will send the result to the first stage for the next generation round.
+
+    Difference between this schedule and InferenceSchedule is that last
+    stage will not load data, and the last stage will send the result to
+    the first stage for the next generation round.
     """
 
     def __init__(self, micro_batches, stages, stage_id, max_new_tokens):
@@ -304,8 +311,9 @@ class GenerateSchedule(PipeSchedule):
             yield step_id, micro_batch_id, cmds
 
     def num_pipe_buffers(self):
-        """2 buffers for inter stage transfer (except last stage to first stage)
-        self.num_micro_batches buffers for last stage to first stage transfer
+        """2 buffers for inter stage transfer (except last stage to first
+        stage) self.num_micro_batches buffers for last stage to first stage
+        transfer.
 
         Returns:
             ``2 + self.num_micro_batches``
@@ -316,9 +324,9 @@ class GenerateSchedule(PipeSchedule):
 class TrainSchedule(PipeSchedule):
     """A schedule for training a batch using hybrid parallelism.
 
-    Pipeline parallelism is extracted through gradient accumulation and thus
-    convergence follows that of a data parallel approach with the same batch
-    size.
+    Pipeline parallelism is extracted through gradient accumulation and
+    thus convergence follows that of a data parallel approach with the
+    same batch size.
     """
 
     def steps(self):
@@ -375,10 +383,11 @@ class TrainSchedule(PipeSchedule):
     def num_pipe_buffers(self):
         """Return the number of pipeline buffers required for this stage.
 
-        This is equivalent to the maximum number of in-flight forward passes,
-        since we need to remember the activations of forward passes in order
-        to run backpropagation. For synchronous 1F1B, this is equivalent to
-        the index difference between this stage and the last stage.
+        This is equivalent to the maximum number of in-flight forward
+        passes, since we need to remember the activations of forward
+        passes in order to run backpropagation. For synchronous 1F1B,
+        this is equivalent to the index difference between this stage
+        and the last stage.
         """
         buffers = min(self.stages - self.stage_id, self.micro_batches)
         return max(2, buffers)
@@ -427,9 +436,8 @@ class TrainSchedule(PipeSchedule):
 
 
 class DataParallelSchedule(PipeSchedule):
-    """An example schedule that trains using traditional data parallelism with gradient
-    accumulation.
-    """
+    """An example schedule that trains using traditional data parallelism with
+    gradient accumulation."""
 
     def steps(self):
         """"""

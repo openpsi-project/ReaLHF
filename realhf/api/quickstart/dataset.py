@@ -31,18 +31,15 @@ class PromptAnswerDatasetConfig:
 
 @dataclasses.dataclass
 class PairedComparisonDatasetConfig:
-    """Datasets used for paired-comparison reward modeling and DPO.
+    """Datasets used for paired-comparison reward modeling, DPO and SimPO.
 
     The raw data must be a json or jsonl file, where each piece of data is a dictionary
     with keys `prompt`, `pos_answers`, and `neg_answers`. `prompt` is a string.
-    `pos_answers` and `neg_answers` are lists of strings. They must have the same size.
-
-    Answer pairs of the same prompt will be sampled in the same batch. Hence, the number of sequences
-    in each batch must be even, in the form of [P1A1+, P1A1-, P1A2+, P1A2-, P2A1+, P2A1-, P2A2+, P2A2-, ...],
-    where `P` means prompt, `A` means answer, `+` means positive, and `-` means negative.
+    `pos_answers` and `neg_answers` are lists of strings. The lists must have the same size.
 
     The raw dataset may contain multiple answer pairs for each prompt. We will randomly sample
-    `max_pairs_per_prompt` answer pairs for each prompt in each epoch.
+    `max_pairs_per_prompt` answer pairs for each prompt in each epoch, so the maximum batch size
+    (in terms of #seqs) of each step is `train_bs_n_seqs` * `max_pairs_per_prompt`.
 
     :param train_path: Path to the training dataset.
     :type train_path: str

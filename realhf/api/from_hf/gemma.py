@@ -80,6 +80,7 @@ def convert_config_back_gemma(
         attention_dropout=config.attn_pdrop,
         rope_theta=config.rotary_base,
         tie_word_embeddings=config.tied_embedding,
+        architectures=["GemmaForCausalLM"],
     )
 
 

@@ -70,6 +70,7 @@ def convert_config_back_qwen2(
         hidden_act=config.activation_function,
         attention_dropout=config.attn_pdrop,
         rope_theta=config.rotary_base,
+        architectures=["Qwen2ForCausalLM"],
     )
 
 

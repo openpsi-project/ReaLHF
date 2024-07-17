@@ -130,7 +130,7 @@ def summary_time_points(
     save_fig_path="time_points.png",
     draw_boundary=False,
 ):
-    """Plot and summary time marks in logs"""
+    """Plot and summary time marks in logs."""
     import matplotlib.pyplot as plt
 
     assert file_name or dir_name, "dir or file name must be specified"

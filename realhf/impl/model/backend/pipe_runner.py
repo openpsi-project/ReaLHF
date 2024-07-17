@@ -44,7 +44,9 @@ def _split_and_prefill_pipe_input(
     loss_fn: Optional[Callable] = None,
 ):
     """Prepare input for pipelined generate, train, or inference.
-    Basically, splitting all input tensors into micro batches for pipeline parallel.
+
+    Basically, splitting all input tensors into micro batches for
+    pipeline parallel.
     """
     n_mbs = num_micro_batches
 
@@ -511,7 +513,8 @@ class PipeGenInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
-        """When generating, send next tokens from the last stage to the first stage."""
+        """When generating, send next tokens from the last stage to the first
+        stage."""
         assert constants.is_last_pipe_stage()
         next_stage = constants.next_pipe_stage()
         next_tokens_to_send = tensor_buffer.get(
@@ -528,9 +531,8 @@ class PipeGenInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
-        """When generating, recv next tokens from the last stage on the first stage
-        Construct next forward input
-        """
+        """When generating, recv next tokens from the last stage on the first
+        stage Construct next forward input."""
         assert constants.is_first_pipe_stage()
         batch_length = tensor_buffer.get("batch_lengths", micro_batch_id, remove=False)
 
@@ -712,7 +714,8 @@ class PipelineRunner:
         input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
     ):
-        """Run one forward step over a batch of tokens and return the logits."""
+        """Run one forward step over a batch of tokens and return the
+        logits."""
 
         if num_micro_batches is None:
             num_micro_batches = self.default_inf_mbs

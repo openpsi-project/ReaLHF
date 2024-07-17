@@ -49,7 +49,8 @@ class SchedulerClient:
         self.run_name = f"{expr_name}_{trial_name}"
 
     def submit(self, worker_type, cmd, **kwargs):
-        """Submits a job to the scheduler. Raises exception if the job is already running.
+        """Submits a job to the scheduler. Raises exception if the job is
+        already running.
 
         Args:
             worker_type: The worker type to be submitted. The job name is specified when initializing the client.
@@ -74,8 +75,10 @@ class SchedulerClient:
             )
 
     def stop(self, job_name):
-        """Stops a running job. Raises exception if there is no such job, but passes if the job has stopped
-        either successfully or not.
+        """Stops a running job.
+
+        Raises exception if there is no such job, but passes if the job
+        has stopped either successfully or not.
         """
         raise NotImplementedError()
 

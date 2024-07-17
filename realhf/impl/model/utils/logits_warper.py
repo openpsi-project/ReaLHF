@@ -6,7 +6,8 @@ import torch
 
 
 class LogitsWarper:
-    """Abstract base class for all logit processors that can be applied during generation.
+    """Abstract base class for all logit processors that can be applied during
+    generation.
 
     Cloned from huggingface transformers/src/transformers/generation/logits_process.py,
     except that we can optionally change the logits inplace.

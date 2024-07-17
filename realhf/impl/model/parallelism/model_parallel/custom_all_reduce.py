@@ -49,9 +49,10 @@ class GraphCaptureContext:
 
 @contextmanager
 def graph_capture():
-    """
-    `graph_capture` is a context manager which should surround the code that
-    is capturing the CUDA graph. Its main purpose is to ensure that the
+    """`graph_capture` is a context manager which should surround the code that
+    is capturing the CUDA graph.
+
+    Its main purpose is to ensure that the
     some operations will be run after the graph is captured, before the graph
     is replayed. It returns a `GraphCaptureContext` object which contains the
     necessary data for the graph capture. Currently, it only contains the
@@ -76,9 +77,10 @@ class GraphCaptureContext:
 
 @contextmanager
 def graph_capture():
-    """
-    `graph_capture` is a context manager which should surround the code that
-    is capturing the CUDA graph. Its main purpose is to ensure that the
+    """`graph_capture` is a context manager which should surround the code that
+    is capturing the CUDA graph.
+
+    Its main purpose is to ensure that the
     some operations will be run after the graph is captured, before the graph
     is replayed. It returns a `GraphCaptureContext` object which contains the
     necessary data for the graph capture. Currently, it only contains the
@@ -246,9 +248,9 @@ class CustomAllreduce:
 
     @contextmanager
     def capture(self):
-        """
-        The main responsibility of this context manager is the
+        """The main responsibility of this context manager is the
         `register_graph_buffers` call at the end of the context.
+
         It records all the buffer addresses used in the CUDA graph.
         """
         try:

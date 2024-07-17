@@ -75,8 +75,10 @@ class NameRecordRepository:
         raise NotImplementedError()
 
     def add_subentry(self, name, value, **kwargs):
-        """Adds a sub-entry to the key-root `name`. The values is retrievable by get_subtree() given that no
-        other entries use the name prefix.
+        """Adds a sub-entry to the key-root `name`.
+
+        The values is retrievable by get_subtree() given that no other
+        entries use the name prefix.
         """
         sub_name = name.rstrip("/") + "/" + str(uuid.uuid4())[:8]
         self.add(sub_name, value, **kwargs)
@@ -87,19 +89,22 @@ class NameRecordRepository:
         raise NotImplementedError()
 
     def clear_subtree(self, name_root):
-        """Deletes all records whose names start with the path root name_root; specifically, whose name either
-        is `name_root`, or starts with `name_root.rstrip("/") + "/"`.
-        """
+        """Deletes all records whose names start with the path root name_root;
+        specifically, whose name either is `name_root`, or starts with
+        `name_root.rstrip("/") + "/"`."""
         raise NotImplementedError()
 
     def get(self, name):
-        """Returns the value of the key. Raises NameEntryNotFoundError if not found."""
+        """Returns the value of the key.
+
+        Raises NameEntryNotFoundError if not found.
+        """
         raise NotImplementedError()
 
     def get_subtree(self, name_root):
-        """Returns all values whose names start with the path root name_root; specifically, whose name either
-        is `name_root`, or starts with `name_root.rstrip("/") + "/"`.
-        """
+        """Returns all values whose names start with the path root name_root;
+        specifically, whose name either is `name_root`, or starts with
+        `name_root.rstrip("/") + "/"`."""
         raise NotImplementedError()
 
     def find_subtree(self, name_root):
@@ -128,7 +133,8 @@ class NameRecordRepository:
                 )
 
     def reset(self):
-        """Deletes all entries added via this repository instance's add(delete_on_exit=True)."""
+        """Deletes all entries added via this repository instance's
+        add(delete_on_exit=True)."""
         raise NotImplementedError()
 
     def watch_names(
@@ -173,7 +179,9 @@ class NameRecordRepository:
 
 
 class MemoryNameRecordRepository(NameRecordRepository):
-    """Stores all the records in a thread-local memory. Note that this is most likely for testing purposes:
+    """Stores all the records in a thread-local memory.
+
+    Note that this is most likely for testing purposes:
     any distributed application is impossible to use this.
     """
 
@@ -484,8 +492,8 @@ class RedisNameRecordRepository(NameRecordRepository):
         return [k.decode() for k in self.__redis.keys(pattern=pattern)]
 
     def _testonly_drop_cached_entry(self, name):
-        """Used by unittest only to simulate the case that the Python process crashes and the key is
-        automatically removed after TTL."""
+        """Used by unittest only to simulate the case that the Python process
+        crashes and the key is automatically removed after TTL."""
         with self.__lock:
             del self.__entries[name]
             print("Testonly: dropped key:", name)

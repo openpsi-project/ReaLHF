@@ -151,13 +151,14 @@ class ParallelEmbedding(torch.nn.Module):
 
 
 class LinearWithFrozenWeight(torch.autograd.Function):
-    """Linear operator that does not calculate gradient for weight.
-    This op and LinearWithGradAccumulationAndAsyncCommunication performs
-    mathematically-identical forward and DGRAD.
+    """Linear operator that does not calculate gradient for weight. This op and
+    LinearWithGradAccumulationAndAsyncCommunication performs mathematically-
+    identical forward and DGRAD.
 
     Conceptually this op is the same as torch.nn.functional.linear with
-    weight.requires_grad==False, but in realhf.experiments they are not identical
-    mathematically."""
+    weight.requires_grad==False, but in realhf.experiments they are not
+    identical mathematically.
+    """
 
     @staticmethod
     @custom_fwd
@@ -233,7 +234,7 @@ def linear_with_frozen_weight(
 
 
 class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
-    """See linear_with_grad_accumulation_and_async_allreduce"""
+    """See linear_with_grad_accumulation_and_async_allreduce."""
 
     @staticmethod
     @custom_fwd
@@ -403,8 +404,8 @@ def linear_with_grad_accumulation_and_async_allreduce(
     async_grad_allreduce: bool,
     sequence_parallel: bool,
 ) -> torch.Tensor:
-    """Linear layer execution with asynchronous communication and
-    gradient accumulation fusion in backprop.
+    """Linear layer execution with asynchronous communication and gradient
+    accumulation fusion in backprop.
 
     This has the option to accumulate the result of backprop
     calculation into an existing gradient buffer, preventing the need
@@ -691,9 +692,9 @@ def merged_linear_with_grad_accumulation_and_async_allreduce(
     is_w_parallel: List[bool],
     *wbs: List[torch.Tensor | None],
 ) -> torch.Tensor:
-    """Similar to linear_with_grad_accumulation_and_async_allreduce
-    but does multiple linear-layer forward/backward calls with a single all gather operation.
-    """
+    """Similar to linear_with_grad_accumulation_and_async_allreduce but does
+    multiple linear-layer forward/backward calls with a single all gather
+    operation."""
     args = [
         input,
         gradient_accumulation_fusion,
@@ -832,7 +833,7 @@ class ColumnParallelLinear(torch.nn.Module):
         self.gradient_accumulation_fusion = gradient_accumulation_fusion
 
     def forward(self, input_) -> torch.Tensor:
-        """Forward of ColumnParallelLinear
+        """Forward of ColumnParallelLinear.
 
         Args:
             input_: 3D tensor whose order of dimension is [sequence, batch, hidden]
@@ -971,7 +972,7 @@ class RowParallelLinear(torch.nn.Module):
             self.register_parameter("bias", None)
 
     def forward(self, input_) -> torch.Tensor:
-        """Forward of RowParallelLinear
+        """Forward of RowParallelLinear.
 
         Args:
             input_: 3D tensor whose order of dimension is [sequence, batch, hidden]
@@ -1170,8 +1171,8 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
 
 
 def vocab_parallel_cross_entropy(vocab_parallel_logits, target, label_smoothing=0.0):
-    """
-    Performs cross entropy loss when logits are split across tensor parallel ranks
+    """Performs cross entropy loss when logits are split across tensor parallel
+    ranks.
 
     Arguments:
         vocab_parallel_logits: logits split across tensor parallel ranks

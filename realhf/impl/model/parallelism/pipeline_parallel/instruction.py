@@ -19,7 +19,6 @@ class PipeInstruction:
              that should appear in pair, belong to different (adjancent) stages and have the same micro_batch_id.
              Two binded instructions should have the same dependency list. This feature is used to avoid NCCL
              communication deadlock.
-
     """
 
     def __init__(
@@ -108,7 +107,8 @@ class OptimizerStep(PipeInstruction):
 
 
 class ReduceGrads(PipeInstruction):
-    """Reduce the computed gradients among data-parallel processes within the stage."""
+    """Reduce the computed gradients among data-parallel processes within the
+    stage."""
 
     pass
 
@@ -141,6 +141,7 @@ class RecvActivation(PipeInstruction):
 
 class SendGrad(PipeInstruction):
     """Send computed gradients to the previous pipeline stage.
+
     with respect to the received activations
     """
 
@@ -155,12 +156,18 @@ class RecvGrad(PipeInstruction):
 
 # generation
 class SendNextTokens(PipeInstruction):
-    """In GenerateSchedule, send next tokens to the first stage. Only available in the last stage."""
+    """In GenerateSchedule, send next tokens to the first stage.
+
+    Only available in the last stage.
+    """
 
     pass
 
 
 class RecvNextTokens(PipeInstruction):
-    """In GenerateSchedule, recv next tokens from the last stage. Only available in the first stage."""
+    """In GenerateSchedule, recv next tokens from the last stage.
+
+    Only available in the first stage.
+    """
 
     pass

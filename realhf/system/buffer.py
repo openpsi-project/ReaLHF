@@ -54,7 +54,8 @@ class _TensorDictSequenceBuffer:
     """An thread-unsafe buffer implementation based on list.
 
     Used as an internal buffer object in asyncio-based SequenceBuffer.
-    Can be replaced with a more efficient C++ implementation based on std vector.
+    Can be replaced with a more efficient C++ implementation based on
+    std vector.
 
     Methods starting with _ should be called in a locked context.
     """

@@ -17,12 +17,14 @@ class ParallelismConfig:
 
     :param model_parallel_size: Tensor-model parallelism size.
     :type model_parallel_size: int
-    :param pipeline_parallel_size: The number of pipeline parallelism stages.
+    :param pipeline_parallel_size: The number of pipeline parallelism
+        stages.
     :type pipeline_parallel_size: int
-    :param data_parallel_size: Data parallelism size for ZeRO optimization.
+    :param data_parallel_size: Data parallelism size for ZeRO
+        optimization.
     :type data_parallel_size: int
-    :param use_sequence_parallel: Whether to use sequence parallelism
-        in Megatron combined with tensor-model parallelism.
+    :param use_sequence_parallel: Whether to use sequence parallelism in
+        Megatron combined with tensor-model parallelism.
     :type use_sequence_parallel: bool
     """
 
@@ -72,7 +74,8 @@ class OptimizerConfig:
 
     For models that will not be trained, its type should be "empty".
 
-    :param type: Optimizer type. Currently only adam and empty optimizer are supported.
+    :param type: Optimizer type. Currently only adam and empty optimizer
+        are supported.
     :type type: str
     :param lr: Learning rate.
     :type lr: float
@@ -84,17 +87,17 @@ class OptimizerConfig:
     :type beta2: float
     :param eps: Adam epsilon in the denominator.
     :type eps: float
-    :param min_lr_ratio: Minimum learning rate ratio after learning rate annealing.
-        Should be in the interval of [0.0, 1.0].
+    :param min_lr_ratio: Minimum learning rate ratio after learning rate
+        annealing. Should be in the interval of [0.0, 1.0].
     :type min_lr_ratio: float
-    :param lr_scheduler_type: Learning rate scheduler type.
-        One of "linear", "cosine", "constant".
+    :param lr_scheduler_type: Learning rate scheduler type. One of
+        "linear", "cosine", "constant".
     :type lr_scheduler_type: str
-    :param warmup_steps_proportion: Proportion of total training steps to warm up.
-        Should be in the interval of [0.0, 1.0].
+    :param warmup_steps_proportion: Proportion of total training steps
+        to warm up. Should be in the interval of [0.0, 1.0].
     :type warmup_steps_proportion: float
-    :param offload: Whether to offload optimizer to CPU.
-        Only valid for the deepspeed backend.
+    :param offload: Whether to offload optimizer to CPU. Only valid for
+        the deepspeed backend.
     :type offload: bool
     """
 
@@ -126,8 +129,7 @@ class OptimizerConfig:
 
 @dataclasses.dataclass
 class ModelTrainEvalConfig:
-    """
-    Model (or LLM) runtime configuration in ReaL.
+    """Model (or LLM) runtime configuration in ReaL.
 
     We use a customized model class instead of HuggingFace's.
     Our customized model has the following highlights:

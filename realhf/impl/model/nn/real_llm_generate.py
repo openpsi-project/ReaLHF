@@ -359,7 +359,8 @@ def _gather_gen_output_from_list(
     gen_logprob_ph: List[torch.FloatTensor],
     gen_logits_mask_ph: List[torch.BoolTensor],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Stack over the sequence dimension given a list of single-token tensors."""
+    """Stack over the sequence dimension given a list of single-token
+    tensors."""
     gen_tokens = torch.stack(gen_token_ph, -1)  # [bs, seqlen]
     log_probs = torch.stack(gen_logprob_ph, -1)  # [bs, seqlen]
     if all([m is None for m in gen_logits_mask_ph]):
@@ -378,10 +379,11 @@ def _gather_minibatch_gen_outputs(
     all_log_probs: List[torch.FloatTensor],
     all_logits_mask: List[torch.BoolTensor],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Concate over the batch dimension given multiple [bs, seqlen] mini-batch tensors.
+    """Concate over the batch dimension given multiple [bs, seqlen] mini-batch
+    tensors.
 
-    Since different minibatches may have different generated lengths,
-    we should pad them to the same length.
+    Since different minibatches may have different generated lengths, we
+    should pad them to the same length.
     """
     gen_tokens_lengths = [t.shape[-1] for t in all_gen_tokens]
     max_gen_tokens_length = max(gen_tokens_lengths)

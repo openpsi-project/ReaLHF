@@ -20,7 +20,8 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
     ):
-        """A dataset with prompts and corresponding answers. Usually used for SFT.
+        """A dataset with prompts and corresponding answers. Usually used for
+        SFT.
 
         Args:
             util (api.data.DatasetUtility): .
