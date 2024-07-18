@@ -30,6 +30,8 @@ logger = logging.getLogger("GRPO exp", "colored")
 
 @dataclasses.dataclass
 class GRPOConfig(CommonExperimentConfig):
+    """The GRPO algorithm proposed in https://arxiv.org/abs/2402.03300.
+    """
     actor: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )

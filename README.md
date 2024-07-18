@@ -15,7 +15,7 @@
 <em>ReaL</em>: Efficient RLHF Training for LLMs <br>with Parameter Reallocation
 </h1>
 
-***ReaL*** (short for *<ins>ReaL</ins>location*) is a distributed system designed for efficient RLHF training with LLMs.
+***ReaL*** (short for *<ins>ReaL</ins>location*) is a distributed system designed for efficient RLHF training with LLMs. This is the library used to run experiments for the ICML 2024 Oral Paper [Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study](https://arxiv.org/pdf/2404.10719). 
 
 ReaL introduces a novel approach called *parameter reallocation*, which dynamically redistributes LLM parameters across the cluster and adapts parallelization strategies during training. By optimizing allocations and parallelism for each computation workload, ReaL minimizes redundant communication while maximizing GPU utilization.
 
@@ -44,16 +44,18 @@ Check out our [tutorial](https://openpsi-project.github.io/ReaLHF/quickstart.htm
 
 - Offers versatile configuration customization with Hydra structured config.
 - Supports many commonly used RLHF algorithms, including DPO, PPO, RAFT, and more.
-- Allows the addition of custom algorithms (e.g, [ReMax](https://arxiv.org/abs/2310.10505), [GRPO](https://arxiv.org/abs/2402.03300), [SimPO](https://arxiv.org/abs/2405.14734), or [external reward signal](https://github.com/openpsi-project/ReaLHF/blob/main/examples/ppo_sentiment.py)) while maintaining high efficiency with ReaL's infrastructure.
+- Allows the addition of custom algorithms (e.g, [ReMax](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/reinforce), [GRPO](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/grpo), or [external reward signal](https://github.com/openpsi-project/ReaLHF/blob/main/examples/ppo_sentiment.py)) while maintaining high efficiency with ReaL's infrastructure.
 
 Refer to our [customization guide](https://openpsi-project.github.io/ReaLHF/customization.html) for [hands-on examples](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/).
 
 ## Getting Started
 
-We provide pre-built [Docker images](https://openpsi-project.github.io/ReaLHF/install.html#docker-images) and [PyPI packages](https://openpsi-project.github.io/ReaLHF/install.html#install-from-pypi-or-source).
+We provide pre-built [Docker images](https://openpsi-project.github.io/ReaLHF/install.html#docker-images) and [PyPI packages](https://openpsi-project.github.io/ReaLHF/install.html#install-from-pypi-or-source). To use the latest version of code, please install from source:
 
 ```bash
-pip3 install realhf --no-build-isolation
+git clone https://github.com/openpsi-project/ReaLHF/
+cd ReaLHF
+MAX_JOBS=8 REAL_CUDA=1 pip3 install -e . --no-build-isolation
 ```
 
 For detailed information, please visit our [documentation site](https://openpsi-project.github.io/ReaLHF/).
@@ -72,14 +74,22 @@ We would like to thank the authors of our paper and the following individuals fo
 
 ## Citation
 
-If you find our system useful for your research or production, please cite our [paper](https://arxiv.org/abs/2406.14088).
+If you find our system useful for your research or production, please cite our papers.
 
 ```
-@misc{mei2024realhf,
-      title={ReaLHF: Optimized RLHF Training for Large Language Models through Parameter Reallocation}, 
-      author={Zhiyu Mei and Wei Fu and Kaiwei Li and Guangju Wang and Huanchen Zhang and Yi Wu},
-      year={2024},
-      eprint={2406.14088},
-      archivePrefix={arXiv},
+@article{mei2024realhf,
+  title={ReaLHF: Optimized RLHF Training for Large Language Models through Parameter Reallocation},
+  author={Mei, Zhiyu and Fu, Wei and Li, Kaiwei and Wang, Guangju and Zhang, Huanchen and Wu, Yi},
+  journal={arXiv preprint arXiv:2406.14088},
+  year={2024}
+}
+```
+
+```
+@article{xu2024dpo,
+  title={Is dpo superior to ppo for llm alignment? a comprehensive study},
+  author={Xu, Shusheng and Fu, Wei and Gao, Jiaxuan and Ye, Wenjie and Liu, Weilin and Mei, Zhiyu and Wang, Guangju and Yu, Chao and Wu, Yi},
+  journal={arXiv preprint arXiv:2404.10719},
+  year={2024}
 }
 ```
