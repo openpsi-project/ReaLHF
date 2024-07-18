@@ -6,7 +6,7 @@ from realhf.api.core.config import (
     ModelInterfaceType,
     ModelName,
 )
-from realhf.api.core.dfg import OffloadHook, SyncParamHook
+from realhf.api.core.dfg import OffloadHook, ParamReallocHook
 from realhf.api.quickstart.device_mesh import RPCAllocation
 from realhf.api.quickstart.model import (
     ModelTrainEvalConfig,
@@ -161,8 +161,8 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                     and device_mesh == other.device_mesh
                 ):
                     continue
-                other.rpc.add_pre_hook(SyncParamHook(source=rpc.model_name))
-                other.rpc.add_post_hook(SyncParamHook(target=rpc.model_name))
+                other.rpc.add_pre_hook(ParamReallocHook(source=rpc.model_name))
+                other.rpc.add_post_hook(ParamReallocHook(target=rpc.model_name))
                 logger.info(
                     f"Add param sync hooks between "
                     f"{rpc.name} and {other.rpc.name} for role {rpc.role}"

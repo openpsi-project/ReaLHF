@@ -423,7 +423,7 @@ class ExperimentConfig:
         sync_param_pairs: List[Tuple[ModelName, ModelName]] = []
         for rpc in self.model_rpcs:
             for hook in rpc._pre_hooks + rpc._post_hooks:
-                if not isinstance(hook, dfg.SyncParamHook):
+                if not isinstance(hook, dfg.ParamReallocHook):
                     continue
                 if (
                     hook.target is not None

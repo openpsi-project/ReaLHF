@@ -304,7 +304,7 @@ def _attach_payloads_with_hooks(
 
     main_mwids = set([msid2mwid[h] for h in main_handlers])
     for hook in getattr(rpc, f"_{hook_type}_hooks"):
-        if isinstance(hook, dfg.SyncParamHook):
+        if isinstance(hook, dfg.ParamReallocHook):
             assert (hook.source is None) != (hook.target is None), hook
             if hook.source is None:
                 src_topo = model_topos[rpc.model_name]

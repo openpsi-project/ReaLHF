@@ -22,13 +22,14 @@ class OffloadHook:
 
 
 @dataclasses.dataclass
-class SyncParamHook:
+class ParamReallocHook:
     source: Optional[ModelName] = None
     target: Optional[ModelName] = None
     interval: int = 1
 
 
-RPCHook = Union[OffloadHook, SyncParamHook]
+
+RPCHook = Union[OffloadHook, ParamReallocHook]
 
 
 @dataclasses.dataclass
@@ -133,14 +134,14 @@ class MFCDef:
 
     def add_pre_hook(self, h: RPCHook):
         assert isinstance(h, RPCHook), type(h)
-        if isinstance(h, SyncParamHook):
+        if isinstance(h, ParamReallocHook):
             assert h.target is None or h.source is None
         if isinstance(h, OffloadHook):
             raise ValueError("Offload can only be post hooks!")
         self._pre_hooks.append(h)
 
     def add_post_hook(self, h: RPCHook):
-        if isinstance(h, SyncParamHook):
+        if isinstance(h, ParamReallocHook):
             assert h.target is None or h.source is None
         self._post_hooks.append(h)
 
