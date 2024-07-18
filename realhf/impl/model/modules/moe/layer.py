@@ -27,7 +27,7 @@ class LayerNormMoELayer(torch.nn.Module):
         self.config = config
         self.dtype = dtype
         self.device = device
-        self.num_experts = self.config.num_experts
+        self.num_experts = self.config.moe.num_experts
 
         if config.layer_norm_type is None:
             layer_norm_fn = nn.LayerNorm
@@ -41,7 +41,7 @@ class LayerNormMoELayer(torch.nn.Module):
 
         self.router = TopKRouter(config=self.config, layer_idx=layer_idx)
         self.token_dispatcher = MoETokenDispatcher(config=self.config)
-        if config.use_grouped_gemm:
+        if config.moe.use_grouped_gemm:
             self.experts = GroupedMLP(self.config, dtype=dtype, device=device)
         else:
             self.experts = SequentialMLP(self.config, dtype=dtype, device=device)
@@ -51,25 +51,20 @@ class LayerNormMoELayer(torch.nn.Module):
             self.training
             and constants.model_parallel_world_size() > 1
             and not constants.sequence_parallel()
-            and not self.config.use_grouped_gemm
+            and not self.config.moe.use_grouped_gemm
         ):
             raise ValueError(
                 "During training, performance may degrade if MoE and tensor parallelism"
                 "are enabled without also enabling sequence parallelism."
             )
 
-        # process MoE
-        def custom_forward(hidden_states):
-            probs, indices = self.router(hidden_states)
-            (dispatched_input, tokens_per_expert) = (
-                self.token_dispatcher.token_permutation(hidden_states, probs, indices)
-            )
-            expert_output = self.experts(dispatched_input, tokens_per_expert)
-            output = self.token_dispatcher.token_unpermutation(
-                expert_output,
-            )
-            return output
-
         hidden_states = self.ln(hidden_states)
-        output = custom_forward(hidden_states)
+        probs, indices = self.router(hidden_states)
+        (dispatched_input, tokens_per_expert) = self.token_dispatcher.token_permutation(
+            hidden_states, probs, indices
+        )
+        expert_output = self.experts(dispatched_input, tokens_per_expert)
+        output = self.token_dispatcher.token_unpermutation(
+            expert_output,
+        )
         return output

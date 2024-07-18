@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 
+import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.impl.model.parallelism.model_parallel.modules import RowParallelLinear
 from realhf.impl.model.utils.functional import (
@@ -86,6 +87,7 @@ class CausalSelfAttentionLayer(nn.Module):
                 n_q_heads * head_dim,
                 hidden_dim,
                 bias=use_attn_proj_bias,
+                sequence_parallel=constants.sequence_parallel(),
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,

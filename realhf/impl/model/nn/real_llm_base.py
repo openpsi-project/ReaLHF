@@ -27,7 +27,6 @@ from realhf.impl.model.modules import (
 from realhf.impl.model.parallelism.model_parallel.modules import (
     ColumnParallelLinear,
     ParallelEmbedding,
-    RowParallelLinear,
     parallel_lm_logits,
 )
 from realhf.impl.model.utils.functional import compute_varlen_position_indices
@@ -381,7 +380,7 @@ class ParallelActorHead(ColumnParallelLinear):
             x.pp_input,
             self.weight,
             parallel_output=True,
-            async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
+            sequence_parallel=self.sequence_parallel,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             bias=self.bias,
         )
@@ -394,7 +393,7 @@ class ParallelActorHead(ColumnParallelLinear):
             x,
             self.weight,
             parallel_output=True,
-            async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
+            sequence_parallel=self.sequence_parallel,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             bias=self.bias,
         )
@@ -451,7 +450,7 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
     elif config.mlp_type == "llama":
         count += 3 * config.hidden_dim * config.intermediate_dim
     elif config.mlp_type == "moe":
-        num_experts = config.num_experts
+        num_experts = config.moe.num_experts
         count += num_experts * 3 * config.hidden_dim * config.hidden_dim
     else:
         raise NotImplementedError()
@@ -498,7 +497,7 @@ def real_model_tblock_param_keys(
             f"{idx + 1}.mlp.down_proj.weight",
         ]
     elif config.mlp_type == "moe":
-        num_experts = config.num_experts
+        num_experts = config.moe.num_experts
         keys += [
             f"{idx + 1}.mlp.router.weight",
         ]

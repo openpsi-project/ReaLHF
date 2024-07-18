@@ -33,7 +33,7 @@ class SequentialMLP(torch.nn.Module):
         super().__init__()
         self.config = config
 
-        self.num_experts = self.config.num_experts
+        self.num_experts = self.config.moe.num_experts
         self.local_experts = torch.nn.ModuleList()
 
         for _ in range(self.num_experts):
@@ -41,7 +41,7 @@ class SequentialMLP(torch.nn.Module):
                 hidden_dim=config.hidden_dim,
                 intermediate_dim=config.intermediate_dim,
                 activation_function=config.activation_function,
-                use_layer_norm=False,  # layer norm is in the moe layer
+                is_expert=True,
                 model_parallel=constants.model_parallel_world_size() > 1,
                 gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
@@ -59,11 +59,15 @@ class SequentialMLP(torch.nn.Module):
         # Insert zero at the begining for offset index's convenience
         zero_tensor = torch.zeros(1, dtype=torch.long, device=cumsum_num_tokens.device)
         cumsum_num_tokens = torch.cat((zero_tensor, cumsum_num_tokens))
+        # print(f"rank {constants.model_parallel_rank()} {tokens_per_expert}")
 
         for expert_num, expert in enumerate(self.local_experts):
             start = cumsum_num_tokens[expert_num]
             end = cumsum_num_tokens[expert_num + 1]
+            # print("permuted local hidden states shape {}".format(permuted_local_hidden_states.shape))
+            # print(expert_num, start, end)
             hidden = permuted_local_hidden_states[start:end]
+            # print(f"hidden shape {hidden.shape}")
             output = expert(hidden)
             output_local[start:end] = output
 
@@ -116,7 +120,7 @@ class GroupedMLP(torch.nn.Module):
         self.config = config
         self.dtype = dtype
         self.device = device
-        self.num_experts = config.num_experts
+        self.num_experts = config.moe.num_experts
 
         gg.assert_grouped_gemm_is_available()
         self.activation_func = get_activation_fn(self.config.activation_function)

@@ -3,12 +3,18 @@ from typing import *
 import torch
 import transformers
 
-from realhf.api.core.model_api import ReaLModelConfig, register_hf_family
+from realhf.api.core.model_api import ReaLModelConfig, ReaLMoEConfig, register_hf_family
 
 from .llama import llama_embedding_layer_names, llama_output_head_param_name
 
 
 def config_from_mixtral(hf_config: transformers.MixtralConfig) -> ReaLModelConfig:
+    moe = ReaLMoEConfig(
+        num_experts=hf_config.num_local_experts,
+        top_k=hf_config.num_experts_per_tok,
+        aux_loss_coeff=hf_config.router_aux_loss_coef,
+        input_jitter_eps=hf_config.router_jitter_noise,
+    )
     return ReaLModelConfig(
         n_layers=hf_config.num_hidden_layers,
         vocab_size=hf_config.vocab_size,
@@ -31,10 +37,7 @@ def config_from_mixtral(hf_config: transformers.MixtralConfig) -> ReaLModelConfi
         use_attn_proj_bias=False,
         embd_pdrop=0.0,
         sliding_window=hf_config.sliding_window,
-        num_experts=hf_config.num_local_experts,
-        moe_top_k=hf_config.num_experts_per_tok,
-        aux_loss_coeff=hf_config.router_aux_loss_coef,
-        input_jitter_eps=hf_config.router_jitter_noise,
+        moe=moe,
     )
 
 
@@ -53,10 +56,10 @@ def config_to_mixtral(config: ReaLModelConfig) -> transformers.MistralConfig:
         rope_theta=config.rotary_base,
         attention_dropout=config.attn_pdrop,
         sliding_window=config.sliding_window,
-        num_local_experts=config.num_experts,
-        num_experts_per_tok=config.moe_top_k,
-        router_aux_loss_coef=config.aux_loss_coeff,
-        router_jitter_noise=config.input_jitter_eps,
+        num_local_experts=config.moe.num_experts,
+        num_experts_per_tok=config.moe.top_k,
+        router_aux_loss_coef=config.moe.aux_loss_coeff,
+        router_jitter_noise=config.moe.input_jitter_eps,
     )
 
 
@@ -100,7 +103,7 @@ def to_mixtral_state_dict(
 ) -> Dict:
     _k = list(state_dict.keys())[0]
     device = state_dict[_k].device
-    num_experts = config.num_experts
+    num_experts = config.moe.num_experts
 
     layer_indices = list(set([int(k.split(".")[0]) for k in state_dict.keys()]))
 
@@ -182,7 +185,7 @@ def mixtral_transformer_block_param_name(
     config: ReaLModelConfig, idx: int
 ) -> List[str]:
     names = []
-    num_experts = config.num_experts
+    num_experts = config.moe.num_experts
     for k in ["weight", "bias"]:
         names += [
             f"model.layers.{idx}.input_layernorm.{k}",
@@ -207,7 +210,7 @@ def mixtral_transformer_block_param_name(
 
 def get_real_config_mixtral() -> ReaLModelConfig:
     hf_config = transformers.MixtralConfig(
-        vocab_size=200,
+        vocab_size=256,
         hidden_size=128,
         intermediate_size=160,
         num_hidden_layers=8,

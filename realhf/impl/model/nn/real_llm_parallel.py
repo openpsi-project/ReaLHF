@@ -266,7 +266,7 @@ def get_real_model_param_shape(
             raise NotImplementedError(f"unkown shape of key {k}.")
     elif ".mlp.router" in k:
         # mp does not partition router weights
-        return (config.num_experts, config.hidden_dim)
+        return (config.moe.num_experts, config.hidden_dim)
     else:
         raise NotImplementedError(f"unkown shape of key {k}.")
 

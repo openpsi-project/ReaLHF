@@ -308,50 +308,6 @@ class _ReduceScatterToTensorParallelRegion(torch.autograd.Function):
         return _gather_along_last_dim(grad_output)
 
 
-class _AllToAll(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, group, input, output_split_sizes, input_split_sizes):
-        ctx.group = group
-        ctx.output_split_sizes = output_split_sizes
-        ctx.input_split_sizes = input_split_sizes
-
-        world_size = torch.distributed.get_world_size(group=group)
-        # Bypass the function if we are using only 1 GPU.
-        if world_size == 1:
-            return input
-
-        input = input.contiguous()
-        if output_split_sizes is None:
-            # Equal split (all2all)
-            output = torch.empty_like(input)
-        else:
-            # Unequal split (all2all-v)
-            output = input.new_empty(
-                size=[sum(output_split_sizes)] + list(input.size()[1:]),
-                dtype=input.dtype,
-                device=torch.cuda.current_device(),
-            )
-        torch.distributed.all_to_all_single(
-            output,
-            input,
-            output_split_sizes=output_split_sizes,
-            input_split_sizes=input_split_sizes,
-            group=group,
-        )
-        return output
-
-    @staticmethod
-    def backward(ctx, *grad_output):
-        return (
-            None,
-            _AllToAll.apply(
-                ctx.group, *grad_output, ctx.input_split_sizes, ctx.output_split_sizes
-            ),
-            None,
-            None,
-        )
-
-
 # -----------------
 # Helper functions.
 # -----------------
@@ -391,53 +347,3 @@ def all_gather_last_dim_from_tensor_parallel_region(input_):
 
 def reduce_scatter_last_dim_to_tensor_parallel_region(input_):
     return _ReduceScatterToTensorParallelRegion.apply(input_)
-
-
-def all_to_all(group, input_, output_split_sizes_=None, input_split_sizes_=None):
-    return _AllToAll.apply(group, input_, output_split_sizes_, input_split_sizes_)
-
-
-def all_to_all_sp2hp(input_):
-    """
-    Perform AlltoAll communication on tensor parallel group, transform the input tensor from shape [num_tokens/TP, H] to [num_tokens, H/TP].
-
-    Args:
-        input_ (torch.Tensor): The input tensor which has been distributed along the sequence dimension.
-
-    Returns:
-        torch.Tensor: The output tensor with shape [num_tokens, H/TP].
-
-    """
-    world_size = constants.model_parallel_world_size()
-    tp_group = constants.model_parallel_group()
-    input_ = input_.reshape(-1, input_.shape[-1])
-    split_tensors = torch.split(
-        input_, split_size_or_sections=input_.shape[-1] // world_size, dim=1
-    )
-    concat_tensor = torch.cat(split_tensors, dim=0)
-    output = all_to_all(tp_group, concat_tensor)
-    return output
-
-
-def all_to_all_hp2sp(input_):
-    """
-    Perform AlltoAll communication on tensor parallel group, transform the input tensor from shape [num_tokens, H/TP] to [num_tokens/TP, H].
-
-    Args:
-        input_ (torch.Tensor): The input tensor which has been distributed along the hidden dimension.
-
-    Returns:
-        torch.Tensor: The output tensor with shape [num_tokens/TP, H].
-    """
-    world_size = constants.model_parallel_world_size()
-    input_ = input_.reshape(-1, input_.shape[-1])
-    tp_group = constants.model_parallel_group()
-    input_exchanged = all_to_all(tp_group, input_)
-    input_reshaped = input_exchanged.reshape(-1, input_exchanged.shape[-1])
-    split_tensors = torch.split(
-        input_reshaped,
-        split_size_or_sections=input_reshaped.shape[0] // world_size,
-        dim=0,
-    )
-    output = torch.cat(split_tensors, dim=-1)
-    return output

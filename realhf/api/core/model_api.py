@@ -69,6 +69,48 @@ class GenerationHyperparameters:
 
 
 @dataclasses.dataclass
+class ReaLMoEConfig:
+    """Configuration related to MoE models
+    :param num_experts: Number of experts in the mixture of experts.
+    :type num_experts: int
+    :param top_k: The number of experts to route per-token, can be also
+        interpreted as the `top-k` routing parameter.
+    :type top_k: int
+    :param routing_type: The load balancing type for the MoE router.
+        Can be "aux_loss", "sinkhorn", or "none".
+    :type routing_type: str
+    :param aux_loss_coeff: The coefficient for the auxiliary loss.
+        Only effective when routing_type="aux_loss".
+    :type aux_loss_coeff: float
+    :param capacity_factor: The capacity factor of each expert.
+        An expert will drop tokens if the number of tokens exceeds capacity_factor * (num_tokens / num_experts).
+        Drop nothing when capacity_factor is None.
+    :type capacity_factor: float
+    :param pad_to_capacity: Whether to pad the input to the capacity of the expert.
+    :type pad_to_capacity: bool
+    :param token_drop_policy: The token drop policy for the MoE. Can be either "prob" or "position".
+        If "prob", the tokens with the lowest probabilities will be dropped.
+        If "position", tokens at the end of each batch will be dropped.
+    :type token_drop_policy: str
+    :param z_loss_coeff: The coefficient for the z-loss.
+    :type z_loss_coeff: float
+    :param input_jitter_eps: The input jitter noise for the router.
+    :type input_jitter_eps: float
+    """
+
+    num_experts: int = 8
+    top_k: int = 2
+    routing_type: str = "aux_loss"
+    aux_loss_coeff: float = 1e-3
+    capacity_factor: float = None
+    pad_to_capacity: bool = False
+    token_drop_policy: str = "probs"
+    z_loss_coeff: float = 0.0
+    input_jitter_eps: float = 0.0
+    use_grouped_gemm: bool = False
+
+
+@dataclasses.dataclass
 class ReaLModelConfig:
     """Configuration for ReaLModel.
 
@@ -137,41 +179,14 @@ class ReaLModelConfig:
     :param sliding_window: Sliding window size for the attention.
         Currently a placeholder and not supported.
     :type sliding_window: Optional[int]
-    :param num_experts: Number of experts in the mixture of experts.
-        Only effective when mlp_type="moe".
-    :type num_experts: int
-    :param moe_top_k: The number of experts to route per-token, can be also
-        interpreted as the `top-k` routing parameter.
-    :type moe_top_k: int
-    :param routing_type: The load balancing type for the MoE router.
-        Can be "aux_loss", "sinkhorn", or "none".
-    :type routing_type: str
-    :param aux_loss_coeff: The coefficient for the auxiliary loss.
-        Only effective when routing_type="aux_loss".
-    :type aux_loss_coeff: float
-    :param capacity_factor: The capacity factor of each expert.
-        An expert will drop tokens if the number of tokens exceeds capacity_factor * (num_tokens / num_experts).
-        Drop nothing when capacity_factor is None.
-    :type capacity_factor: float
-    :param pad_to_capacity: Whether to pad the input to the capacity of the expert.
-    :type pad_to_capacity: bool
-    :param token_drop_policy: The token drop policy for the MoE. Can be either "prob" or "position".
-        If "prob", the tokens with the lowest probabilities will be dropped.
-        If "position", tokens at the end of each batch will be dropped.
-    :type token_drop_policy: str
-    :param z_loss_coeff: The coefficient for the z-loss.
-    :type z_loss_coeff: float
-    :param input_jitter_eps: The input jitter noise for the router.
-    :type input_jitter_eps: float
+    :param moe: Configuration for MoE models, only effective when mlp_type="moe".
+    :type moe: Optional[ReaLMoEConfig]
     :param is_critic: Whether the model is a critic model.
     :type is_critic: bool
     :param gradient_accumulation_fusion: Whether to fuse
         gradient accumulation in Megatron.
         Currently not supported.
     :type gradient_accumulation_fusion: bool
-    :param use_grouped_gemm: Whether to use grouped GEMM for MoE.
-        Currenly grouped GEMM only supports bf16 and does not support enabling sequence parallel
-    :type use_grouped_gemm: bool
     """
 
     ### Architectural configurations. ###
@@ -209,17 +224,8 @@ class ReaLModelConfig:
     # Tied embedding
     tied_embedding: bool = False
     sliding_window: Optional[int] = None
-    # For MoE
-    num_experts: int = 8
-    moe_top_k: int = 2
-    routing_type: str = "aux_loss"  # "sinkhorn" "none"
-    aux_loss_coeff: float = 1e-3
-    capacity_factor: float = None
-    pad_to_capacity: bool = False
-    token_drop_policy: str = "probs"  # "position"
-    z_loss_coeff: float = 0.0
-    input_jitter_eps: float = 0.0
-    use_grouped_gemm: bool = False
+    # MoE Config
+    moe: Optional[ReaLMoEConfig] = None
 
     # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False

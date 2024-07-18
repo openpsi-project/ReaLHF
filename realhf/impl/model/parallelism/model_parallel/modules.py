@@ -747,9 +747,9 @@ class ColumnParallelLinear(torch.nn.Module):
         skip_bias_add: This was added to enable performance optimations where bias
                        can be fused with other elementwise operations. we skip
                        adding bias but instead return it.
-        async_tensor_model_parallel_allreduce:
-        params_dtype:
-        gradient_accumulation_fusion:
+        sequence_parallel: Whether to all_gather input before doing linear
+        perform_initialization: Whether to perform initialization
+        gradient_accumulation_fusion: Whether to enable gradient accumulation fusion
     """
 
     def __init__(
@@ -761,7 +761,7 @@ class ColumnParallelLinear(torch.nn.Module):
         init_method=init.xavier_normal_,
         stride=1,
         skip_bias_add=False,
-        async_tensor_model_parallel_allreduce=True,
+        sequence_parallel=False,
         perform_initialization=True,
         gradient_accumulation_fusion=False,
         dtype: Optional[torch.dtype] = None,
@@ -811,8 +811,9 @@ class ColumnParallelLinear(torch.nn.Module):
             self.register_parameter("bias", None)
 
         self.async_tensor_model_parallel_allreduce = (
-            async_tensor_model_parallel_allreduce and world_size > 1
+            not sequence_parallel and world_size > 1
         )
+        self.sequence_parallel = sequence_parallel
 
         if gradient_accumulation_fusion:
             if not _grad_accum_fusion_available:
@@ -838,13 +839,8 @@ class ColumnParallelLinear(torch.nn.Module):
             - bias
         """
         bias = self.bias if not self.skip_bias_add else None
-        if self.async_tensor_model_parallel_allreduce and constants.sequence_parallel():
-            raise RuntimeError(
-                "`async_tensor_model_parallel_allreduce` and `sequence_parallel` "
-                "cannot be enabled at the same time."
-            )
 
-        if self.async_tensor_model_parallel_allreduce or constants.sequence_parallel():
+        if self.sequence_parallel:
             input_parallel = input_
         else:
             input_parallel = copy_to_tensor_model_parallel_region(input_)
@@ -859,11 +855,11 @@ class ColumnParallelLinear(torch.nn.Module):
             bias=bias,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             async_grad_allreduce=self.async_tensor_model_parallel_allreduce,
-            sequence_parallel=constants.sequence_parallel(),
+            sequence_parallel=self.sequence_parallel,
         )
         if self.gather_output:
             # All-gather across the partitions.
-            assert not constants.sequence_parallel()
+            assert not self.sequence_parallel
             output = gather_from_tensor_model_parallel_region(output_parallel)
         else:
             output = output_parallel
@@ -892,6 +888,7 @@ class RowParallelLinear(torch.nn.Module):
         input_is_parallel: If true, we assume that the input is already
                            split across the GPUs and we do not split
                            again.
+        sequence_parallel: Whether sequence parallel is enabled.
         init_method: method to initialize weights. Note that bias is always set
                      to zero.
         stride: For the strided linear layers.
@@ -914,6 +911,7 @@ class RowParallelLinear(torch.nn.Module):
         output_size,
         bias=True,
         input_is_parallel=True,
+        sequence_parallel=False,
         init_method=init.xavier_normal_,
         stride=1,
         skip_bias_add=False,
@@ -928,12 +926,13 @@ class RowParallelLinear(torch.nn.Module):
         self.input_size = input_size
         self.output_size = output_size
         self.input_is_parallel = input_is_parallel
+        self.sequence_parallel = sequence_parallel
         # Divide the weight matrix along the last dimension.
         world_size = constants.model_parallel_world_size()
         self.input_size_per_partition = divide(input_size, world_size)
         self.skip_bias_add = skip_bias_add
         self.gradient_accumulation_fusion = gradient_accumulation_fusion
-        if constants.sequence_parallel() and not self.input_is_parallel:
+        if self.sequence_parallel and not self.input_is_parallel:
             raise RuntimeError(
                 "To enable `sequence_parallel`, `input_is_parallel` must be `True`"
             )
@@ -980,7 +979,6 @@ class RowParallelLinear(torch.nn.Module):
         if self.input_is_parallel:
             input_parallel = input_
         else:
-            assert not constants.sequence_parallel()
             input_parallel = scatter_to_tensor_model_parallel_region(input_)
         # Matrix multiply.
         if not self.weight.requires_grad:
@@ -997,7 +995,7 @@ class RowParallelLinear(torch.nn.Module):
         )
 
         # All-reduce across all the partitions.
-        if constants.sequence_parallel():
+        if self.sequence_parallel:
             output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
         else:
             output_ = reduce_from_tensor_model_parallel_region(output_parallel)
@@ -1009,21 +1007,16 @@ def parallel_lm_logits(
     input_: torch.HalfTensor,
     word_embeddings_weight: torch.HalfTensor,
     parallel_output: bool = False,
-    async_tensor_model_parallel_allreduce: bool = False,
+    sequence_parallel: bool = False,
     gradient_accumulation_fusion: bool = False,
     bias=None,
 ):
     """LM logits using word embedding weights."""
-    sequence_parallel = constants.sequence_parallel()
+    model_parallel = constants.model_parallel_world_size() > 1
+    async_grad_allreduce = not sequence_parallel and model_parallel
     # Parallel logits.
-    if async_tensor_model_parallel_allreduce or sequence_parallel:
+    if sequence_parallel:
         input_parallel = input_
-        model_parallel = constants.model_parallel_world_size() > 1
-        async_grad_allreduce = (
-            async_tensor_model_parallel_allreduce
-            and model_parallel
-            and not sequence_parallel
-        )
     else:
         input_parallel = copy_to_tensor_model_parallel_region(input_)
         async_grad_allreduce = False

@@ -6,8 +6,11 @@ from typing import List, Optional, Tuple, Union
 import torch
 
 import realhf.base.constants as constants
-import realhf.impl.model.parallelism.model_parallel.mappings as mappings
 from realhf.api.core.model_api import ReaLModelConfig
+from realhf.impl.model.parallelism.model_parallel.mappings import (
+    gather_from_sequence_parallel_region,
+    scatter_to_sequence_parallel_region,
+)
 from realhf.impl.model.utils.moe import custom_histc, permute, unpermute
 
 
@@ -34,19 +37,19 @@ class MoETokenDispatcher:
         self.device = device
 
         self.hidden_shape = None
-        self.num_experts = self.config.num_experts
+        self.num_experts = self.config.moe.num_experts
 
         assert self.num_experts > 0, "Expected at least one expert"
 
-        self.router_topk = self.config.moe_top_k
+        self.router_topk = self.config.moe.top_k
         self.probs = None
 
         # Token drop and padding.
         # We need to keep track of the token num if we drop tokens without padding them.
         self.num_out_tokens = None
         # Drop and pad the input to capacity.
-        self.capacity_factor = self.config.capacity_factor
-        self.drop_and_pad = self.config.pad_to_capacity
+        self.capacity_factor = self.config.moe.capacity_factor
+        self.drop_and_pad = self.config.moe.pad_to_capacity
         if self.drop_and_pad:
             assert self.capacity_factor is not None
         self.capacity = torch.tensor(0, dtype=torch.long, device=self.device)
@@ -113,10 +116,8 @@ class MoETokenDispatcher:
         hidden_states = hidden_states.view(-1, self.hidden_shape[-1])
         tokens_per_expert = self.preprocess(indices)
 
-        # Perform tensor parallel AlltoAll communication
-        # hidden_states: [S*B/TP, H] -> [S*B, H/TP]
-        if constants.model_parallel_world_size() > 1:
-            hidden_states = mappings.all_to_all_sp2hp(hidden_states)
+        if constants.sequence_parallel():
+            hidden_states = gather_from_sequence_parallel_region(hidden_states)
 
         # Permutation
         self.hiddden_shape_before_permute = hidden_states.shape
@@ -127,15 +128,6 @@ class MoETokenDispatcher:
             num_out_tokens=self.num_out_tokens,
             padded_mode=self.drop_and_pad,
         )
-
-        # Perform tensor parallel AllGather on the hidden dimension to obtain the input tokens.
-        # global_input_tokens: [SEQL, H/TP] -> [SEQL, H]
-        if constants.model_parallel_world_size() > 1:
-            permutated_input_tokens = (
-                mappings.all_gather_last_dim_from_tensor_parallel_region(
-                    permutated_input_tokens
-                )
-            )
 
         return permutated_input_tokens, tokens_per_expert
 
@@ -156,13 +148,6 @@ class MoETokenDispatcher:
                 - None (bias is not supported).
         """
 
-        # Perform tensor parallel Reduce-Scatter
-        # hidden_states: [SEQL, H] -> [SEQL, H/TP]
-        if constants.model_parallel_world_size() > 1:
-            hidden_states = mappings.reduce_scatter_last_dim_to_tensor_parallel_region(
-                hidden_states
-            )
-
         # Unpermutation
         output = unpermute(
             hidden_states,
@@ -172,10 +157,8 @@ class MoETokenDispatcher:
             restore_shape=self.hiddden_shape_before_permute,
         )
 
-        # Perform tensor parallel AlltoAll communication
-        # output: [S*B, H/TP] -> [S*B/TP, H]
-        if constants.model_parallel_world_size() > 1:
-            output = mappings.all_to_all_hp2sp(output)
+        if constants.sequence_parallel():
+            output = scatter_to_sequence_parallel_region(output)
 
         # Reshape the output tensor
         output = output.view(self.hidden_shape)

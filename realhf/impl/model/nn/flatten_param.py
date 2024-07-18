@@ -367,10 +367,7 @@ def param_intervals_from_keys(
                     portion_size,
                 )
             ]
-        try:
-            intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
-        except TypeError:
-            raise TypeError(f"{k}: {zero_start_intervals}, {param_spec[k].start_idx}")
+        intervals += (zero_start_intervals + param_spec[k].start_idx).tolist()
         interval_size += sum(zero_start_intervals[:, 1] - zero_start_intervals[:, 0])
     # assert len(set([x[0] for x in intervals])) == len(intervals)
     assert interval_size == param_size, (interval_size, param_size)

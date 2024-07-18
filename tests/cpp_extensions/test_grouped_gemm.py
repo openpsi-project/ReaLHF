@@ -18,7 +18,7 @@ def run_grouped_mlp(num_tokens, mp_size, token_dispatch_strategy, seed=1):
 
     mconfig: ReaLModelConfig = getattr(ReaLModel, f"make_mixtral_config")()
     hidden_dim = mconfig.hidden_dim
-    num_experts = mconfig.num_experts
+    num_experts = mconfig.moe.num_experts
     assert num_tokens % num_experts == 0, f"{num_tokens} % {num_experts} != 0"
     torch.manual_seed(seed)
     random.seed(seed)
@@ -34,7 +34,6 @@ def run_grouped_mlp(num_tokens, mp_size, token_dispatch_strategy, seed=1):
 
     with constants.model_scope(testing.MODEL_NAME):
         seq_mlp = SequentialMLP(
-            num_local_experts=num_experts,
             config=mconfig,
             dtype=torch.bfloat16,
             device=device,
@@ -42,7 +41,6 @@ def run_grouped_mlp(num_tokens, mp_size, token_dispatch_strategy, seed=1):
         seq_mlp_state_dict = seq_mlp.state_dict()
 
         grouped_mlp = GroupedMLP(
-            num_local_experts=num_experts,
             config=mconfig,
             dtype=torch.bfloat16,
             device=device,
@@ -104,6 +102,7 @@ def run_grouped_mlp(num_tokens, mp_size, token_dispatch_strategy, seed=1):
 @pytest.mark.parametrize("num_tokens", [200])
 @pytest.mark.parametrize("mp_size", [1, 2])
 @pytest.mark.parametrize("token_dispatch_strategy", ["random"])
+@pytest.mark.gpu
 @pytest.mark.distributed
 def test_grouped_mlp(
     num_tokens,
@@ -124,6 +123,7 @@ def test_grouped_mlp(
     not torch.cuda.is_available(),
     reason="This test requires GPU to run",
 )
+@pytest.mark.gpu
 def test_grouped_gemm():
     torch.manual_seed(1)
     device = torch.device("cuda")
