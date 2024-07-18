@@ -15,7 +15,7 @@ class GenerationInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def generate(
-        self, model: model_api.Model, input_: SequenceSample
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None,
     ) -> SequenceSample:
         module = model.module
 
@@ -33,6 +33,7 @@ class GenerationInterface(model_api.ModelInterface):
             input_=x,
             tokenizer=model.tokenizer,
             gconfig=self.generation_config,
+            num_micro_batches=n_mbs,
         )
         if res is None:
             return None

@@ -303,8 +303,9 @@ class ModelInterface(abc.ABC):
         pass
 
     def evaluate(
-        self, model: Model, eval_dataloader: torch.utils.data.DataLoader
+        self, model: Model, eval_dataloader: torch.utils.data.DataLoader,
     ) -> Dict:
+        # NOTE: No n_mbs here because the batch size can be configured in the dataloader.
         return {}
 
     def inference(self, model: Model, data: SequenceSample, n_mbs: Optional[int] = None) -> SequenceSample:

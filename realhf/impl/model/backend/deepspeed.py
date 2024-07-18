@@ -201,6 +201,8 @@ class ReaLDeepSpeedEngine:
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:
+            if num_micro_batches is not None:
+                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_train_mbs)
             instr_set = PipeTrainSetForDeepSpeed(self.ds_engine)
             return self.pipe_runner.train_batch(
                 instr_set=instr_set,

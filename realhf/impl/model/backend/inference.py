@@ -84,6 +84,8 @@ class PipelinableInferenceEngine:
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:
+            if num_micro_batches is not None:
+                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
             return self.pipe_runner.eval_batch(
                 input_=input_,
                 loss_fn=loss_fn,
@@ -113,6 +115,8 @@ class PipelinableInferenceEngine:
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:
+            if num_micro_batches is not None:
+                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
             return self.pipe_runner.forward(
                 input_=input_,
                 num_micro_batches=num_micro_batches,
@@ -144,6 +148,8 @@ class PipelinableInferenceEngine:
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:
+            if num_micro_batches is not None:
+                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
             return self.pipe_runner.generate(
                 input_=input_,
                 num_micro_batches=num_micro_batches,
