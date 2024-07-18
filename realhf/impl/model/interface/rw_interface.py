@@ -111,7 +111,9 @@ class PairedRewardInterface(model_api.ModelInterface):
     train_total_correct_predictions: int = 0
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: SequenceSample, n_mbs=None) -> SequenceSample:
+    def inference(
+        self, model: model_api.Model, data: SequenceSample, n_mbs=None
+    ) -> SequenceSample:
 
         module = model.module
 

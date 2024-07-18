@@ -177,7 +177,10 @@ class PPOActorInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def generate(
-        self, model: model_api.Model, input_: SequenceSample, n_mbs=None,
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
 
@@ -251,7 +254,10 @@ class PPOActorInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample, n_mbs=None,
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
@@ -278,7 +284,9 @@ class PPOActorInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample, n_mbs=None) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
@@ -576,7 +584,10 @@ class PPOCriticInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample, n_mbs=None,
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
@@ -592,7 +603,9 @@ class PPOCriticInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample, n_mbs=None) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.

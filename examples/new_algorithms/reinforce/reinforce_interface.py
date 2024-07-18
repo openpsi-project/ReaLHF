@@ -88,7 +88,10 @@ class ReinforceInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def generate(
-        self, model: model_api.Model, input_: SequenceSample,n_mbs=None,
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         # NOTE: import here to avoid cuda initialization
         from realhf.impl.model.nn.real_llm_generate import (
@@ -152,7 +155,9 @@ class ReinforceInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample, n_mbs=None) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         # NOTE: import here to avoid cuda initialization
         from realhf.impl.model.utils.functional import masked_normalization
         from realhf.impl.model.utils.ppo_functional import (

@@ -15,7 +15,10 @@ class GenerationInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def generate(
-        self, model: model_api.Model, input_: SequenceSample, n_mbs=None,
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
 

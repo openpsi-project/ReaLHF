@@ -101,7 +101,10 @@ class DPOInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample, n_mbs=None,
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
@@ -159,7 +162,9 @@ class DPOInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample, n_mbs=None) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
 
         # Determining whether to disable dropout is a bit tricky.

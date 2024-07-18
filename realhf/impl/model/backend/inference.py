@@ -1,10 +1,10 @@
+import collections
 import dataclasses
 from typing import *
 
 import torch
 import torch.distributed as dist
 import transformers
-import collections
 
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
@@ -85,7 +85,9 @@ class PipelinableInferenceEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             if num_micro_batches is not None:
-                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
+                num_micro_batches = max(
+                    num_micro_batches, self.pipe_runner.default_inf_mbs
+                )
             return self.pipe_runner.eval_batch(
                 input_=input_,
                 loss_fn=loss_fn,
@@ -96,7 +98,9 @@ class PipelinableInferenceEngine:
                 num_micro_batches = 1
             stat = collections.defaultdict(int)
             for mb_input in input_.split(num_micro_batches):
-                input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                input_lens = torch.cat(
+                    mb_input.seqlens["packed_input_ids"], dim=0
+                ).cuda()
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
                 model_output = self.module(
@@ -116,7 +120,9 @@ class PipelinableInferenceEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             if num_micro_batches is not None:
-                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
+                num_micro_batches = max(
+                    num_micro_batches, self.pipe_runner.default_inf_mbs
+                )
             return self.pipe_runner.forward(
                 input_=input_,
                 num_micro_batches=num_micro_batches,
@@ -126,7 +132,9 @@ class PipelinableInferenceEngine:
                 num_micro_batches = 1
             outputs = []
             for mb_input in input_.split(num_micro_batches):
-                input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                input_lens = torch.cat(
+                    mb_input.seqlens["packed_input_ids"], dim=0
+                ).cuda()
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
                 model_output = self.module(
@@ -149,7 +157,9 @@ class PipelinableInferenceEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             if num_micro_batches is not None:
-                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
+                num_micro_batches = max(
+                    num_micro_batches, self.pipe_runner.default_inf_mbs
+                )
             return self.pipe_runner.generate(
                 input_=input_,
                 num_micro_batches=num_micro_batches,
@@ -161,7 +171,9 @@ class PipelinableInferenceEngine:
                 num_micro_batches = 1
             sequences, scores, logits_mask = [], [], []
             for mb_input in input_.split(num_micro_batches):
-                input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                input_lens = torch.cat(
+                    mb_input.seqlens["packed_input_ids"], dim=0
+                ).cuda()
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
                 res = self.module.generate(
@@ -177,7 +189,11 @@ class PipelinableInferenceEngine:
             if num_micro_batches == 1:
                 return sequences[0], scores[0], logits_mask[0]
             else:
-                return torch.cat(sequences, dim=0), torch.cat(scores, dim=0), torch.cat(logits_mask, dim=0)
+                return (
+                    torch.cat(sequences, dim=0),
+                    torch.cat(scores, dim=0),
+                    torch.cat(logits_mask, dim=0),
+                )
 
 
 @dataclasses.dataclass

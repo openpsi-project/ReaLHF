@@ -220,6 +220,7 @@ def use_te_impl() -> bool:
 def sequence_parallel() -> bool:
     return grid().topology().sequence_parallel
 
+
 def gradient_accumulation_fusion() -> bool:
     # FIXME: change it to be an option since ds cannot use it
     _grad_accum_fusion_available = True
@@ -229,6 +230,7 @@ def gradient_accumulation_fusion() -> bool:
         _grad_accum_fusion_available = False
     print(">>>>>>>>>>>>>>>>>>>>>>>>>>", _grad_accum_fusion_available)
     return _grad_accum_fusion_available
+
 
 def max_prompt_len() -> int:
     return grid().topology().max_prompt_len

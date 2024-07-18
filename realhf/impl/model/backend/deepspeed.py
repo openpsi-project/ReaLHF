@@ -1,18 +1,16 @@
+import collections
 import dataclasses
 import functools
 import math
 from typing import *
 
 import deepspeed
-import collections
 import torch
 import torch.distributed as dist
 import transformers
 from deepspeed.runtime import zero
 from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.config import DeepSpeedConfig
-from deepspeed.runtime.zero.stage3 import DeepSpeedZeroOptimizer_Stage3
-from deepspeed.runtime.zero.stage_1_and_2 import DeepSpeedZeroOptimizer
 from deepspeed.runtime.engine import (
     MEMORY_OPT_ALLREDUCE_SIZE,
     DeepSpeedEngine,
@@ -20,6 +18,8 @@ from deepspeed.runtime.engine import (
     DeepSpeedSchedulerCallable,
 )
 from deepspeed.runtime.zero.config import ZeroStageEnum
+from deepspeed.runtime.zero.stage3 import DeepSpeedZeroOptimizer_Stage3
+from deepspeed.runtime.zero.stage_1_and_2 import DeepSpeedZeroOptimizer
 
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
@@ -202,7 +202,9 @@ class ReaLDeepSpeedEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             if num_micro_batches is not None:
-                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_train_mbs)
+                num_micro_batches = max(
+                    num_micro_batches, self.pipe_runner.default_train_mbs
+                )
             instr_set = PipeTrainSetForDeepSpeed(self.ds_engine)
             return self.pipe_runner.train_batch(
                 instr_set=instr_set,
@@ -216,14 +218,19 @@ class ReaLDeepSpeedEngine:
                 num_micro_batches = 1
             self.ds_engine._config.gradient_accumulation_steps = num_micro_batches
             self.ds_engine.set_gradient_accumulation_boundary(False)
-            if isinstance(self.ds_engine.optimizer, (DeepSpeedZeroOptimizer, DeepSpeedZeroOptimizer_Stage3)):
+            if isinstance(
+                self.ds_engine.optimizer,
+                (DeepSpeedZeroOptimizer, DeepSpeedZeroOptimizer_Stage3),
+            ):
                 self.ds_engine.optimizer.gradient_accumulation_steps = num_micro_batches
 
             stat = collections.defaultdict(int)
             for i, mb_input in enumerate(input_.split(num_micro_batches)):
                 if i == num_micro_batches - 1:
                     self.ds_engine.set_gradient_accumulation_boundary(True)
-                input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                input_lens = torch.cat(
+                    mb_input.seqlens["packed_input_ids"], dim=0
+                ).cuda()
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
                 model_output = self.ds_engine(

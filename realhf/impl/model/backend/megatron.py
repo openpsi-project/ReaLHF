@@ -1,8 +1,8 @@
+import collections
 import dataclasses
 import math
 from contextlib import contextmanager
 from typing import *
-import collections
 
 import torch
 import torch.distributed as dist
@@ -733,7 +733,9 @@ class ReaLMegatronEngine:
             self.engine.zero_grad()
             if constants.pipe_parallel_world_size() > 1:
                 if num_micro_batches is not None:
-                    num_micro_batches = max(num_micro_batches, self.pipe_runner.default_train_mbs)
+                    num_micro_batches = max(
+                        num_micro_batches, self.pipe_runner.default_train_mbs
+                    )
                 instr_set = PipeTrainInstrSetForMegatron(self.engine, num_micro_batches)
                 return self.pipe_runner.train_batch(
                     instr_set=instr_set,
@@ -751,9 +753,13 @@ class ReaLMegatronEngine:
                 for i, mb_input in enumerate(input_.split(num_micro_batches)):
                     if i == num_micro_batches - 1:
                         no_sync_ctx.__exit__(None, None, None)
-                    input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                    input_lens = torch.cat(
+                        mb_input.seqlens["packed_input_ids"], dim=0
+                    ).cuda()
                     max_seqlen = int(max(input_lens))
-                    cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+                    cu_seqlens = torch.nn.functional.pad(
+                        input_lens.cumsum(0), (1, 0)
+                    ).int()
                     model_output = self.engine.ddp(
                         packed_input_ids=mb_input.data["packed_input_ids"],
                         cu_seqlens=cu_seqlens,
