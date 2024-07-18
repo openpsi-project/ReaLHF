@@ -227,7 +227,9 @@ def gradient_accumulation_fusion() -> bool:
         import fused_weight_gradient_mlp_cuda
     except ImportError:
         _grad_accum_fusion_available = False
-    return _grad_accum_fusion_available and grid().topology().gradient_accumulation_fusion
+    return (
+        _grad_accum_fusion_available and grid().topology().gradient_accumulation_fusion
+    )
 
 
 def max_prompt_len() -> int:

@@ -52,7 +52,7 @@ class GRPOConfig(CommonExperimentConfig):
     group_size: int = 4
 
     actor_train_n_mbs: int = 1
-    actor_gen_n_mbs: int = 1 
+    actor_gen_n_mbs: int = 1
     rew_inf_n_mbs: int = 1
     ref_inf_n_mbs: int = 1
 

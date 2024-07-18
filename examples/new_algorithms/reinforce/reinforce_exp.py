@@ -47,7 +47,7 @@ class ReinforceConfig(CommonExperimentConfig):
 
     actor_train_n_mbs: int = 1
     gen_n_mbs: int = 1
-    rew_inf_n_mbs: int =1
+    rew_inf_n_mbs: int = 1
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
