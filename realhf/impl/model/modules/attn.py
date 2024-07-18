@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.utils.checkpoint
 
 import realhf.base.logging as logging
+import realhf.base.constants as constants
 from realhf.impl.model.parallelism.model_parallel.modules import RowParallelLinear
 from realhf.impl.model.utils.functional import (
     apply_rotary_varlen,
@@ -54,9 +55,6 @@ class CausalSelfAttentionLayer(nn.Module):
         rotary_interleaved: bool = False,  # False for LLaMA, GPT-neoX; True for GPT-J
         rotary_scaling: Optional[float] = None,
         rotary_scaling_type: Optional[str] = None,
-        # parallel settings
-        model_parallel: bool = False,
-        gradient_accumulation_fusion: bool = False,
         # device and dtype
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
@@ -70,8 +68,6 @@ class CausalSelfAttentionLayer(nn.Module):
             head_dim=head_dim,
             n_q_heads=n_q_heads,
             n_kv_heads=n_kv_heads,
-            model_parallel=model_parallel,
-            gradient_accumulation_fusion=gradient_accumulation_fusion,
             layer_norm_epsilon=layer_norm_epsilon,
             layer_norm_type=layer_norm_type,
             use_attention_bias=use_attention_bias,
@@ -81,12 +77,12 @@ class CausalSelfAttentionLayer(nn.Module):
             layer_index=layer_index,
         )
 
-        if model_parallel:
+        if constants.model_parallel_world_size() > 1:
             self.c_proj = RowParallelLinear(
                 n_q_heads * head_dim,
                 hidden_dim,
                 bias=use_attn_proj_bias,
-                gradient_accumulation_fusion=gradient_accumulation_fusion,
+                gradient_accumulation_fusion=constants.gradient_accumulation_fusion(),
                 dtype=dtype,
                 device=device,
             )

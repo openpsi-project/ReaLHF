@@ -76,6 +76,11 @@ class MFCDef:
     :param output_key_remap: Remap output keys to let MFC recognize them.
         Keys are identifiers known to the interface and values are ``output_keys``.
     :type output_key_remap: Dict[str, str]
+    :param n_mbs: Number of micro batches when executing this MFC.
+        If None, defaults to 1 if pipeline parallelism is disabled,
+        defaults to 2 * pp_size for train_step and pp_size for generate/inference
+        if pipeline parallelism is enabled.
+    :type n_mbs: int
     :param balanced_dp: Whether to balance the data parallelism such that
         each DP rank will get exactly n_seqs // dp_size sequences.
         If set to False, ReaL will do partition according to the number of tokens.
@@ -113,6 +118,7 @@ class MFCDef:
     output_keys: Tuple = dataclasses.field(default_factory=tuple)
     output_key_remap: Dict[str, str] = dataclasses.field(default_factory=lambda: {})
 
+    n_mbs: Optional[int] = None
     balanced_dp: bool = False
     log_return_value: bool = False
 

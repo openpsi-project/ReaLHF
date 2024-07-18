@@ -4,6 +4,7 @@ from typing import *
 import torch
 import torch.distributed as dist
 import transformers
+import collections
 
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
@@ -89,15 +90,21 @@ class PipelinableInferenceEngine:
                 num_micro_batches=num_micro_batches,
             )
         else:
-            input_lens = torch.cat(input_.seqlens["packed_input_ids"], dim=0).cuda()
-            max_seqlen = int(max(input_lens))
-            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-            model_output = self.module(
-                packed_input_ids=input_.data["packed_input_ids"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            ).logits
-            _, stat = loss_fn(model_output, input_)
+            if num_micro_batches is None:
+                num_micro_batches = 1
+            stat = collections.defaultdict(int)
+            for mb_input in input_.split(num_micro_batches):
+                input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                max_seqlen = int(max(input_lens))
+                cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+                model_output = self.module(
+                    packed_input_ids=mb_input.data["packed_input_ids"],
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                ).logits
+                _, _stat = loss_fn(model_output, mb_input)
+                for k, v in _stat.items():
+                    stat[k] += v
             return stat
 
     def forward(
@@ -111,15 +118,20 @@ class PipelinableInferenceEngine:
                 num_micro_batches=num_micro_batches,
             )
         else:
-            input_lens = torch.cat(input_.seqlens["packed_input_ids"], dim=0).cuda()
-            max_seqlen = int(max(input_lens))
-            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-            model_output = self.module(
-                packed_input_ids=input_.data["packed_input_ids"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            ).logits
-            return model_output
+            if num_micro_batches is None:
+                num_micro_batches = 1
+            outputs = []
+            for mb_input in input_.split(num_micro_batches):
+                input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                max_seqlen = int(max(input_lens))
+                cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+                model_output = self.module(
+                    packed_input_ids=mb_input.data["packed_input_ids"],
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                ).logits
+                outputs.append(model_output)
+            return torch.cat(outputs, dim=0) if num_micro_batches > 1 else outputs[0]
 
     @torch.no_grad()
     def generate(
@@ -139,17 +151,27 @@ class PipelinableInferenceEngine:
                 gconfig=gconfig,
             )
         else:
-            input_lens = torch.cat(input_.seqlens["packed_input_ids"], dim=0).cuda()
-            max_seqlen = int(max(input_lens))
-            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-            res = self.module.generate(
-                tokenizer=tokenizer,
-                packed_input_ids=input_.data["packed_input_ids"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-                gconfig=gconfig,
-            )
-            return res.sequences, res.scores, res.logits_mask
+            if num_micro_batches is None:
+                num_micro_batches = 1
+            sequences, scores, logits_mask = [], [], []
+            for mb_input in input_.split(num_micro_batches):
+                input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                max_seqlen = int(max(input_lens))
+                cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+                res = self.module.generate(
+                    tokenizer=tokenizer,
+                    packed_input_ids=mb_input.data["packed_input_ids"],
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                    gconfig=gconfig,
+                )
+                sequences.append(res.sequences)
+                scores.append(res.scores)
+                logits_mask.append(res.logits_mask)
+            if num_micro_batches == 1:
+                return sequences[0], scores[0], logits_mask[0]
+            else:
+                return torch.cat(sequences, dim=0), torch.cat(scores, dim=0), torch.cat(logits_mask, dim=0)
 
 
 @dataclasses.dataclass

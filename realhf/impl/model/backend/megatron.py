@@ -742,17 +742,26 @@ class ReaLMegatronEngine:
                     num_micro_batches=num_micro_batches,
                 )
             else:
-                # FIXME: num_micro_batches is ignored here
-                input_lens = torch.cat(input_.seqlens["packed_input_ids"], dim=0).cuda()
-                max_seqlen = int(max(input_lens))
-                cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-                model_output = self.engine.ddp(
-                    packed_input_ids=input_.data["packed_input_ids"],
-                    cu_seqlens=cu_seqlens,
-                    max_seqlen=max_seqlen,
-                ).logits
-                loss, stat = loss_fn(model_output, input_)
-                self.engine.optim.scale_loss(loss).backward()
+                if num_micro_batches is None:
+                    num_micro_batches = 1
+                no_sync_ctx = self.engine.ddp.no_sync()
+                no_sync_ctx.__enter__()
+                _stat = collections.defaultdict(int)
+                for i, mb_input in enumerate(input_.split(num_micro_batches)):
+                    if i == num_micro_batches - 1:
+                        no_sync_ctx.__exit__(None, None, None)
+                    input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                    max_seqlen = int(max(input_lens))
+                    cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+                    model_output = self.engine.ddp(
+                        packed_input_ids=mb_input.data["packed_input_ids"],
+                        cu_seqlens=cu_seqlens,
+                        max_seqlen=max_seqlen,
+                    ).logits
+                    loss, stat = loss_fn(model_output, mb_input)
+                    self.engine.optim.scale_loss(loss).backward()
+                    for k, v in stat.items():
+                        _stat[k] += v
 
                 finalize_grads_megatron(self.engine)
 

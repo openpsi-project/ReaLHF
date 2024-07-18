@@ -4,12 +4,15 @@ import math
 from typing import *
 
 import deepspeed
+import collections
 import torch
 import torch.distributed as dist
 import transformers
 from deepspeed.runtime import zero
 from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
 from deepspeed.runtime.config import DeepSpeedConfig
+from deepspeed.runtime.zero.stage3 import DeepSpeedZeroOptimizer_Stage3
+from deepspeed.runtime.zero.stage_1_and_2 import DeepSpeedZeroOptimizer
 from deepspeed.runtime.engine import (
     MEMORY_OPT_ALLREDUCE_SIZE,
     DeepSpeedEngine,
@@ -207,17 +210,29 @@ class ReaLDeepSpeedEngine:
                 num_micro_batches=num_micro_batches,
             )
         else:
-            # FIXME: num_micro_batches is ignored here
-            input_lens = torch.cat(input_.seqlens["packed_input_ids"], dim=0).cuda()
-            max_seqlen = int(max(input_lens))
-            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-            model_output = self.ds_engine(
-                packed_input_ids=input_.data["packed_input_ids"],
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
-            ).logits
-            loss, stat = loss_fn(model_output, input_)
-            self.ds_engine.backward(loss)
+            if num_micro_batches is None:
+                num_micro_batches = 1
+            self.ds_engine._config.gradient_accumulation_steps = num_micro_batches
+            self.ds_engine.set_gradient_accumulation_boundary(False)
+            if isinstance(self.ds_engine.optimizer, (DeepSpeedZeroOptimizer, DeepSpeedZeroOptimizer_Stage3)):
+                self.ds_engine.optimizer.gradient_accumulation_steps = num_micro_batches
+
+            stat = collections.defaultdict(int)
+            for i, mb_input in enumerate(input_.split(num_micro_batches)):
+                if i == num_micro_batches - 1:
+                    self.ds_engine.set_gradient_accumulation_boundary(True)
+                input_lens = torch.cat(mb_input.seqlens["packed_input_ids"], dim=0).cuda()
+                max_seqlen = int(max(input_lens))
+                cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+                model_output = self.ds_engine(
+                    packed_input_ids=mb_input.data["packed_input_ids"],
+                    cu_seqlens=cu_seqlens,
+                    max_seqlen=max_seqlen,
+                ).logits
+                loss, _stat = loss_fn(model_output, mb_input)
+                self.ds_engine.backward(loss)
+                for k, v in _stat.items():
+                    stat[k] += v
             lr_kwargs = {"epoch": version_steps} if version_steps is not None else None
             self.ds_engine.step(lr_kwargs=lr_kwargs)
             return stat

@@ -265,7 +265,7 @@ class ReaLModel(nn.Module):
                 config.vocab_size,
                 bias=False,
                 async_tensor_model_parallel_allreduce=not constants.sequence_parallel(),
-                gradient_accumulation_fusion=config.gradient_accumulation_fusion,
+                gradient_accumulation_fusion=constants.gradient_accumulation_fusion(),
                 device=device,
                 dtype=dtype,
             )
