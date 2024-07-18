@@ -28,6 +28,8 @@ class SFTConfig(CommonExperimentConfig):
     :type allocation: AllocationConfig
     :param dataset: Dataset configuration
     :type dataset: PromptAnswerDatasetConfig
+    :param n_mbs: Number of microbatches.
+    :type n_mbs: int
     """
 
     model: ModelTrainEvalConfig = dataclasses.field(
@@ -37,6 +39,7 @@ class SFTConfig(CommonExperimentConfig):
     dataset: PromptAnswerDatasetConfig = dataclasses.field(
         default_factory=PromptAnswerDatasetConfig
     )
+    n_mbs: int = 1
 
     @property
     def models(self):
@@ -49,6 +52,7 @@ class SFTConfig(CommonExperimentConfig):
         rpc = MFCDef(
             n_seqs=self.dataset.train_bs_n_seqs,
             name="trainDefault",
+            n_mbs=self.n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=ModelInterfaceAbstraction("sft"),
             model_name="default",

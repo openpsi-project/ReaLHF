@@ -188,6 +188,18 @@ class PPOConfig(CommonExperimentConfig):
     :type dataset: PromptOnlyDatasetConfig
     :param ppo: Configuration for the PPO algorithm.
     :type ppo: PPOHyperparameters
+    :param actor_train_n_mbs: Number of minibatches for TrainActor.
+    :type actor_train_n_mbs: int
+    :param critic_train_n_mbs: Number of minibatches for TrainCritic.
+    :type critic_train_n_mbs: int
+    :param actor_gen_n_mbs: Number of minibatches for Rollout.
+    :type actor_gen_n_mbs: int
+    :param critic_inf_n_mbs: Number of minibatches for InfValues.
+    :type critic_inf_n_mbs: int
+    :param rew_inf_n_mbs: Number of minibatches for InfReward.
+    :type rew_inf_n_mbs: int
+    :param ref_inf_n_mbs: Number of minibatches for InfRef.
+    :type ref_inf_n_mbs: int
     """
 
     is_sft_lora: bool = False
@@ -212,6 +224,13 @@ class PPOConfig(CommonExperimentConfig):
     critic_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
     rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
     ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+
+    actor_train_n_mbs: int = 1
+    critic_train_n_mbs: int = 1
+    actor_gen_n_mbs: int = 1
+    critic_inf_n_mbs: int = 1
+    rew_inf_n_mbs: int = 1
+    ref_inf_n_mbs: int = 1
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
@@ -292,6 +311,7 @@ class PPOConfig(CommonExperimentConfig):
         rollout = MFCDef(
             name="actor_gen",
             model_name="actor",
+            n_mbs=self.actor_gen_n_mbs,
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -311,6 +331,7 @@ class PPOConfig(CommonExperimentConfig):
         inf_reward = MFCDef(
             name="rew_inf",
             model_name="reward",
+            n_mbs=self.rew_inf_n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
@@ -328,6 +349,7 @@ class PPOConfig(CommonExperimentConfig):
         inf_ref_logits = MFCDef(
             name="ref_inf",
             model_name="ref",
+            n_mbs=self.ref_inf_n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
             model_path=self.ref.path,
@@ -340,6 +362,7 @@ class PPOConfig(CommonExperimentConfig):
         inf_values = MFCDef(
             name="critic_inf",
             model_name="critic",
+            n_mbs=self.critic_inf_n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
             model_type=self.critic.type,
@@ -364,6 +387,7 @@ class PPOConfig(CommonExperimentConfig):
         train_actor = MFCDef(
             name="actor_train",
             model_name="actor",
+            n_mbs=self.actor_train_n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -376,6 +400,7 @@ class PPOConfig(CommonExperimentConfig):
         train_critic = MFCDef(
             name="critic_train",
             model_name="critic",
+            n_mbs=self.critic_train_n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,
             model_type=self.critic.type,

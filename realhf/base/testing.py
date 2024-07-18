@@ -180,6 +180,7 @@ def init_global_constants(
     msid2mwid=None,
     sequence_parallel=False,
     gradient_checkpointing=True,
+    gradient_accumulation_fusion=False,
     max_prompt_len=None,
 ):
     model_name = model_name if model_name is not None else MODEL_NAME
@@ -191,6 +192,7 @@ def init_global_constants(
             num_pp=num_pp,
             sequence_parallel=sequence_parallel,
             gradient_checkpointing=gradient_checkpointing,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
             max_prompt_len=max_prompt_len,
         )
         ws = num_dp * num_mp * num_pp

@@ -37,6 +37,8 @@ class RWConfig(CommonExperimentConfig):
     :type allocation: AllocationConfig
     :param dataset: Dataset configuration.
     :type dataset: PairedComparisonDatasetConfig
+    :param n_mbs: Number of microbatches.
+    :type n_mbs: int
     """
 
     is_sft_lora: bool = False
@@ -49,6 +51,7 @@ class RWConfig(CommonExperimentConfig):
     dataset: PairedComparisonDatasetConfig = dataclasses.field(
         default_factory=PairedComparisonDatasetConfig
     )
+    n_mbs: int = 1
 
     def __post_init__(self):
         assert (
@@ -67,6 +70,7 @@ class RWConfig(CommonExperimentConfig):
         interface = ModelInterfaceAbstraction("paired_rw")
         rpc = MFCDef(
             name="rwTrain",
+            n_mbs=self.n_mbs,
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,

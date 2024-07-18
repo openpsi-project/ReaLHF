@@ -51,6 +51,11 @@ class GRPOConfig(CommonExperimentConfig):
     ppo: PPOHyperparameters = dataclasses.field(default_factory=PPOHyperparameters)
     group_size: int = 4
 
+    actor_train_n_mbs: int = 1
+    actor_gen_n_mbs: int = 1 
+    rew_inf_n_mbs: int = 1
+    ref_inf_n_mbs: int = 1
+
     def __post_init__(self):
 
         self.ppo_kwargs = dict(
@@ -111,6 +116,7 @@ class GRPOConfig(CommonExperimentConfig):
         rollout = MFCDef(
             name=f"actor_gen",
             model_name="actor",
+            n_mbs=self.actor_gen_n_mbs,
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -130,6 +136,7 @@ class GRPOConfig(CommonExperimentConfig):
         inf_reward = MFCDef(
             name=f"rew_inf",
             model_name="reward",
+            n_mbs=self.rew_inf_n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
@@ -147,6 +154,7 @@ class GRPOConfig(CommonExperimentConfig):
         inf_ref_logits = MFCDef(
             name=f"ref_inf",
             model_name="ref",
+            n_mbs=self.ref_inf_n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
             model_path=self.ref.path,
@@ -173,6 +181,7 @@ class GRPOConfig(CommonExperimentConfig):
         train_actor = MFCDef(
             name="actor_train",
             model_name="actor",
+            n_mbs=self.actor_train_n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
             model_path=self.actor.path,

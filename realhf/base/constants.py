@@ -222,14 +222,12 @@ def sequence_parallel() -> bool:
 
 
 def gradient_accumulation_fusion() -> bool:
-    # FIXME: change it to be an option since ds cannot use it
     _grad_accum_fusion_available = True
     try:
         import fused_weight_gradient_mlp_cuda
     except ImportError:
         _grad_accum_fusion_available = False
-    print(">>>>>>>>>>>>>>>>>>>>>>>>>>", _grad_accum_fusion_available)
-    return _grad_accum_fusion_available
+    return _grad_accum_fusion_available and grid().topology().gradient_accumulation_fusion
 
 
 def max_prompt_len() -> int:

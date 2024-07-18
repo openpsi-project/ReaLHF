@@ -293,6 +293,7 @@ class PipeModelDataParallelTopology(ProcessTopology):
         num_dp: int,
         sequence_parallel: bool,
         gradient_checkpointing: bool,
+        gradient_accumulation_fusion: bool,
         max_prompt_len: Optional[int] = None,
     ):
         super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
@@ -300,6 +301,7 @@ class PipeModelDataParallelTopology(ProcessTopology):
         self.sequence_parallel = sequence_parallel
         self.gradient_checkpointing = gradient_checkpointing
         self.max_prompt_len = max_prompt_len
+        self.gradient_accumulation_fusion = gradient_accumulation_fusion
 
 
 class ParallelGrid:

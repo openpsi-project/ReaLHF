@@ -425,6 +425,7 @@ class CommonExperimentConfig(Experiment):
                         )
                         else None
                     ),
+                    gradient_accumulation_fusion=model_cfg.backend == "megatron",
                 )
 
                 if any(

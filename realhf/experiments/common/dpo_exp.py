@@ -55,6 +55,10 @@ class DPOConfig(CommonExperimentConfig):
     :type dataset: PairedComparisonDatasetConfig
     :param beta: KL regularization coefficient.
     :type beta: float
+    :param actor_train_n_mbs: Number of microbatches for training the primary LLM.
+    :type actor_train_n_mbs: int
+    :param ref_inf_n_mbs: Number of microbatches for inference on the reference LLM.
+    :type ref_inf_n_mbs: int
     """
 
     is_sft_lora: bool = False
@@ -72,6 +76,9 @@ class DPOConfig(CommonExperimentConfig):
         default_factory=PairedComparisonDatasetConfig
     )
     beta: float = 0.1
+
+    actor_train_n_mbs: int = 1
+    ref_inf_n_mbs: int = 1
 
     def __post_init__(self):
         assert (
@@ -95,6 +102,7 @@ class DPOConfig(CommonExperimentConfig):
         )
         ref_inf = MFCDef(
             name="ref_inf",
+            n_mbs=self.ref_inf_n_mbs,
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
@@ -109,6 +117,7 @@ class DPOConfig(CommonExperimentConfig):
         )
         dpo = MFCDef(
             name="actor_train",
+            n_mbs=self.actor_train_n_mbs,
             model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,

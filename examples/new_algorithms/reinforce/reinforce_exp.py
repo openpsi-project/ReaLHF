@@ -45,6 +45,10 @@ class ReinforceConfig(CommonExperimentConfig):
         default_factory=AllocationConfig
     )
 
+    actor_train_n_mbs: int = 1
+    gen_n_mbs: int = 1
+    rew_inf_n_mbs: int =1
+
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
     )
@@ -105,6 +109,7 @@ class ReinforceConfig(CommonExperimentConfig):
         sample_gen = MFCDef(
             name="sample_gen",
             model_name="actor",
+            n_mbs=self.gen_n_mbs,
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -122,6 +127,7 @@ class ReinforceConfig(CommonExperimentConfig):
         greedy_gen = MFCDef(
             name="greedy_gen",
             model_name="actor",
+            n_mbs=self.gen_n_mbs,
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -139,6 +145,7 @@ class ReinforceConfig(CommonExperimentConfig):
         sample_rw = MFCDef(
             name="sample_rw",
             model_name="reward",
+            n_mbs=self.rew_inf_n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
@@ -152,6 +159,7 @@ class ReinforceConfig(CommonExperimentConfig):
             model_name="reward",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
+            n_mbs=self.rew_inf_n_mbs,
             model_type=self.rew.type,
             model_path=self.rew.path,
             input_keys=["greedy_packed_input_ids"],
@@ -164,6 +172,7 @@ class ReinforceConfig(CommonExperimentConfig):
         actor_train = MFCDef(
             name="actor_train",
             model_name="actor",
+            n_mbs=self.actor_train_n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
             model_path=self.actor.path,

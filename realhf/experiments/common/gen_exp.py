@@ -56,6 +56,7 @@ class GenerationConfig(CommonExperimentConfig):
         )
         gen = MFCDef(
             name="gen",
+            n_mbs=1,
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.model,

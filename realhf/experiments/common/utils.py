@@ -23,6 +23,7 @@ logger = logging.getLogger("Experiment Common Utils", "benchmark")
 def get_topo(
     parallel: ParallelismConfig,
     gradient_checkpointing: bool,
+    gradient_accumulation_fusion: bool,
     max_prompt_len: Optional[int] = None,
 ) -> PipeModelDataParallelTopology:
     return PipeModelDataParallelTopology(
@@ -32,6 +33,7 @@ def get_topo(
         sequence_parallel=parallel.use_sequence_parallel,
         gradient_checkpointing=gradient_checkpointing,
         max_prompt_len=max_prompt_len,
+        gradient_accumulation_fusion=gradient_accumulation_fusion,
     )
 
 
