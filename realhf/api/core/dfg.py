@@ -23,10 +23,16 @@ class OffloadHook:
 
 @dataclasses.dataclass
 class ParamReallocHook:
+    """Weights will be sent from source to target.
+
+    Only one of source and target should be given. The other is the model name
+    of the hooked MFC.
+
+    Weights will be updated as `target = eta * source + (1 - eta) * target`.
+    """
     source: Optional[ModelName] = None
     target: Optional[ModelName] = None
-    interval: int = 1
-
+    eta: float = 1.0
 
 
 RPCHook = Union[OffloadHook, ParamReallocHook]

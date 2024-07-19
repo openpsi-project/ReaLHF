@@ -771,8 +771,19 @@ class ReaLModel(nn.Module):
 
         return rtgt.to_layers_handle, to_contiguous_param, comm_volume
 
-    def patch_reparallelization(self, x):
-        self.layers, self.contiguous_param = x
+    def patch_reparallelization(self, x, eta):
+        if eta == 1.0:
+            self.layers, self.contiguous_param = x
+        else:
+            _, new_param = x
+            self.contiguous_param = eta * new_param + (1 - eta) * self.contiguous_param
+            map_param_to_contigous_memory(
+                self.layers,self.config,
+                self.head_param_point_to_embedding,
+                param_spec=self._param_spec,
+                contiguous_param=self.contiguous_param,
+                allocate_only=False,
+            )
         assert self.layers is not None
         assert self.contiguous_param is not None
         assert self.contiguous_param.shape[0] > 0
