@@ -59,15 +59,11 @@ class SequentialMLP(torch.nn.Module):
         # Insert zero at the begining for offset index's convenience
         zero_tensor = torch.zeros(1, dtype=torch.long, device=cumsum_num_tokens.device)
         cumsum_num_tokens = torch.cat((zero_tensor, cumsum_num_tokens))
-        # print(f"rank {constants.model_parallel_rank()} {tokens_per_expert}")
 
         for expert_num, expert in enumerate(self.local_experts):
             start = cumsum_num_tokens[expert_num]
             end = cumsum_num_tokens[expert_num + 1]
-            # print("permuted local hidden states shape {}".format(permuted_local_hidden_states.shape))
-            # print(expert_num, start, end)
             hidden = permuted_local_hidden_states[start:end]
-            # print(f"hidden shape {hidden.shape}")
             output = expert(hidden)
             output_local[start:end] = output
 

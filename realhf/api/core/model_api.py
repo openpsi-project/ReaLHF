@@ -70,7 +70,8 @@ class GenerationHyperparameters:
 
 @dataclasses.dataclass
 class ReaLMoEConfig:
-    """Configuration related to MoE models
+    """Configuration related to MoE models.
+
     :param num_experts: Number of experts in the mixture of experts.
     :type num_experts: int
     :param top_k: The number of experts to route per-token, can be also

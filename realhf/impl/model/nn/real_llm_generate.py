@@ -90,7 +90,6 @@ def genstep(
     distrb = torch.distributions.Categorical(logits=next_token_logits)
     next_tokens = distrb.mode if gconfig.greedy else distrb.sample()
     logprob = distrb.log_prob(next_tokens)
-    # print(f"genstep logprob {logprob.shape} {logprob}")
 
     if constants.model_parallel_world_size() > 1:
         if constants.model_parallel_rank() > 0:
@@ -107,7 +106,6 @@ def genstep(
             torch.distributed.ReduceOp.SUM,
             group=constants.model_parallel_group(),
         )
-    # print(f"after mp allreduce genstep logprob {logprob.shape} {logprob}")
 
     if tokenizer.eos_token_id is not None:
         if tokenizer.pad_token_id is None:

@@ -106,7 +106,6 @@ class DeviceMesh:
         unique_rows = np.unique(rows)
         for row in unique_rows:
             this_cols = cols[rows == row]
-            # print(row, this_cols)
             assert (
                 self.n_gpus_per_node % min_n_gpus == 0
                 or min_n_gpus % self.n_gpus_per_node == 0
@@ -114,7 +113,6 @@ class DeviceMesh:
             n_gpus = min_n_gpus
             while n_gpus < min(self.n_gpus_per_node, np.sum(self.mapping)):
                 for start in range(np.min(this_cols), self.n_gpus_per_node, n_gpus):
-                    # print(row, start, start+n_gpus)
                     sub_mapping = np.zeros(
                         (self.n_nodes, self.n_gpus_per_node), dtype=np.int32
                     )

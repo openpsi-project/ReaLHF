@@ -6,11 +6,14 @@ import torch
 import torch.nn as nn
 
 import realhf.base.constants as constants
+import realhf.base.logging as logging
 from realhf.api.core.model_api import ReaLModelConfig
 from realhf.impl.model.modules.mlp import GemmaRMSNorm, LlamaRMSNorm
 from realhf.impl.model.modules.moe.experts import GroupedMLP, SequentialMLP
 from realhf.impl.model.modules.moe.router import TopKRouter
 from realhf.impl.model.modules.moe.token_dispatcher import MoETokenDispatcher
+
+logger = logging.getLogger(__name__)
 
 
 class LayerNormMoELayer(torch.nn.Module):
@@ -53,7 +56,7 @@ class LayerNormMoELayer(torch.nn.Module):
             and not constants.sequence_parallel()
             and not self.config.moe.use_grouped_gemm
         ):
-            raise ValueError(
+            logger.warning(
                 "During training, performance may degrade if MoE and tensor parallelism"
                 "are enabled without also enabling sequence parallelism."
             )
