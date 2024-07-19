@@ -162,7 +162,8 @@ def allocate(
 
 @numba.njit
 def partition_balanced(nums: np.ndarray, k: int, min_size: int = 1):
-    """Partition an array into k subarrays with a minimum absolute difference of sums and minimum subarray size.
+    """Partition an array into k subarrays with a minimum absolute difference
+    of sums and minimum subarray size.
 
     Dynamic programming solution.
 

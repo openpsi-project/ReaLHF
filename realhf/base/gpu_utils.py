@@ -19,7 +19,10 @@ GLOBAL_PROCESS_GROUP_NAME = "master"
 
 
 def gpu_count():
-    """Returns the number of gpus on a node. Ad-hoc to frl cluster."""
+    """Returns the number of gpus on a node.
+
+    Ad-hoc to frl cluster.
+    """
     if platform.system() == "Darwin":
         return 0
     elif platform.system() == "Windows":
@@ -40,7 +43,10 @@ def gpu_count():
 
 
 def set_cuda_device(device):
-    """Set the default cuda-device. Useful on multi-gpu nodes. Should be called in every gpu-thread."""
+    """Set the default cuda-device.
+
+    Useful on multi-gpu nodes. Should be called in every gpu-thread.
+    """
     # logger.info(f"Setting device to {device}.")
     if device != "cpu":
         import torch

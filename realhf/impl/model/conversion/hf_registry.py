@@ -275,6 +275,8 @@ class HFModelRegistry:
 
         hf_sd = self.sd_to_hf_converter(cpu_sd, model.config)
         hf_config = self.config_to_hf_converter(model.config)
+        hf_config.architectures = [self.hf_cls_name]
+        hf_config.name_or_path = str(save_dir)
 
         param_size = sum(
             [value.numel() * value.element_size() for value in hf_sd.values()]

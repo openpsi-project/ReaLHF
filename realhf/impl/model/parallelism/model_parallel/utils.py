@@ -63,8 +63,8 @@ def ensure_divisibility(numerator, denominator):
 
 
 def divide(numerator, denominator):
-    """Ensure that numerator is divisible by the denominator and return
-    the division value."""
+    """Ensure that numerator is divisible by the denominator and return the
+    division value."""
     ensure_divisibility(numerator, denominator)
     return numerator // denominator
 
@@ -109,7 +109,6 @@ def split_tensor_into_1d_equal_chunks(tensor, new_buffer=False):
         new_buffer (bool): If True, returns a new Tensor.
                            If False, returns a view into the existing Tensor.
                            Default is False
-
     """
     partition_size = torch.numel(tensor) // model_parallel_world_size()
     start_index = partition_size * model_parallel_rank()
@@ -178,8 +177,8 @@ class VocabUtility:
 
 
 def assert_viewless_tensor(tensor, extra_msg=None):
-    """Assert that a tensor is not a view (i.e., its '._base' field is
-    not set)."""
+    """Assert that a tensor is not a view (i.e., its '._base' field is not
+    set)."""
     if isinstance(tensor, list):
         [assert_viewless_tensor(t) for t in tensor]
         return tensor
@@ -196,8 +195,8 @@ def assert_viewless_tensor(tensor, extra_msg=None):
 def safely_set_viewless_tensor_data(tensor, new_data_tensor):
     """Safely set tensor's '.data' field.
 
-    Check first that the tensor is viewless (i.e., '._base' not set). If not,
-    raise an exception.
+    Check first that the tensor is viewless (i.e., '._base' not set). If
+    not, raise an exception.
     """
     assert_viewless_tensor(
         tensor,

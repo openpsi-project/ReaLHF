@@ -13,6 +13,7 @@ from realhf.api.quickstart.model import (
     ParallelismConfig,
     degree_eq,
     get_real_model_config,
+    parallelism_eq,
 )
 from realhf.base import logging
 from realhf.base.topology import PipeModelDataParallelTopology
@@ -133,7 +134,7 @@ def resolve_replica_ids(rpc_allocs: List[RPCAllocation]):
             first_device_mesh[rpc.role] = alloc.device_mesh
             first_parallel[rpc.role] = alloc.parallel
             continue
-        if alloc.device_mesh != first_device_mesh[rpc.role] or not degree_eq(
+        if alloc.device_mesh != first_device_mesh[rpc.role] or not parallelism_eq(
             alloc.parallel, first_parallel[rpc.role]
         ):
             role_cnt[rpc.role] += 1
@@ -157,7 +158,7 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                 if rpc.role != other.rpc.role:
                     continue
                 if (
-                    degree_eq(parallel, other.parallel)
+                    parallelism_eq(parallel, other.parallel)
                     and device_mesh == other.device_mesh
                 ):
                     continue

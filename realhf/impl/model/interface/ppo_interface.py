@@ -32,9 +32,8 @@ def _ppo_actor_loss_from_model_outputs(
     early_stop_imp_ratio: Optional[float],  # const
     early_stop_kl: Optional[float],  # const
 ) -> Tuple[torch.FloatTensor, Dict]:
-    """Loss function for ppo actor step, all inputs should be splitted into pipeline micro batches,
-    returns loss and logging stats.
-    """
+    """Loss function for ppo actor step, all inputs should be splitted into
+    pipeline micro batches, returns loss and logging stats."""
     logits_mask = input_.data["packed_logits_mask"]
     packed_input_ids = input_.data["packed_input_ids"]
     cu_seqlens = (

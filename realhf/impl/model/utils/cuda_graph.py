@@ -45,8 +45,9 @@ def capture_func(
     force_recapture: bool = False,
     no_grad: bool = False,
 ) -> Tuple[torch.cuda.CUDAGraph, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
-    """Capture a function with cuda graph, store the graph and input/output buffers by name.
-    The input/output metadata should match the inputs and outputs of function.
+    """Capture a function with cuda graph, store the graph and input/output
+    buffers by name. The input/output metadata should match the inputs and
+    outputs of function.
 
     :param name: The identifier of the CUDAGraph to be captured/reused.
     :type name: str

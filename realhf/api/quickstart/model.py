@@ -17,12 +17,14 @@ class ParallelismConfig:
 
     :param model_parallel_size: Tensor-model parallelism size.
     :type model_parallel_size: int
-    :param pipeline_parallel_size: The number of pipeline parallelism stages.
+    :param pipeline_parallel_size: The number of pipeline parallelism
+        stages.
     :type pipeline_parallel_size: int
-    :param data_parallel_size: Data parallelism size for ZeRO optimization.
+    :param data_parallel_size: Data parallelism size for ZeRO
+        optimization.
     :type data_parallel_size: int
-    :param use_sequence_parallel: Whether to use sequence parallelism
-        in Megatron combined with tensor-model parallelism.
+    :param use_sequence_parallel: Whether to use sequence parallelism in
+        Megatron combined with tensor-model parallelism.
     :type use_sequence_parallel: bool
     """
 
@@ -50,14 +52,14 @@ class ParallelismConfig:
         )
 
 
-def degree_eq(one: ParallelismConfig, other: ParallelismConfig):
-    # NOTE: We only want to know whether the degree or the sharding strategy is the same
-    # for parameter reallocation. We use this function to decide whether to use different
-    # model names.
+def parallelism_eq(this, other):
+    # NOTE: We write this function because
+    # 1) we don't want to compare sequence_parallelism (it's irrelevant to parameter reallocation)
+    # 2) implementing this function as a method of ParallelismConfig would cause a OmegaConf bug
     return (
-        (one.model_parallel_size == other.model_parallel_size)
-        and (one.pipeline_parallel_size == other.pipeline_parallel_size)
-        and (one.data_parallel_size == other.data_parallel_size)
+        (this.model_parallel_size == other.model_parallel_size)
+        and (this.pipeline_parallel_size == other.pipeline_parallel_size)
+        and (this.data_parallel_size == other.data_parallel_size)
     )
 
 
@@ -73,7 +75,8 @@ class OptimizerConfig:
 
     For models that will not be trained, its type should be "empty".
 
-    :param type: Optimizer type. Currently only adam and empty optimizer are supported.
+    :param type: Optimizer type. Currently only adam and empty optimizer
+        are supported.
     :type type: str
     :param lr: Learning rate.
     :type lr: float
@@ -85,17 +88,17 @@ class OptimizerConfig:
     :type beta2: float
     :param eps: Adam epsilon in the denominator.
     :type eps: float
-    :param min_lr_ratio: Minimum learning rate ratio after learning rate annealing.
-        Should be in the interval of [0.0, 1.0].
+    :param min_lr_ratio: Minimum learning rate ratio after learning rate
+        annealing. Should be in the interval of [0.0, 1.0].
     :type min_lr_ratio: float
-    :param lr_scheduler_type: Learning rate scheduler type.
-        One of "linear", "cosine", "constant".
+    :param lr_scheduler_type: Learning rate scheduler type. One of
+        "linear", "cosine", "constant".
     :type lr_scheduler_type: str
-    :param warmup_steps_proportion: Proportion of total training steps to warm up.
-        Should be in the interval of [0.0, 1.0].
+    :param warmup_steps_proportion: Proportion of total training steps
+        to warm up. Should be in the interval of [0.0, 1.0].
     :type warmup_steps_proportion: float
-    :param offload: Whether to offload optimizer to CPU.
-        Only valid for the deepspeed backend.
+    :param offload: Whether to offload optimizer to CPU. Only valid for
+        the deepspeed backend.
     :type offload: bool
     """
 
@@ -127,8 +130,7 @@ class OptimizerConfig:
 
 @dataclasses.dataclass
 class ModelTrainEvalConfig:
-    """
-    Model (or LLM) runtime configuration in ReaL.
+    """Model (or LLM) runtime configuration in ReaL.
 
     We use a customized model class instead of HuggingFace's.
     Our customized model has the following highlights:

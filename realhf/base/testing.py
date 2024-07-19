@@ -61,6 +61,7 @@ class StandaloneTestingProcess(mp.Process):
 
         self.expr_name = expr_name if expr_name is not None else _DEFAULT_EXPR_NAME
         self.trial_name = trial_name if trial_name is not None else _DEFAULT_TRIAL_NAME
+        self.dist_backend = dist_backend
 
         self.func = func
         self.args = args

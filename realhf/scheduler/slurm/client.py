@@ -114,6 +114,7 @@ class SlurmSchedulerClient(SchedulerClient):
 
     def __allocate_and_commit_pending_jobs(self):
         """Allocate resources to all pending job specs.
+
         Generate hostfiles for each job info
         """
         start_time = time.monotonic()

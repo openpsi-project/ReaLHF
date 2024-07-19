@@ -62,8 +62,9 @@ def intervals_partition_fn(
 ) -> Union[List[torch.Tensor], torch.Tensor]:
     """Get the intervals of a MP-partitioned tensor in the flatten view.
 
-    For example, if a tensor of shape (2, 4) is partitioned along the second dimension
-    into 2 parts, then the intervals are [(0, 2), (2, 4)].
+    For example, if a tensor of shape (2, 4) is partitioned along the
+    second dimension into 2 parts, then the intervals are [(0, 2), (2,
+    4)].
     """
     assert mp_rank is not None
     param_size = int(np.prod(shape))
@@ -132,7 +133,8 @@ def mp_partition_key(
         Union[List[torch.Tensor], torch.Tensor],
     ] = tensor_slice_partition_fn,
 ) -> torch.Tensor:
-    """Partition a parameter of ReaLModel with name `key` by the method `partition_fn`."""
+    """Partition a parameter of ReaLModel with name `key` by the method
+    `partition_fn`."""
     if any([ek in key for ek in EMBEDDING_KEYS]):
         assert "weight" in key
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)

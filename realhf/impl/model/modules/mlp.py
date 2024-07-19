@@ -441,9 +441,7 @@ class _LlamaRMSNorm(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
-        """
-        LlamaRMSNorm is equivalent to T5LayerNorm
-        """
+        """LlamaRMSNorm is equivalent to T5LayerNorm."""
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size, dtype=dtype, device=device))
         self.variance_epsilon = eps

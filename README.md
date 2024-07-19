@@ -35,8 +35,8 @@ ReaL achieves significantly higher PPO training throughput compared to state-of-
 
 ### Ease of Use
 
-- Seamlessly integrates with HuggingFace checkpoints and inference frameworks like vLLM.
-- Allows launching local or distributed experiments with a single command.
+- Seamlessly integrates with HuggingFace checkpoints and inference frameworks like vLLM. No checkpoint conversion required.
+- Allows launching local or distributed experiments via [Ray](https://docs.ray.io/en/latest/index.html) or [SLURM](https://slurm.schedmd.com/documentation.html) with a single command.
 
 Check out our [tutorial](https://openpsi-project.github.io/ReaLHF/quickstart.html) to reproduce the full RLHF procedure (SFT/RW/PPO) with 4×LLaMA-7B in just **30 minutes**.
 
@@ -44,9 +44,9 @@ Check out our [tutorial](https://openpsi-project.github.io/ReaLHF/quickstart.htm
 
 - Offers versatile configuration customization with Hydra structured config.
 - Supports many commonly used RLHF algorithms, including DPO, PPO, RAFT, and more.
-- Allows the addition of custom algorithms with fewer than 100 lines of code.
+- Allows the addition of custom algorithms (e.g, [ReMax](https://arxiv.org/abs/2310.10505), [GRPO](https://arxiv.org/abs/2402.03300), [SimPO](https://arxiv.org/abs/2405.14734), or [external reward signal](https://github.com/openpsi-project/ReaLHF/blob/main/examples/ppo_sentiment.py)) while maintaining high efficiency with ReaL's infrastructure.
 
-Refer to our [customization guide](https://openpsi-project.github.io/ReaLHF/customization.html) for hands-on examples.
+Refer to our [customization guide](https://openpsi-project.github.io/ReaLHF/customization.html) for [hands-on examples](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/).
 
 ## Getting Started
 

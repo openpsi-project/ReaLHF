@@ -131,7 +131,10 @@ async def gather_all_replies(
     request_ids: List[str],
     verbose: bool = True,
 ) -> List:
-    """Collect responses from multiple streams. Blocking method."""
+    """Collect responses from multiple streams.
+
+    Blocking method.
+    """
     responses = await asyncio.gather(
         *[
             _awaitable_response(stream, pattern=create_exact_match_pattern([req_id]))

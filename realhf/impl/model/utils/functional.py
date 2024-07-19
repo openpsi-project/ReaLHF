@@ -348,7 +348,8 @@ def torch_attn_func(
     softmax_scale: float,
     upcast_unscale: float = 1.0,
 ) -> torch.Tensor:
-    """PyTorch implementation of the attention function with a flash-attn-like realhf.api.
+    """PyTorch implementation of the attention function with a flash-attn-like
+    realhf.api.
 
     We use this function to compare the output of our model and huggingface models.
     Flash-attn/float16/CUDAkernels will all more or less suffer from float point errors.

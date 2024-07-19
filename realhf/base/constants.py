@@ -22,8 +22,10 @@ if TYPE_CHECKING:
 
 class GlobalMemoryBuffer:
     """Global buffer to avoid dynamic memory allocations.
-    Caller should ensure that buffers of the same name
-    are not used concurrently."""
+
+    Caller should ensure that buffers of the same name are not used
+    concurrently.
+    """
 
     def __init__(self):
         self.buffer = {}
@@ -292,7 +294,8 @@ def parallelism_group_ranks():
 
 
 def parallelism_group_size() -> int:
-    """The 3D parallelism group size of a specific model, normally dp_size * pp_size * mp_size."""
+    """The 3D parallelism group size of a specific model, normally dp_size *
+    pp_size * mp_size."""
     import torch.distributed as dist
 
     return dist.get_world_size(group=parallelism_group())

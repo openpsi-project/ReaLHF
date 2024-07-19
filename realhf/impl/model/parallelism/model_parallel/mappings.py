@@ -27,8 +27,8 @@ def _reduce(input_):
 
 
 def _split_along_last_dim(input_):
-    """Split the tensor along its last dimension and keep the
-    corresponding slice."""
+    """Split the tensor along its last dimension and keep the corresponding
+    slice."""
 
     world_size = constants.model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.
@@ -46,8 +46,8 @@ def _split_along_last_dim(input_):
 
 
 def _split_along_first_dim(input_):
-    """Split the tensor along its first dimension and keep the
-    corresponding slice."""
+    """Split the tensor along its first dimension and keep the corresponding
+    slice."""
 
     world_size = constants.model_parallel_world_size()
     # Bypass the function if we are using only 1 GPU.

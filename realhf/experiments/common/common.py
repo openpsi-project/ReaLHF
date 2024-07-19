@@ -88,9 +88,13 @@ class CommonExperimentConfig(Experiment):
 
     - ``pipe_model``\: identical parallelization (like DSChat) with pipe+model parallelism. A world size under 8 will use tensor-model parallelism only.
 
-    :param experiment_name: Name of the experiment. Arbitrary string without "-" and "/", e.g., ``ultra-chat-llama``.
+    :param experiment_name: Name of the experiment.
+        Arbitrary string without "_" and "/", e.g., ``ultra-chat-llama``.
+        Must be provided.
     :type experiment_name: str
-    :param trial_name: Name of the trial. Arbitrary string without "-" and "/", e.g., ``lr1e-3wd0.05``.
+    :param trial_name: Name of the trial.
+        Arbitrary string without "-" and "/", e.g., ``lr1e-3wd0.05``.
+        Must be provided.
     :type trial_name: str
     :param mode: Experiment launching mode. "local", "ray", or "slurm" are supported.
         "ray" mode requires launching the ray cluster with CLI.
@@ -178,8 +182,8 @@ class CommonExperimentConfig(Experiment):
     def rpcs(self) -> Dict[str, MFCDef]:
         """A dict mapping from model function call names to the MFCDef objects.
 
-        Note that model function call names are different from model names.
-        Should be implemented in all subclasses.
+        Note that model function call names are different from model
+        names. Should be implemented in all subclasses.
         """
         raise NotImplementedError(f"rpcs is not implemented in {self.__class__}")
 
@@ -214,9 +218,9 @@ class CommonExperimentConfig(Experiment):
     def eval_dataloader(self) -> DataLoaderAbstraction:
         """The dataloader configuration used for evaluation.
 
-        Reserved to changed the evaluation batch size.
-        Training does not require this property because the batch size
-        is handled in MFC definitions.
+        Reserved to changed the evaluation batch size. Training does not
+        require this property because the batch size is handled in MFC
+        definitions.
         """
         return DataLoaderAbstraction("packed_eval", args=dict(batch_size=128))
 
@@ -234,8 +238,8 @@ class CommonExperimentConfig(Experiment):
     def max_prompt_len(self) -> int:
         """The maximum prompt length for generation.
 
-        Used by CUDAGraph-enabled generation.
-        If no generation is used in the algorithm, this property can be None.
+        Used by CUDAGraph-enabled generation. If no generation is used
+        in the algorithm, this property can be None.
         """
         return None
 
@@ -275,8 +279,8 @@ class CommonExperimentConfig(Experiment):
     def scheduling_setup(self) -> ExperimentScheduling:
         """The resourced occupied by each worker.
 
-        The resource requirements will be sent to SLURM or Ray,
-        while being ignored in the local mode.
+        The resource requirements will be sent to SLURM or Ray, while
+        being ignored in the local mode.
         """
         return ExperimentScheduling(
             master_worker=TasksGroup(

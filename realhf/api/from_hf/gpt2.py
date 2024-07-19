@@ -198,6 +198,7 @@ def to_gpt2_config(config: ReaLModelConfig) -> transformers.GPT2Config:
         layer_norm_epsilon=config.layer_norm_epsilon,
         scale_attn_by_inverse_layer_idx=config.scale_attn_by_inverse_layer_idx,
         scale_attn_weights=config.scale_attn_weights,
+        architectures=["GPT2LMHeadModel"],
     )
 
 

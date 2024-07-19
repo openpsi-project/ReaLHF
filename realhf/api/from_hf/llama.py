@@ -264,6 +264,7 @@ def convert_config_back_llama(
         attention_bias=config.use_attention_bias,
         rope_theta=config.rotary_base,
         rope_scaling=rope_scaling if rope_scaling else None,
+        architectures=["LlamaForCausalLM"],
     )
 
 

@@ -37,20 +37,22 @@ PROCESS_COORD_REGISTRY = {
 
 class ProcessTopology:
     """Manages the mapping of n-dimensional Cartesian coordinates to linear
-    indices. This mapping is used to map the rank of processes to the grid
-    for various forms of parallelism.
+    indices. This mapping is used to map the rank of processes to the grid for
+    various forms of parallelism.
 
-    Each axis of the tensor is accessed by its name. The provided ordering
-    of the axes defines the layout of the topology. ProcessTopology uses a "row-major"
-    layout of the tensor axes, and so axes=['x', 'y'] would map coordinates (x,y) and
-    (x,y+1) to adjacent linear indices. If instead axes=['y', 'x'] was used, coordinates
+    Each axis of the tensor is accessed by its name. The provided
+    ordering of the axes defines the layout of the topology.
+    ProcessTopology uses a "row-major" layout of the tensor axes, and so
+    axes=['x', 'y'] would map coordinates (x,y) and (x,y+1) to adjacent
+    linear indices. If instead axes=['y', 'x'] was used, coordinates
     (x,y) and (x+1,y) would be adjacent.
 
     Some methods return ProcessCoord namedtuples.
     """
 
     def __init__(self, axes, dims):
-        """Create a mapping of n-dimensional tensor coordinates to linear indices.
+        """Create a mapping of n-dimensional tensor coordinates to linear
+        indices.
 
         Arguments:
             axes (list): the names of the tensor axes
@@ -169,7 +171,8 @@ class ProcessTopology:
         raise ValueError(f"rank {rank} not found in topology.")
 
     def get_axis_comm_lists(self, axis):
-        """Construct lists suitable for a communicator group along axis ``axis``.
+        """Construct lists suitable for a communicator group along axis
+        ``axis``.
 
         Example:
             >>> topo = Topo(axes=['pipe', 'data', 'model'], dims=[2, 2, 2])
@@ -209,7 +212,8 @@ class ProcessTopology:
         return lists
 
     def filter_match(self, **filter_kwargs):
-        """Return the list of ranks whose coordinates match the provided criteria.
+        """Return the list of ranks whose coordinates match the provided
+        criteria.
 
         Example:
             >>> X = ProcessTopology(axes=['pipe', 'data', 'model'], dims=[2, 2, 2])
@@ -296,25 +300,24 @@ class PipeModelDataParallelTopology(ProcessTopology):
 
 class ParallelGrid:
     """Implements a grid object that stores the data parallel ranks
-    corresponding to each of the model parallel stages
+    corresponding to each of the model parallel stages.
 
     The grid object organizes the processes in a distributed pytorch job
     into a 2D grid, of stage_id and data_parallel_id.
 
-    self.stage_id and self.data_parallel_id stores the stage id
-    and the data parallel id of current process.
+    self.stage_id and self.data_parallel_id stores the stage id and the
+    data parallel id of current process.
 
-    self.dp_group groups the processes by stage_id.
-    self.dp_group[i], is a list containing all process ranks whose
-    stage_id is i.
+    self.dp_group groups the processes by stage_id. self.dp_group[i], is
+    a list containing all process ranks whose stage_id is i.
 
-    self.p2p_groups stores a list of tuple, where each tuple
-    stores process ranks of adjacent stages for a given data_parallel_id.
-    For example if num_stage is 5 then a tuple [7,8] represents stages [3, 4],
-    with data_parallel id = 1. A stage wrap around will appear as non-adjacent ranks,
-    for example tuple [4,0] with representing wrap-around stage 4 and 0, for
-    data_parallel_id = 0, or similarly [9,5] represents wrapped around stages [4,0]
-    for data_parallel_id = 1.
+    self.p2p_groups stores a list of tuple, where each tuple stores
+    process ranks of adjacent stages for a given data_parallel_id. For
+    example if num_stage is 5 then a tuple [7,8] represents stages [3,
+    4], with data_parallel id = 1. A stage wrap around will appear as
+    non-adjacent ranks, for example tuple [4,0] with representing wrap-
+    around stage 4 and 0, for data_parallel_id = 0, or similarly [9,5]
+    represents wrapped around stages [4,0] for data_parallel_id = 1.
     """
 
     def __init__(
@@ -462,9 +465,8 @@ class ParallelGrid:
         return self._topo.get_coord(rank=self.global_rank).data
 
     def _build_p2p_groups(self):
-        """Groups for sending and receiving activations and gradients across model
-        parallel stages.
-        """
+        """Groups for sending and receiving activations and gradients across
+        model parallel stages."""
         comm_lists = self._topo.get_axis_comm_lists("pipe")
         p2p_lists = []
         for rank in range(self.world_size):
