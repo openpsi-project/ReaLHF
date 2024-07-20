@@ -27,7 +27,7 @@ logger = logging.getLogger("REINFORCE exp", "colored")
 
 @dataclasses.dataclass
 class ReinforceConfig(CommonExperimentConfig):
-    """Reinforce experiment configuration."""
+    """The REINFORCE or ReMax (https://arxiv.org/abs/2310.10505) algorithm."""
 
     actor: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig

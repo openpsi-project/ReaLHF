@@ -423,7 +423,7 @@ class ExperimentConfig:
         sync_param_pairs: List[Tuple[ModelName, ModelName]] = []
         for rpc in self.model_rpcs:
             for hook in rpc._pre_hooks + rpc._post_hooks:
-                if not isinstance(hook, dfg.SyncParamHook):
+                if not isinstance(hook, dfg.ParamReallocHook):
                     continue
                 if (
                     hook.target is not None
@@ -471,18 +471,6 @@ class ExperimentConfig:
                 else:
                     if not (hook.source, rpc.model_name) in sync_param_pairs:
                         sync_param_pairs.append((hook.source, rpc.model_name))
-        param_senders = set([x[0] for x in sync_param_pairs])
-        assert len(set(param_senders)) == len(param_senders)
-        param_receivers = set([x[1] for x in sync_param_pairs])
-        assert len(set(param_receivers)) == len(param_receivers)
-        for a, b in sync_param_pairs:
-            if (b, a) not in sync_param_pairs:
-                raise ValueError(
-                    "The current implementation of parameter synchronization "
-                    f"will throw local parameters away, "
-                    f"so it is necceary to do bidirectional synchronization. "
-                    f"{(a,b)} found in sync param pairs but not {(b,a)}"
-                )
         return sync_param_pairs
 
     def _resolve_model_names_to_instantiate(
