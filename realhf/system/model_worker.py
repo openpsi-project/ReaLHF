@@ -468,7 +468,7 @@ class ModelWorker(worker_base.Worker):
             m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
-        blogger.info(
+        blogger.debug(
             f"Model worker {self.__worker_index} handle "
             f"RPC hook {hook} CPU time {time.perf_counter() - tik:.4f}s."
         )
