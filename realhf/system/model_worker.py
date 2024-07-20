@@ -452,7 +452,7 @@ class ModelWorker(worker_base.Worker):
                 from_model_name
             ):
                 self.__unwrapped_models[to_model_name].patch_reparallelization(
-                    (new_layers, new_param), eta=hook_data['eta']
+                    (new_layers, new_param), eta=hook_data["eta"]
                 )
                 self.__model_is_handle[to_model_name] = False
         elif hook == "offload":
@@ -468,8 +468,10 @@ class ModelWorker(worker_base.Worker):
             m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
-        blogger.info(f"Model worker {self.__worker_index} handle "
-                         f"RPC hook {hook} CPU time {time.perf_counter() - tik:.4f}s.")
+        blogger.info(
+            f"Model worker {self.__worker_index} handle "
+            f"RPC hook {hook} CPU time {time.perf_counter() - tik:.4f}s."
+        )
 
     def handle_all_pre_hooks(self):
         # drain request queues, handle all pending hooks, then recover the queue

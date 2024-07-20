@@ -1,16 +1,15 @@
 import copy
 import dataclasses
 import math
+import pprint
 from typing import *
 
-import numpy as np
-
+from realhf.api.core.dfg import ParamReallocHook
 from realhf.api.core.system_api import ExperimentConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
+from realhf.apps.quickstart import main
 from realhf.experiments.common.ppo_exp import PPOConfig
-from realhf.api.core.dfg import ParamReallocHook
 from realhf.experiments.common.utils import resolve_replica_ids, resolve_rpc_hooks
-import pprint
 
 
 @dataclasses.dataclass
@@ -25,11 +24,16 @@ class PPORefEMAConfig(PPOConfig):
 
         pprint.pprint(rpc_allocs)
 
+        ######### The main difference from normal PPO #########
         def _find_rpc(name):
             return next(alloc.rpc for alloc in rpc_allocs if alloc.rpc.name == name)
 
+        # Remove the offload hook of ref_inf, because
+        # we need to receive parameters from peer GPUs and update it immediately.
         ref_inf = _find_rpc("ref_inf")
         ref_inf._post_hooks = []
+
+        # Add an unidirectional parameter reallocation hook.
         actor_train = _find_rpc("actor_train")
         actor_train.add_post_hook(
             ParamReallocHook(
@@ -37,6 +41,7 @@ class PPORefEMAConfig(PPOConfig):
                 eta=self.ref_ema_eta,
             )
         )
+        ######### The main difference from normal PPO #########
 
         model_worker = self._get_model_worker_configs(rpc_allocs)
 
@@ -47,4 +52,7 @@ class PPORefEMAConfig(PPOConfig):
         )
 
 
-register_quickstart_exp("ppo-ref-mea", PPORefEMAConfig)
+register_quickstart_exp("ppo-ref-ema", PPORefEMAConfig)
+
+if __name__ == "__main__":
+    main()

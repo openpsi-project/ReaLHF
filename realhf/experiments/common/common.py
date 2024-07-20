@@ -312,7 +312,7 @@ class CommonExperimentConfig(Experiment):
                 f"allocated according to n_nodes {self.n_nodes} "
                 f"and n_gpus_per_node {self.n_gpus_per_node}."
             )
-        
+
         self.__check_legal_allocation_options()
 
         rpcs = self.rpcs
@@ -377,8 +377,10 @@ class CommonExperimentConfig(Experiment):
         else:
             raise NotImplementedError()
         return rpc_allocs
-    
-    def _get_model_worker_configs(self, rpc_allocs: List[RPCAllocation]) -> List[ModelWorker]:
+
+    def _get_model_worker_configs(
+        self, rpc_allocs: List[RPCAllocation]
+    ) -> List[ModelWorker]:
         model_worker = []
         shard_counter = defaultdict(lambda: 0)
 
@@ -457,14 +459,10 @@ class CommonExperimentConfig(Experiment):
                     shard_counter[model_name] += 1
             model_worker.append(mw)
         return model_worker
-    
+
     def initial_setup(self) -> ExperimentConfig:
-        
 
-        
-
-
-        rpc_allocs = self._get_rpc_allocations()        
+        rpc_allocs = self._get_rpc_allocations()
 
         resolve_replica_ids(rpc_allocs)
         resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations

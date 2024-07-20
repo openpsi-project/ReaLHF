@@ -30,6 +30,7 @@ class ParamReallocHook:
 
     Weights will be updated as `target = eta * source + (1 - eta) * target`.
     """
+
     source: Optional[ModelName] = None
     target: Optional[ModelName] = None
     eta: float = 1.0

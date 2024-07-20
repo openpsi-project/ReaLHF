@@ -775,15 +775,20 @@ class ReaLModel(nn.Module):
         if eta == 1.0:
             self.layers, self.contiguous_param = x
         else:
-            _, new_param = x
+            new_layers, new_param = x
             self.contiguous_param = eta * new_param + (1 - eta) * self.contiguous_param
             map_param_to_contigous_memory(
-                self.layers,self.config,
+                self.layers,
+                self.config,
                 self.head_param_point_to_embedding,
                 param_spec=self._param_spec,
                 contiguous_param=self.contiguous_param,
+                layer_idx_offset=self.layer_idx_start,
                 allocate_only=False,
             )
+            dummy_tensor = torch.tensor((), dtype=self.dtype, device=self.device)
+            for p in new_layers.parameters():
+                p.data = dummy_tensor
         assert self.layers is not None
         assert self.contiguous_param is not None
         assert self.contiguous_param.shape[0] > 0
