@@ -44,7 +44,7 @@ Check out our [tutorial](https://openpsi-project.github.io/ReaLHF/quickstart.htm
 
 - Offers versatile configuration customization with Hydra structured config.
 - Supports many commonly used RLHF algorithms, including DPO, PPO, RAFT, and more.
-- Allows the addition of custom algorithms (e.g, [ReMax](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/reinforce), [GRPO](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/grpo), or [external reward signal](https://github.com/openpsi-project/ReaLHF/blob/main/examples/ppo_sentiment.py)) while maintaining high efficiency with ReaL's infrastructure.
+- Allows the addition of custom algorithms (e.g, [ReMax](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/reinforce), [GRPO](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/grpo), [Reference Model EMA](https://github.com/openpsi-project/ReaLHF/blob/main/examples/customized_exp/ppo_ref_ema.py) or [external reward signal](https://github.com/openpsi-project/ReaLHF/blob/main/examples/customized_exp/ppo_sentiment.py)) while maintaining high efficiency with ReaL's infrastructure.
 
 Refer to our [customization guide](https://openpsi-project.github.io/ReaLHF/customization.html) for [hands-on examples](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/).
 
