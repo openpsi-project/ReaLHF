@@ -380,7 +380,6 @@ class ParallelActorHead(ColumnParallelLinear):
             x.pp_input,
             self.weight,
             parallel_output=True,
-            sequence_parallel=self.sequence_parallel,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             bias=self.bias,
         )
@@ -393,7 +392,6 @@ class ParallelActorHead(ColumnParallelLinear):
             x,
             self.weight,
             parallel_output=True,
-            sequence_parallel=self.sequence_parallel,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             bias=self.bias,
         )

@@ -1010,12 +1010,12 @@ def parallel_lm_logits(
     input_: torch.HalfTensor,
     word_embeddings_weight: torch.HalfTensor,
     parallel_output: bool = False,
-    sequence_parallel: bool = False,
     gradient_accumulation_fusion: bool = False,
     bias=None,
 ):
     """LM logits using word embedding weights."""
     model_parallel = constants.model_parallel_world_size() > 1
+    sequence_parallel = constants.sequence_parallel()
     async_grad_allreduce = not sequence_parallel and model_parallel
     # Parallel logits.
     if sequence_parallel:
