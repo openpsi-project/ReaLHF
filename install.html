@@ -261,6 +261,7 @@ Docker images.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">MAX_JOBS</span><span class="o">=</span><span class="m">8</span><span class="w">  </span><span class="c1"># Set the number of parallel jobs for compilation.</span>
 <span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>git+https://github.com/NVIDIA/TransformerEngine.git@v1.4<span class="w"> </span>--no-deps<span class="w"> </span>--no-build-isolation
 <span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span><span class="nv">flash_attn</span><span class="o">==</span><span class="m">2</span>.4.2<span class="w"> </span>--no-build-isolation
+<span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>grouped_gemm<span class="w">  </span><span class="c1"># For MoE</span>
 </pre></div>
 </div>
 <div class="admonition note">
