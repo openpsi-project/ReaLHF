@@ -328,7 +328,6 @@ def topk_softmax_with_capacity(
         (1) If there's no token padding, the shape of probs and indices is [tokens, top_k], indicating the selected experts for each token.
         (2) If there's token padding, the shape of probs and indices is [num_expert, capacity], indicating the tokens selected for each expert.
     """
-    # TODO: Add Pre softmax.
     assert (
         logits.dim() == 2
     ), f"Expected 2D logits [num_tokens, num_experts], got {logits.dim()}."
