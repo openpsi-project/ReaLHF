@@ -303,7 +303,7 @@ class CommonExperimentConfig(Experiment):
             ),
         )
 
-    def initial_setup(self) -> ExperimentConfig:
+    def _get_rpc_allocations(self) -> List[RPCAllocation]:
         if self.allocation_mode == "manual" and self.nodelist is None:
             logger.warning(
                 "Warning: Nodelist is not set in manual allocation mode, "
@@ -313,11 +313,9 @@ class CommonExperimentConfig(Experiment):
                 f"and n_gpus_per_node {self.n_gpus_per_node}."
             )
 
-        self.__check_legal_experiment()
+        self.__check_legal_allocation_options()
 
         rpcs = self.rpcs
-        model_worker = []
-
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"
             # assumes gradient checkpointing for all training RPCs if one is enabled
@@ -378,12 +376,13 @@ class CommonExperimentConfig(Experiment):
             rpc_allocs: List[RPCAllocation] = self._heuristic_rpc_allocation()
         else:
             raise NotImplementedError()
+        return rpc_allocs
 
+    def _get_model_worker_configs(
+        self, rpc_allocs: List[RPCAllocation]
+    ) -> List[ModelWorker]:
+        model_worker = []
         shard_counter = defaultdict(lambda: 0)
-        resolve_replica_ids(rpc_allocs)
-        resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
-
-        pprint.pprint(rpc_allocs)
 
         model_name_to_rpc_allocs: Dict[ModelName, List[RPCAllocation]] = defaultdict(
             list
@@ -453,6 +452,18 @@ class CommonExperimentConfig(Experiment):
                     )
                     shard_counter[model_name] += 1
             model_worker.append(mw)
+        return model_worker
+
+    def initial_setup(self) -> ExperimentConfig:
+
+        rpc_allocs = self._get_rpc_allocations()
+
+        resolve_replica_ids(rpc_allocs)
+        resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
+
+        pprint.pprint(rpc_allocs)
+
+        model_worker = self._get_model_worker_configs(rpc_allocs)
 
         return ExperimentConfig(
             exp_ctrl=self.exp_ctrl,
@@ -460,7 +471,7 @@ class CommonExperimentConfig(Experiment):
             model_worker=model_worker,
         )
 
-    def __check_legal_experiment(self):
+    def __check_legal_allocation_options(self):
         if self.n_nodes > 1 and self.mode == "local":
             raise ValueError(
                 "Cannot run multi-node experiment in local mode, "

@@ -198,6 +198,7 @@ def _request_parameter_sync(
         "from_topo": from_topo,
         "to_topo": to_topo,
         "to_model_config": to_model_config,
+        "eta": 1.0,
     }
     payloads = [
         request_reply_stream.Payload(
@@ -304,7 +305,7 @@ def _attach_payloads_with_hooks(
 
     main_mwids = set([msid2mwid[h] for h in main_handlers])
     for hook in getattr(rpc, f"_{hook_type}_hooks"):
-        if isinstance(hook, dfg.SyncParamHook):
+        if isinstance(hook, dfg.ParamReallocHook):
             assert (hook.source is None) != (hook.target is None), hook
             if hook.source is None:
                 src_topo = model_topos[rpc.model_name]
@@ -327,6 +328,7 @@ def _attach_payloads_with_hooks(
                 "from_topo": src_topo,
                 "to_topo": dst_topo,
                 "to_model_config": dst_config,
+                "eta": hook.eta,
             }
             for h in main_handlers:
                 getattr(payloads[h], f"{hook_type}_hooks").append("param_realloc")

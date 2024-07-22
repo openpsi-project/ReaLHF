@@ -22,13 +22,21 @@ class OffloadHook:
 
 
 @dataclasses.dataclass
-class SyncParamHook:
+class ParamReallocHook:
+    """Weights will be sent from source to target.
+
+    Only one of source and target should be given. The other is the model name
+    of the hooked MFC.
+
+    Weights will be updated as `target = eta * source + (1 - eta) * target`.
+    """
+
     source: Optional[ModelName] = None
     target: Optional[ModelName] = None
-    interval: int = 1
+    eta: float = 1.0
 
 
-RPCHook = Union[OffloadHook, SyncParamHook]
+RPCHook = Union[OffloadHook, ParamReallocHook]
 
 
 @dataclasses.dataclass
@@ -133,14 +141,14 @@ class MFCDef:
 
     def add_pre_hook(self, h: RPCHook):
         assert isinstance(h, RPCHook), type(h)
-        if isinstance(h, SyncParamHook):
+        if isinstance(h, ParamReallocHook):
             assert h.target is None or h.source is None
         if isinstance(h, OffloadHook):
             raise ValueError("Offload can only be post hooks!")
         self._pre_hooks.append(h)
 
     def add_post_hook(self, h: RPCHook):
-        if isinstance(h, SyncParamHook):
+        if isinstance(h, ParamReallocHook):
             assert h.target is None or h.source is None
         self._post_hooks.append(h)
 
