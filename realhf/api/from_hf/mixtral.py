@@ -4,6 +4,15 @@ import torch
 import transformers
 
 from realhf.api.core.model_api import ReaLModelConfig, ReaLMoEConfig, register_hf_family
+from realhf.base.testing import (
+    TESTING_MODEL_HEAD_DIM,
+    TESTING_MODEL_HIDDEN_SIZE,
+    TESTING_MODEL_INTERMEDIATE_SIZE,
+    TESTING_MODEL_N_HEADS,
+    TESTING_MODEL_N_LAYERS,
+    TESTING_MODEL_N_POSITIONS,
+    TESTING_MODEL_VOCAB_SIZE,
+)
 
 from .llama import llama_embedding_layer_names, llama_output_head_param_name
 
@@ -210,13 +219,13 @@ def mixtral_transformer_block_param_name(
 
 def get_real_config_mixtral() -> ReaLModelConfig:
     hf_config = transformers.MixtralConfig(
-        vocab_size=256,
-        hidden_size=128,
-        intermediate_size=160,
-        num_hidden_layers=8,
-        num_attention_heads=8,
-        num_key_value_heads=4,
-        max_position_embeddings=512,
+        vocab_size=TESTING_MODEL_VOCAB_SIZE,
+        max_position_embeddings=TESTING_MODEL_N_POSITIONS,
+        hidden_size=TESTING_MODEL_HIDDEN_SIZE,
+        intermediate_size=TESTING_MODEL_INTERMEDIATE_SIZE,
+        num_hidden_layers=TESTING_MODEL_N_LAYERS,
+        num_attention_heads=TESTING_MODEL_N_HEADS,
+        num_key_value_heads=8,
         num_local_experts=4,
         num_experts_per_tok=2,
     )

@@ -87,7 +87,6 @@ class CausalSelfAttentionLayer(nn.Module):
                 n_q_heads * head_dim,
                 hidden_dim,
                 bias=use_attn_proj_bias,
-                sequence_parallel=constants.sequence_parallel(),
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,

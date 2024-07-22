@@ -762,7 +762,7 @@ class ColumnParallelLinear(torch.nn.Module):
         init_method=init.xavier_normal_,
         stride=1,
         skip_bias_add=False,
-        sequence_parallel=False,
+        is_expert=False,
         perform_initialization=True,
         gradient_accumulation_fusion=False,
         dtype: Optional[torch.dtype] = None,
@@ -778,6 +778,7 @@ class ColumnParallelLinear(torch.nn.Module):
         world_size = constants.model_parallel_world_size()
         self.output_size_per_partition = divide(output_size, world_size)
         self.skip_bias_add = skip_bias_add
+        self.is_expert = is_expert
         assert skip_bias_add is False
 
         # Parameters.
@@ -811,11 +812,6 @@ class ColumnParallelLinear(torch.nn.Module):
         else:
             self.register_parameter("bias", None)
 
-        self.async_tensor_model_parallel_allreduce = (
-            not sequence_parallel and world_size > 1
-        )
-        self.sequence_parallel = sequence_parallel
-
         if gradient_accumulation_fusion:
             if not _grad_accum_fusion_available:
                 raise RuntimeError(
@@ -840,8 +836,12 @@ class ColumnParallelLinear(torch.nn.Module):
             - bias
         """
         bias = self.bias if not self.skip_bias_add else None
+        sequence_parallel = constants.sequence_parallel() and not self.is_expert
+        async_tensor_model_parallel_allreduce = (
+            constants.model_parallel_world_size() > 1 and not sequence_parallel
+        )
 
-        if self.sequence_parallel:
+        if sequence_parallel:
             input_parallel = input_
         else:
             input_parallel = copy_to_tensor_model_parallel_region(input_)
@@ -855,12 +855,12 @@ class ColumnParallelLinear(torch.nn.Module):
             weight=self.weight,
             bias=bias,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
-            async_grad_allreduce=self.async_tensor_model_parallel_allreduce,
-            sequence_parallel=self.sequence_parallel,
+            async_grad_allreduce=async_tensor_model_parallel_allreduce,
+            sequence_parallel=sequence_parallel,
         )
         if self.gather_output:
             # All-gather across the partitions.
-            assert not self.sequence_parallel
+            assert not sequence_parallel
             output = gather_from_tensor_model_parallel_region(output_parallel)
         else:
             output = output_parallel
@@ -912,10 +912,10 @@ class RowParallelLinear(torch.nn.Module):
         output_size,
         bias=True,
         input_is_parallel=True,
-        sequence_parallel=False,
         init_method=init.xavier_normal_,
         stride=1,
         skip_bias_add=False,
+        is_expert=False,
         perform_initialization=True,
         gradient_accumulation_fusion=False,
         dtype: Optional[torch.dtype] = None,
@@ -927,16 +927,12 @@ class RowParallelLinear(torch.nn.Module):
         self.input_size = input_size
         self.output_size = output_size
         self.input_is_parallel = input_is_parallel
-        self.sequence_parallel = sequence_parallel
         # Divide the weight matrix along the last dimension.
         world_size = constants.model_parallel_world_size()
         self.input_size_per_partition = divide(input_size, world_size)
         self.skip_bias_add = skip_bias_add
         self.gradient_accumulation_fusion = gradient_accumulation_fusion
-        if self.sequence_parallel and not self.input_is_parallel:
-            raise RuntimeError(
-                "To enable `sequence_parallel`, `input_is_parallel` must be `True`"
-            )
+        self.is_expert = is_expert
 
         # Parameters.
         # Note: torch.nn.functional.linear performs XA^T + b and as a result
@@ -976,6 +972,12 @@ class RowParallelLinear(torch.nn.Module):
             - output
             - bias
         """
+        sequence_parallel = constants.sequence_parallel() and not self.is_expert
+        if sequence_parallel and not self.input_is_parallel:
+            raise RuntimeError(
+                "To enable `sequence_parallel`, `input_is_parallel` must be `True`"
+            )
+
         # Set up backprop all-reduce.
         if self.input_is_parallel:
             input_parallel = input_
@@ -996,7 +998,7 @@ class RowParallelLinear(torch.nn.Module):
         )
 
         # All-reduce across all the partitions.
-        if self.sequence_parallel:
+        if sequence_parallel:
             output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
         else:
             output_ = reduce_from_tensor_model_parallel_region(output_parallel)

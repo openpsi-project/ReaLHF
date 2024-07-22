@@ -504,8 +504,8 @@ def real_model_tblock_param_keys(
         for j in range(num_experts):
             keys += [
                 f"{idx + 1}.mlp.experts.local_experts.{j}.gate_proj.weight",
-                f"{idx + 1}.mlp.experts.local_experts.{j}.up_proj.weight",
                 f"{idx + 1}.mlp.experts.local_experts.{j}.down_proj.weight",
+                f"{idx + 1}.mlp.experts.local_experts.{j}.up_proj.weight",
             ]
     else:
         raise NotImplementedError()

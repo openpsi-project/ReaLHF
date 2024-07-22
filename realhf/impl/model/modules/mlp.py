@@ -24,7 +24,6 @@ def get_activation_fn(activation_function: str) -> Callable:
     return ACT2FN[activation_function]
 
 
-SEQUENCE_PARALLEL_WARNED = False
 SPLIT_KV_HEADS_WARNED = False
 
 
@@ -106,7 +105,6 @@ class LayerNormQKVLinear(nn.Module):
                 hidden_dim,
                 head_dim * n_q_heads,
                 bias=use_attention_bias,
-                sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -117,7 +115,6 @@ class LayerNormQKVLinear(nn.Module):
                     hidden_dim,
                     head_dim * n_kv_heads,
                     bias=use_attention_bias,
-                    sequence_parallel=sequence_parallel,
                     gradient_accumulation_fusion=gradient_accumulation_fusion,
                     dtype=dtype,
                     device=device,
@@ -126,7 +123,6 @@ class LayerNormQKVLinear(nn.Module):
                     hidden_dim,
                     head_dim * n_kv_heads,
                     bias=use_attention_bias,
-                    sequence_parallel=sequence_parallel,
                     gradient_accumulation_fusion=gradient_accumulation_fusion,
                     dtype=dtype,
                     device=device,
@@ -197,8 +193,8 @@ class LayerNormQKVLinear(nn.Module):
             v = v.view(*v.shape[:-1], self.nkv, self.d)
         else:
             _gradient_accumulation_fusion = self.q_attn.gradient_accumulation_fusion
-            _async_grad_allreduce = self.q_attn.async_tensor_model_parallel_allreduce
             _sequence_parallel = constants.sequence_parallel()
+            _async_grad_allreduce = not _sequence_parallel
             _is_w_parallel = [
                 True,
                 isinstance(self.k_attn, ColumnParallelLinear),
@@ -274,7 +270,7 @@ class LayerNormMLP(nn.Module):
             self.c_fc = ColumnParallelLinear(
                 hidden_dim,
                 intermediate_dim,
-                sequence_parallel=sequence_parallel,
+                async_tensor_model_parallel_allreduce=not sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -282,7 +278,7 @@ class LayerNormMLP(nn.Module):
             self.c_proj = RowParallelLinear(
                 intermediate_dim,
                 hidden_dim,
-                sequence_parallel=sequence_parallel,
+                async_tensor_model_parallel_allreduce=not sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -321,10 +317,9 @@ class LlamaLayerNormMLP(nn.Module):
     ):
         super().__init__()
         # when used as experts the MLP always compute without sequence parallel
-        self.sequence_parallel = constants.sequence_parallel() and not is_expert
-        if not model_parallel and (
-            self.sequence_parallel or gradient_accumulation_fusion
-        ):
+        self.is_expert = is_expert
+        sequence_parallel = constants.sequence_parallel() and not is_expert
+        if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             global SEQUENCE_PARALLEL_WARNED
             if not SEQUENCE_PARALLEL_WARNED:
                 logger.warning(
@@ -381,8 +376,8 @@ class LlamaLayerNormMLP(nn.Module):
             self.gate_proj = ColumnParallelLinear(
                 self.hidden_size,
                 self.intermediate_size,
-                sequence_parallel=self.sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
+                is_expert=is_expert,
                 bias=False,
                 dtype=dtype,
                 device=device,
@@ -390,8 +385,8 @@ class LlamaLayerNormMLP(nn.Module):
             self.up_proj = ColumnParallelLinear(
                 self.hidden_size,
                 self.intermediate_size,
-                sequence_parallel=self.sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
+                is_expert=is_expert,
                 bias=False,
                 dtype=dtype,
                 device=device,
@@ -399,8 +394,8 @@ class LlamaLayerNormMLP(nn.Module):
             self.down_proj = RowParallelLinear(
                 self.intermediate_size,
                 self.hidden_size,
-                sequence_parallel=self.sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
+                is_expert=is_expert,
                 bias=False,
                 dtype=dtype,
                 device=device,
@@ -414,8 +409,8 @@ class LlamaLayerNormMLP(nn.Module):
             return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         else:
             _gradient_accumulation_fusion = self.gate_proj.gradient_accumulation_fusion
-            _async_grad_allreduce = self.gate_proj.async_tensor_model_parallel_allreduce
-            _sequence_parallel = self.sequence_parallel
+            _sequence_parallel = constants.sequence_parallel() and not self.is_expert
+            _async_grad_allreduce = not _sequence_parallel
             _is_w_parallel = [True, True]
 
             gate, upproj = merged_linear_with_grad_accumulation_and_async_allreduce(
