@@ -115,7 +115,6 @@ class GroupedMLP(torch.nn.Module):
         assert (
             not constants.sequence_parallel()
         ), "Grouped GEMM does not support sequence parallel"
-        assert dtype == torch.bfloat16, "Grouped GEMM only supports bfloat16 dtype"
 
         self.config = config
         self.dtype = dtype

@@ -326,7 +326,6 @@ class LlamaLayerNormMLP(nn.Module):
                     "sequence_parallel and gradient_accumulation_fusion are only available in model parallel mode"
                 )
                 SEQUENCE_PARALLEL_WARNED = True
-            self.sequence_parallel = False
             gradient_accumulation_fusion = False
 
         if dtype is None:

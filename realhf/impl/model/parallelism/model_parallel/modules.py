@@ -836,6 +836,10 @@ class ColumnParallelLinear(torch.nn.Module):
             - bias
         """
         bias = self.bias if not self.skip_bias_add else None
+        # NOTE: When sequence_parallel is enabled in MoE models, the gather and scatter of
+        # sequence parallel are done in MoE token dispatcher before and after permutation.
+        # Therefore, when used as experts, ColumnParallelLinear and RowParallelLinear
+        # in expert MLPs always behave as sequence parallel is not enabled.
         sequence_parallel = constants.sequence_parallel() and not self.is_expert
         async_tensor_model_parallel_allreduce = (
             constants.model_parallel_world_size() > 1 and not sequence_parallel
@@ -972,6 +976,8 @@ class RowParallelLinear(torch.nn.Module):
             - output
             - bias
         """
+        # NOTE: ColumnParallelLinear and RowParallelLinear in expert MLPs always behave
+        # as sequence parallel is not enabled. See ColumnParallelLinear for more details.
         sequence_parallel = constants.sequence_parallel() and not self.is_expert
         if sequence_parallel and not self.input_is_parallel:
             raise RuntimeError(

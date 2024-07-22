@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 
-import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.impl.model.parallelism.model_parallel.modules import RowParallelLinear
 from realhf.impl.model.utils.functional import (
