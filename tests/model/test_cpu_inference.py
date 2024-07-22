@@ -15,8 +15,7 @@ logger = logging.getLogger("tests.test_cpu")
 # NOTE: To run test for a new model class, please implement and register `real_config_maker`
 # in realhf.api.from_hf.<your_model_class_name> and add the model class name to the
 # `model_class` fixture in this file.
-# @pytest.fixture(params=["llama", "gpt2", "qwen2", "gemma", "mistral", "mixtral"])
-@pytest.fixture(params=["mixtral"])
+@pytest.fixture(params=["llama", "gpt2", "qwen2", "gemma", "mistral", "mixtral"])
 def model_class(request):
     return request.param
 
@@ -74,9 +73,6 @@ def cpu_hf_model(save_path):
         torch.float32
     )
     hf_model.eval()
-    import pprint
-
-    pprint.pprint(hf_model.state_dict().keys())
     return hf_model
 
 
