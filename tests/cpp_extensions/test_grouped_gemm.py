@@ -127,9 +127,8 @@ def test_grouped_mlp(
 def test_grouped_gemm():
     torch.manual_seed(1)
     device = torch.device("cuda")
+    import grouped_gemm as gg
     import torch.nn.functional as F
-
-    import realhf.impl.model.utils.grouped_gemm as gg
 
     w1 = torch.rand((128, 128), dtype=torch.bfloat16, device=device)
     w2 = torch.rand((4, 128, 160), dtype=torch.bfloat16, device=device)

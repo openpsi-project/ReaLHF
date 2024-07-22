@@ -8,7 +8,6 @@ import torch.nn.init as init
 from torch.nn.parameter import Parameter
 
 import realhf.base.constants as constants
-import realhf.impl.model.utils.grouped_gemm as gg
 from realhf.api.core.model_api import ReaLModelConfig
 from realhf.impl.model.modules.mlp import LlamaLayerNormMLP, get_activation_fn
 from realhf.impl.model.parallelism.model_parallel.mappings import (
@@ -17,6 +16,11 @@ from realhf.impl.model.parallelism.model_parallel.mappings import (
 )
 from realhf.impl.model.parallelism.model_parallel.utils import divide
 from realhf.impl.model.utils.random import _initialize_affine_weight_gpu
+
+try:
+    import grouped_gemm
+except ImportError:
+    grouped_gemm = None
 
 
 class SequentialMLP(torch.nn.Module):
@@ -118,7 +122,10 @@ class GroupedMLP(torch.nn.Module):
         self.device = device
         self.num_experts = config.moe.num_experts
 
-        gg.assert_grouped_gemm_is_available()
+        assert (
+            grouped_gemm is not None
+        ), "Grouped GEMM is not available. Please run `pip install grouped_gemm`."
+
         self.activation_func = get_activation_fn(self.config.activation_function)
 
         # How many feature each rank holds for fc1 and fc2, respectively.
@@ -189,20 +196,20 @@ class GroupedMLP(torch.nn.Module):
                 )
 
             # Reshape the weights for the grouped GEMMs.
-            o1 = gg.ops.gmm(
+            o1 = grouped_gemm.ops.gmm(
                 permuted_local_hidden_states,
                 self.grouped_gate_proj,
                 tokens_per_expert,
                 trans_b=False,
             )
-            o2 = gg.ops.gmm(
+            o2 = grouped_gemm.ops.gmm(
                 permuted_local_hidden_states,
                 self.grouped_up_proj,
                 tokens_per_expert,
                 trans_b=False,
             )
             inter = self.activation_func(o1) * o2
-            output = gg.ops.gmm(
+            output = grouped_gemm.ops.gmm(
                 inter, self.grouped_down_proj, tokens_per_expert, trans_b=False
             )
             if constants.model_parallel_world_size() > 1:
