@@ -335,7 +335,6 @@ real_pp_cudagraph = GenerateTestParams(
     [
         (real_simple, huggingface, 0.8, 0.8),
         (real_simple, real_cudagraph, 1.0, 1.0),
-        (real_cudagraph, real_simple, 1.0, 1.0),
         (real_simple, real_3d_parallel, 0.8, 0.8),
         (real_mp, real_mp_cudagraph, 0.8, 0.8),
         (real_dp, real_dp_cudagraph, 1.0, 1.0),

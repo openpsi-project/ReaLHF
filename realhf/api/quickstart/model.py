@@ -48,7 +48,7 @@ class ParallelismConfig:
         return (
             f"Parallel(mp={self.model_parallel_size},"
             f"pp={self.pipeline_parallel_size},"
-            f"dp={self.data_parallel_size}"
+            f"dp={self.data_parallel_size})"
         )
 
 

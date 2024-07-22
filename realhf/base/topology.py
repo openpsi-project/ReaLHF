@@ -289,8 +289,6 @@ class PipeModelDataParallelTopology(ProcessTopology):
         gradient_checkpointing: bool,
         max_prompt_len: Optional[int] = None,
     ):
-        # TODO: maybe abandon deepspeed implementation of topology and grid
-        # only leave attributes in ParallelGrid to make deepspeed engine happy?
         super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
 
         self.sequence_parallel = sequence_parallel

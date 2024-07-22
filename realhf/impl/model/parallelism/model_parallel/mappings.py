@@ -113,20 +113,6 @@ def _gather_along_first_dim(input_):
     return output
 
 
-def _reduce_scatter_along_last_dim(input_):
-    """Reduce-scatter tensors on the last dimension."""
-    world_size = constants.model_parallel_world_size()
-    target_shape = list(input_.size())
-    target_shape[-1] = target_shape[-1] // world_size
-    input_ = input_.reshape(-1, input_.shape[-1])
-    split_tensors = torch.split(
-        input_, split_size_or_sections=input_.shape[-1] // world_size, dim=1
-    )
-    concat_tensor = torch.cat(split_tensors, dim=0)
-    output = _reduce_scatter_along_first_dim(concat_tensor).reshape(target_shape)
-    return output
-
-
 def _reduce_scatter_along_first_dim(input_):
     """Reduce-scatter the input tensor across model parallel group."""
     world_size = constants.model_parallel_world_size()
@@ -272,42 +258,6 @@ class _ReduceScatterToSequenceParallelRegion(torch.autograd.Function):
         return _gather_along_first_dim(grad_output)
 
 
-class _AllGatherFromTensorParallelRegion(torch.autograd.Function):
-    """Gather the input from model parallel region and concatenate."""
-
-    @staticmethod
-    def symbolic(graph, input_):
-        return _gather_along_last_dim(input_)
-
-    @staticmethod
-    def forward(ctx, input_):
-        return _gather_along_last_dim(
-            input_,
-        )
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return _reduce_scatter_along_last_dim(grad_output)
-
-
-class _ReduceScatterToTensorParallelRegion(torch.autograd.Function):
-    """Reduce scatter the input from the model parallel region."""
-
-    @staticmethod
-    def symbolic(graph, input_):
-        return _reduce_scatter_along_last_dim(input_)
-
-    @staticmethod
-    def forward(ctx, input_):
-        return _reduce_scatter_along_last_dim(
-            input_,
-        )
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return _gather_along_last_dim(grad_output)
-
-
 # -----------------
 # Helper functions.
 # -----------------
@@ -339,11 +289,3 @@ def gather_from_sequence_parallel_region(input_, model_parallel_output_grad=True
 
 def reduce_scatter_to_sequence_parallel_region(input_):
     return _ReduceScatterToSequenceParallelRegion.apply(input_)
-
-
-def all_gather_last_dim_from_tensor_parallel_region(input_):
-    return _AllGatherFromTensorParallelRegion.apply(input_)
-
-
-def reduce_scatter_last_dim_to_tensor_parallel_region(input_):
-    return _ReduceScatterToTensorParallelRegion.apply(input_)

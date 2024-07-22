@@ -1,4 +1,5 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+# adopted from megatron
 
 import math
 from typing import Any, Optional
