@@ -377,7 +377,6 @@ class TrainSchedule(PipeSchedule):
 
             # Prepare state for next time
             prev_micro_batch_id = micro_batch_id
-            # TODO: TEMP FOR DEBUG
             yield step_id, micro_batch_id, cmds
 
     def num_pipe_buffers(self):

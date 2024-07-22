@@ -178,7 +178,6 @@ def dump_table(
 
             mconfig = load_model_config(model_family._class, model_path)
 
-            # tik = time.perf_counter()
             cost = compute_cost(
                 world_size,
                 from_model_name,
@@ -189,10 +188,6 @@ def dump_table(
                 bw=200.0,
                 set_interval_cost=0.03,
             )
-            # print(
-            #     f"Model size {model_size}: {from_pp_mp_dp} -> {to_pp_mp_dp}, cost {cost:.4f}",
-            #     time.perf_counter() - tik,
-            # )
             res[
                 hash_tuple_into_str((model_family.size, *from_pp_mp_dp, *to_pp_mp_dp))
             ] = int(cost * 1000 * 1000)

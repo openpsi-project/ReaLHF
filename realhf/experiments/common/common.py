@@ -399,7 +399,6 @@ class CommonExperimentConfig(Experiment):
                 cuda_cache_clear_freq=10,
                 tokenizer_name_or_path=self.tokenizer_name_or_path,
             )
-            # print(f"Setting up ModelWorker ({i},{j})")
 
             for (
                 model_name,
@@ -434,13 +433,8 @@ class CommonExperimentConfig(Experiment):
                 else:
                     backend = make_inf_backend_config(model_cfg, rpc_alloc.parallel)
 
-                # print(f"model name {model_name}, device mesh name {rpc_alloc.device_mesh.name},"
-                #       f"mapping {mapping}")
                 if mapping[i, j]:
                     shard_idx = shard_counter[model_name]
-                    # print(f"Setting up Shard {shard_idx}, "
-                    #       f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
-                    #       f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
                     mw.shards.append(
                         StandaloneModelShardAbstraction(
                             id=ModelShardID(

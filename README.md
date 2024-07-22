@@ -72,6 +72,14 @@ For detailed information, please visit our [documentation site](https://openpsi-
 
 We would like to thank the authors of our paper and the following individuals for their contributions: Shusheng Xu and Jiaxuan Gao from Tsinghua University, and Weilin Liu, Wenjie Ye, and Chuyi He from OpenPsi Inc, for thoroughly testing and using ReaL in their research, and for providing valuable suggestions that greatly improved the system.
 
+We also extend our gratitude to following open-source LLM projects for providing references for our implementation:
+
+- [Megatron-LM](https://github.com/NVIDIA/Megatron-LM)
+
+- [DeepSpeed](https://github.com/microsoft/DeepSpeed)
+
+- [vLLM](https://github.com/vllm-project/vllm)
+
 ## Citation
 
 If you find our system useful for your research or production, please cite our papers.

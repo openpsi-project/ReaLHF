@@ -100,12 +100,16 @@ class SFTInterface(model_api.ModelInterface):
         model.inc_version()
 
         res = dict()
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stat:
             res = dict(
                 loss=float(stat["loss"]) / int(stat["n_tokens"]),
                 ppl=float(stat["ppl"]) / int(stat["n_seqs"]),
                 n_tokens=int(stat["n_tokens"]),
                 n_seqs=int(stat["n_seqs"]),
+                **global_stats,
             )
         return res
 
@@ -146,12 +150,16 @@ class SFTInterface(model_api.ModelInterface):
                 ppl += stat["ppl"]
 
         res = dict()
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stat:
             return dict(
                 loss=float(losses / n_tokens),
                 ppl=float(ppl / n_seqs),
                 n_tokens=int(n_tokens),
                 n_seqs=int(n_seqs),
+                **global_stats,
             )
         return res
 

@@ -81,7 +81,6 @@ def parse_time_mark_in_file(file, name, step_range=None):
                 res_count += 1
                 identifier, time_point = res
                 time_points[identifier].append(time_point)
-        # print(f"file {file} name {name} line count {count} res count {res_count}")
     return time_points
 
 
@@ -167,7 +166,6 @@ def summary_time_points(
         time_sum = {}
         time_list = {}
         for start_key_idx, (start_key, end_key) in enumerate(zip(start_keys, end_keys)):
-            # print(start_key, identifier, all_time_points[start_key])
             time_sum[start_key] = 0
             time_list[start_key] = []
             try:
@@ -184,8 +182,6 @@ def summary_time_points(
                 start_time_points = start_time_points[valid_indices]
                 end_time_points = end_time_points[valid_indices]
 
-            # print(id_index, identifier, start_key_idx, start_key, end_key, start_time_points, end_time_points)
-
             # plot time point pairs
             for stp, etp in zip(list(start_time_points), list(end_time_points)):
                 min_time = stp if min_time is None else min(min_time, stp)
@@ -199,8 +195,6 @@ def summary_time_points(
                 else:
                     label = None
 
-                # print(f"id={identifier} start_key={start_key} left={stp%1000} width={etp-stp}")
-                # print((etp-stp)//1e6)
                 ax.barh(
                     y=id_index,
                     width=etp - stp,
