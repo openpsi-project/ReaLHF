@@ -50,12 +50,20 @@ Refer to our [customization guide](https://openpsi-project.github.io/ReaLHF/cust
 
 ## Getting Started
 
-We provide pre-built [Docker images](https://openpsi-project.github.io/ReaLHF/install.html#docker-images) and [PyPI packages](https://openpsi-project.github.io/ReaLHF/install.html#install-from-pypi-or-source). To use the latest version of code, please install from source:
+We provide pre-built [Docker images](https://openpsi-project.github.io/ReaLHF/install.html#docker-images) and [PyPI packages](https://openpsi-project.github.io/ReaLHF/install.html#install-from-pypi-or-source). To use the latest version of our code, please install from the source (see detailed installation instructions [here](https://openpsi-project.github.io/ReaLHF/install.html#)):
 
 ```bash
-git clone https://github.com/openpsi-project/ReaLHF/
+git clone https://github.com/openpsi-project/ReaLHF
 cd ReaLHF
-MAX_JOBS=8 REAL_CUDA=1 pip3 install -e . --no-build-isolation
+pip install -r requirements.txt
+export MAX_JOBS=8
+
+# GPU dependencies, not required on the launcher node.
+pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.4 --no-deps --no-build-isolation
+pip install flash_attn==2.4.2 --no-build-isolation
+pip install grouped_gemm  # For MoE
+
+REAL_CUDA=1 pip install -e . --no-build-isolation
 ```
 
 For detailed information, please visit our [documentation site](https://openpsi-project.github.io/ReaLHF/).
@@ -71,6 +79,14 @@ For detailed information, please visit our [documentation site](https://openpsi-
 ## Acknowledgement
 
 We would like to thank the authors of our paper and the following individuals for their contributions: Shusheng Xu and Jiaxuan Gao from Tsinghua University, and Weilin Liu, Wenjie Ye, and Chuyi He from OpenPsi Inc, for thoroughly testing and using ReaL in their research, and for providing valuable suggestions that greatly improved the system.
+
+We also extend our gratitude to following open-source LLM projects for providing references for our implementation:
+
+- [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) for TP/EP modules and the distributed optimizer
+
+- [DeepSpeed](https://github.com/microsoft/DeepSpeed) for ZeRO and ZeRO-offload
+
+- [vLLM](https://github.com/vllm-project/vllm) for custom all-reduce and CUDA graph
 
 ## Citation
 

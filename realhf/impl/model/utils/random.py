@@ -1,3 +1,4 @@
+# Copied from Megatron-LM: https://github.com/NVIDIA/Megatron-LM
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
 # Parts of the code here are adapted from PyTorch
@@ -15,8 +16,10 @@ from torch.utils.checkpoint import detach_variable
 
 import realhf.base.constants as constants
 from realhf.impl.model.parallelism.model_parallel.utils import (
+    divide,
     gather_split_1d_tensor,
     safely_set_viewless_tensor_data,
+    set_tensor_model_parallel_attributes,
     split_tensor_into_1d_equal_chunks,
 )
 
@@ -169,6 +172,7 @@ def model_parallel_cuda_manual_seed(seed):
     """
     # 2718 is just for fun and any POSITIVE value will work.
     model_parallel_rank = constants.model_parallel_rank()
+    expert_parallel_rank = 0
     offset = seed + 2718
     tensor_model_parallel_seed = offset + model_parallel_rank
     # Data parallel gets the original seed.
@@ -184,7 +188,9 @@ def model_parallel_cuda_manual_seed(seed):
         _MODEL_PARALLEL_RNG_TRACKER_NAME, tensor_model_parallel_seed
     )
 
-    expert_parallel_seed = seed + 1024 + model_parallel_rank
+    expert_parallel_seed = (
+        seed + 1024 + 100 * expert_parallel_rank + model_parallel_rank
+    )
     _CUDA_RNG_STATE_TRACKER.add(_EXPERT_PARALLEL_RNG_TRACKER_NAME, expert_parallel_seed)
 
 
@@ -278,3 +284,60 @@ def checkpoint(function, distribute_saved_activations, *args):
     This has been directly copied from torch.utils.checkpoint.
     """
     return CheckpointFunction.apply(function, distribute_saved_activations, *args)
+
+
+def _initialize_affine_weight_gpu(
+    weight,
+    init_method,
+    partition_dim,
+    stride=1,
+):
+    """Initialize affine weight for model parallel on GPU."""
+    set_tensor_model_parallel_attributes(
+        tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
+    )
+    init_method(weight)
+
+
+def _initialize_affine_weight_cpu(
+    weight,
+    output_size,
+    input_size,
+    per_partition_size,
+    partition_dim,
+    init_method,
+    stride=1,
+    return_master_weight=False,
+    *,
+    params_dtype=torch.float32,
+):
+    """Initialize affine weight for model parallel.
+
+    Build the master weight on all processes and scatter
+    the relevant chunk."""
+
+    set_tensor_model_parallel_attributes(
+        tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
+    )
+
+    # Initialize master weight
+    master_weight = torch.empty(
+        output_size, input_size, dtype=torch.float, requires_grad=False
+    )
+    init_method(master_weight)
+    master_weight = master_weight.to(dtype=params_dtype)
+
+    # Split and copy
+    per_partition_per_stride_size = divide(per_partition_size, stride)
+    weight_list = torch.split(
+        master_weight, per_partition_per_stride_size, dim=partition_dim
+    )
+    rank = constants.model_parallel_rank()
+    world_size = constants.model_parallel_world_size()
+    my_weight_list = weight_list[rank::world_size]
+
+    with torch.no_grad():
+        torch.cat(my_weight_list, dim=partition_dim, out=weight)
+    if return_master_weight:
+        return master_weight
+    return None

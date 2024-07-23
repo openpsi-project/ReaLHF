@@ -66,6 +66,7 @@ class StandaloneTestingProcess(mp.Process):
         self.func = func
         self.args = args
         self.kwargs = kwargs
+        self.dist_backend = dist_backend
 
     def _run(self):
         return self.func(*self.args, **self.kwargs)

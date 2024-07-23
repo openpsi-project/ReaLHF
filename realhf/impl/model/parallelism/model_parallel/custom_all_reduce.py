@@ -290,7 +290,6 @@ class CustomAllreduce:
         for i in range(len(all_data)):
             handles.append(all_data[i][0][0])  # type: ignore
             offsets.append(all_data[i][0][1])  # type: ignore
-        # print(handles, offsets)
         return handles, offsets
 
     def register_buffer(self, inp: torch.Tensor):

@@ -391,6 +391,7 @@ class PPOActorInterface(model_api.ModelInterface):
         _kl_rewards = (kl_rewards * loss_mask).sum()
         prompt_len = prompt_mask.count_nonzero().float()
         seq_len = input_lens.float().sum()
+
         dist.all_reduce(_n_seqs, group=constants.data_parallel_group())
         dist.all_reduce(task_reward, group=constants.data_parallel_group())
         dist.all_reduce(_advantages, group=constants.data_parallel_group())
@@ -398,6 +399,7 @@ class PPOActorInterface(model_api.ModelInterface):
         dist.all_reduce(seq_len, group=constants.data_parallel_group())
         dist.all_reduce(_n_tokens, group=constants.data_parallel_group())
         dist.all_reduce(_kl_rewards, group=constants.data_parallel_group())
+
         global_stats = dict(
             task_reward=float(task_reward / _n_seqs),
             kl_reward=float(_kl_rewards / _n_tokens),
@@ -444,6 +446,11 @@ class PPOActorInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
 
+        global_stats.update(
+            constants.log_global_stats_tracker(
+                return_dict=True, clear_stats_after_logging=True
+            )
+        )
         if train_stats:
             train_stats = dict(
                 ppo_approx_kl=float(train_stats["ppo_approx_kl"] / _n_tokens),
@@ -703,7 +710,12 @@ class PPOCriticInterface(model_api.ModelInterface):
         n_tokens = loss_mask.count_nonzero()
         dist.all_reduce(returns, group=constants.data_parallel_group())
         dist.all_reduce(n_tokens, group=constants.data_parallel_group())
-        global_stats = dict(returns=float(returns), n_tokens=int(n_tokens))
+        global_stats = dict(returns=float(returns / n_tokens), n_tokens=int(n_tokens))
+        global_stats.update(
+            constants.log_global_stats_tracker(
+                return_dict=True, clear_stats_after_logging=True
+            )
+        )
 
         # Run mini-batched PPO training!
         train_stats = collections.defaultdict(lambda: 0)
@@ -735,8 +747,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                 denormalized_values=float(
                     train_stats["denormalized_values"] / n_tokens
                 ),
-                returns=global_stats["returns"] / int(n_tokens),
-                n_tokens=int(n_tokens),
+                **global_stats,
             )
 
         return dict(train_stats)

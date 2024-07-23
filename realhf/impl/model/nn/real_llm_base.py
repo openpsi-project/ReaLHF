@@ -18,6 +18,7 @@ from realhf.impl.model.modules import (
     CausalSelfAttentionLayer,
     GemmaRMSNorm,
     LayerNormMLP,
+    LayerNormMoELayer,
     LlamaLayerNormMLP,
     LlamaRMSNorm,
     OffsetParallelPositionalEmbedding,
@@ -26,7 +27,6 @@ from realhf.impl.model.modules import (
 from realhf.impl.model.parallelism.model_parallel.modules import (
     ColumnParallelLinear,
     ParallelEmbedding,
-    RowParallelLinear,
     parallel_lm_logits,
 )
 from realhf.impl.model.utils.functional import compute_varlen_position_indices
@@ -159,6 +159,16 @@ class ReaLModelBlock(nn.Module):
                 dtype=dtype,
                 device=device,
             )
+        elif config.mlp_type == "moe":
+            self.mlp = LayerNormMoELayer(
+                config=config,
+                layer_idx=layer_index,
+                dtype=dtype,
+                device=device,
+            )
+        else:
+            raise NotImplementedError(f"Unknown MLP type: {config.mlp_type}")
+
         self.output_layernorm = output_layernorm
         if output_layernorm:
             if config.layer_norm_type is None:
@@ -364,7 +374,6 @@ class ParallelActorHead(ColumnParallelLinear):
             x.pp_input,
             self.weight,
             parallel_output=True,
-            async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             bias=self.bias,
         )
@@ -377,7 +386,6 @@ class ParallelActorHead(ColumnParallelLinear):
             x,
             self.weight,
             parallel_output=True,
-            async_tensor_model_parallel_allreduce=self.async_tensor_model_parallel_allreduce,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             bias=self.bias,
         )
@@ -433,6 +441,9 @@ def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -
         count += 2 * config.hidden_dim * config.intermediate_dim
     elif config.mlp_type == "llama":
         count += 3 * config.hidden_dim * config.intermediate_dim
+    elif config.mlp_type == "moe":
+        num_experts = config.moe.num_experts
+        count += num_experts * 3 * config.hidden_dim * config.hidden_dim
     else:
         raise NotImplementedError()
 
@@ -463,6 +474,7 @@ def real_model_tblock_param_keys(
     keys += [f"{idx + 1}.mlp.ln.weight"]
     if config.layer_norm_type is None:
         keys += [f"{idx + 1}.mlp.ln.bias"]
+
     if config.mlp_type is None:
         keys += [
             f"{idx + 1}.mlp.c_fc.weight",
@@ -476,6 +488,17 @@ def real_model_tblock_param_keys(
             f"{idx + 1}.mlp.up_proj.weight",
             f"{idx + 1}.mlp.down_proj.weight",
         ]
+    elif config.mlp_type == "moe":
+        num_experts = config.moe.num_experts
+        keys += [
+            f"{idx + 1}.mlp.router.weight",
+        ]
+        for j in range(num_experts):
+            keys += [
+                f"{idx + 1}.mlp.experts.local_experts.{j}.gate_proj.weight",
+                f"{idx + 1}.mlp.experts.local_experts.{j}.up_proj.weight",
+                f"{idx + 1}.mlp.experts.local_experts.{j}.down_proj.weight",
+            ]
     else:
         raise NotImplementedError()
     if idx == config.n_layers - 1:
