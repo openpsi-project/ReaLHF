@@ -25,6 +25,7 @@ def get_activation_fn(activation_function: str) -> Callable:
 
 
 SPLIT_KV_HEADS_WARNED = False
+SEQUENCE_PARALLEL_WARNED = False
 
 
 class LayerNormQKVLinear(nn.Module):
