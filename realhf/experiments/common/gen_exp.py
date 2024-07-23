@@ -9,7 +9,7 @@ from realhf.api.core.config import (
 from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
-from realhf.api.quickstart.device_mesh import AllocationConfig
+from realhf.api.quickstart.device_mesh import MFCConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
@@ -29,7 +29,7 @@ class GenerationConfig(CommonExperimentConfig):
     :param dataset: Dataset configuration
     :type dataset: PromptOnlyDatasetConfig
     :param allocation: Device allocation and parallelism configuration.
-    :type allocation: AllocationConfig
+    :type allocation: MFCConfig
     """
 
     model: ModelTrainEvalConfig = dataclasses.field(
@@ -41,7 +41,7 @@ class GenerationConfig(CommonExperimentConfig):
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
     )
-    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    allocation: MFCConfig = dataclasses.field(default_factory=MFCConfig)
 
     @property
     def models(self):
@@ -56,7 +56,7 @@ class GenerationConfig(CommonExperimentConfig):
         )
         gen = MFCDef(
             name="gen",
-            n_mbs=1,
+            n_mbs=self.allocation.n_mbs,
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.model,

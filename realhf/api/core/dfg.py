@@ -51,6 +51,8 @@ class MFCDef:
 
     Fields starting with an underscore will be filled automatically.
 
+    NOTE: in implementation of ReaL, term RPC also refers to MFC.
+
     :param name: The unique identifier of this model function call.
     :type name: str
     :param n_seqs: The number of sequences to be processed in a batch.

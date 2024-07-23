@@ -14,7 +14,7 @@ from .api.quickstart.dataset import (
     PromptAnswerDatasetConfig,
     PromptOnlyDatasetConfig,
 )
-from .api.quickstart.device_mesh import AllocationConfig
+from .api.quickstart.device_mesh import MFCConfig
 from .api.quickstart.model import (
     ModelTrainEvalConfig,
     OptimizerConfig,

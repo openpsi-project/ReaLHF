@@ -10,7 +10,7 @@ from realhf.api.core.config import (
 )
 from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig
-from realhf.api.quickstart.device_mesh import AllocationConfig
+from realhf.api.quickstart.device_mesh import MFCConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
@@ -44,13 +44,13 @@ class DPOConfig(CommonExperimentConfig):
     :type ref: ModelTrainEvalConfig
     :param actor_train: Device allocation and parallelism configuration for
         running training on the primary LLM.
-    :type actor_train: AllocationConfig
+    :type actor_train: MFCConfig
     :param ref_inf: Device allocation and parallelism configuration for
         running inference on the reference LLM.
         This can be different from the training allocation.
         A large data parallel degree with additional pipelining
         can be faster for inference.
-    :type ref_inf: AllocationConfig
+    :type ref_inf: MFCConfig
     :param dataset: Dataset configuration. The same for reward modeling.
     :type dataset: PairedComparisonDatasetConfig
     :param beta: KL regularization coefficient.
@@ -69,16 +69,13 @@ class DPOConfig(CommonExperimentConfig):
     )
     ref: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
-    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_train: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    ref_inf: MFCConfig = dataclasses.field(default_factory=MFCConfig)
 
     dataset: PairedComparisonDatasetConfig = dataclasses.field(
         default_factory=PairedComparisonDatasetConfig
     )
     beta: float = 0.1
-
-    actor_train_n_mbs: int = 1
-    ref_inf_n_mbs: int = 1
 
     def __post_init__(self):
         assert (
@@ -102,7 +99,7 @@ class DPOConfig(CommonExperimentConfig):
         )
         ref_inf = MFCDef(
             name="ref_inf",
-            n_mbs=self.ref_inf_n_mbs,
+            n_mbs=self.ref_inf.n_mbs,
             model_name=ModelName("ref", 0),
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=ref_interface,
@@ -117,7 +114,7 @@ class DPOConfig(CommonExperimentConfig):
         )
         dpo = MFCDef(
             name="actor_train",
-            n_mbs=self.actor_train_n_mbs,
+            n_mbs=self.actor_train.n_mbs,
             model_name=ModelName("actor", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,

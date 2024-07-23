@@ -56,7 +56,7 @@ recursively with command line arguments.
 
 .. autoclass:: ParallelismConfig
 
-.. autoclass:: AllocationConfig
+.. autoclass:: MFCConfig
 
 .. autoclass:: ReaLModelConfig
 

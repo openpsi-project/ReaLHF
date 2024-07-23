@@ -10,7 +10,7 @@ from realhf.api.core.config import (
 )
 from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PairedComparisonDatasetConfig
-from realhf.api.quickstart.device_mesh import AllocationConfig
+from realhf.api.quickstart.device_mesh import MFCConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
@@ -34,7 +34,7 @@ class RWConfig(CommonExperimentConfig):
     :param model: Model runtime configuration.
     :type model: ModelTrainEvalConfig
     :param allocation: Device allocation and parallelism configuration.
-    :type allocation: AllocationConfig
+    :type allocation: MFCConfig
     :param dataset: Dataset configuration.
     :type dataset: PairedComparisonDatasetConfig
     :param n_mbs: Number of microbatches.
@@ -46,12 +46,11 @@ class RWConfig(CommonExperimentConfig):
     model: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
-    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    allocation: MFCConfig = dataclasses.field(default_factory=MFCConfig)
 
     dataset: PairedComparisonDatasetConfig = dataclasses.field(
         default_factory=PairedComparisonDatasetConfig
     )
-    n_mbs: int = 1
 
     def __post_init__(self):
         assert (
@@ -70,7 +69,7 @@ class RWConfig(CommonExperimentConfig):
         interface = ModelInterfaceAbstraction("paired_rw")
         rpc = MFCDef(
             name="rwTrain",
-            n_mbs=self.n_mbs,
+            n_mbs=self.allocation.n_mbs,
             model_name=ModelName("default", 0),
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=interface,

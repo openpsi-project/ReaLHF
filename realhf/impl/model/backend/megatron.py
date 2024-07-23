@@ -733,9 +733,17 @@ class ReaLMegatronEngine:
             self.engine.zero_grad()
             if constants.pipe_parallel_world_size() > 1:
                 if num_micro_batches is not None:
+                    if num_micro_batches > self.pipe_runner.default_train_mbs:
+                        logger.warning(
+                            "When training with pipeline parallel, num micro batches should be "
+                            "larger than 2 x num_pipeline_stages to avoid idle time. "
+                            f"Setting num_micro_batches to {self.pipe_runner.default_train_mbs}"
+                        )
                     num_micro_batches = max(
                         num_micro_batches, self.pipe_runner.default_train_mbs
                     )
+                else:
+                    num_micro_batches = self.pipe_runner.default_train_mbs
                 instr_set = PipeTrainInstrSetForMegatron(self.engine, num_micro_batches)
                 return self.pipe_runner.train_batch(
                     instr_set=instr_set,
@@ -789,7 +797,7 @@ class ReaLMegatronEngine:
                         f"Grad Norm: {grad_norm}. "
                         f"Current loss scale: {self.engine.optim.get_loss_scale()}. "
                     )
-                return stat
+                return _stat
 
     @torch.no_grad()
     def eval_batch(
