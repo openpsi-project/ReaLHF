@@ -224,7 +224,6 @@ class LayerNormQKVLinear(nn.Module):
 
 
 class LayerNormMLP(nn.Module):
-    SEQUENCE_PARALLEL_WARNED = False
 
     def __init__(
         self,
