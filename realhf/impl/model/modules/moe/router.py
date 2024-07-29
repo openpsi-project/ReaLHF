@@ -189,7 +189,7 @@ class TopKRouter(torch.nn.Module):
         return input
 
     def routing(self, logits: torch.Tensor):
-        """Top-k routing function
+        """Top-k routing function.
 
         Args:
             logits (torch.Tensor): Logits tensor after gating.
@@ -228,8 +228,7 @@ class TopKRouter(torch.nn.Module):
         return scores, indices
 
     def forward(self, input: torch.Tensor):
-        """
-        Forward pass of the router.
+        """Forward pass of the router.
 
         Args:
             input (torch.Tensor): Input tensor.

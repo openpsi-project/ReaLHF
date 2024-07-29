@@ -563,10 +563,10 @@ class SequenceSample:
     @contextmanager
     def disable_validation(cls):
         """Disable the expensive pydantic validation within this context.
-        
-        Used to accelerate gather/split/transfer operations
-        since we have ensured that the data created in datasets
-        and interfaces are valid.
+
+        Used to accelerate gather/split/transfer operations since we
+        have ensured that the data created in datasets and interfaces
+        are valid.
         """
         original_init = cls.__init__
 

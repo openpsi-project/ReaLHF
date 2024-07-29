@@ -5,12 +5,13 @@ from typing import Dict
 import torch
 import torch.distributed as dist
 import torch.utils.data
-from realhf.base.datapack import flat2d
+
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 import realhf.impl.model.utils.dpo_functional as dpo_functional
 from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
 

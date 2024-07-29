@@ -9,11 +9,11 @@ import torch
 import torch.distributed as dist
 import tqdm
 
-from realhf.base.datapack import flat2d
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 
 logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")

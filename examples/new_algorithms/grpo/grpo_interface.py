@@ -6,11 +6,11 @@ from typing import *
 import torch
 import torch.distributed as dist
 
-from realhf.base.datapack import flat2d
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 
 logger = logging.getLogger("GRPO Interface")
 
@@ -222,7 +222,9 @@ class GRPOInterface(model_api.ModelInterface):
             prompt_mask,
         ) = concat_prompt_to_generation_output(
             packed_prompts=grouped_input.data["packed_input_ids"],
-            prompt_lengths=torch.tensor(flat2d(grouped_input.seqlens["packed_input_ids"]), device=model.device),
+            prompt_lengths=torch.tensor(
+                flat2d(grouped_input.seqlens["packed_input_ids"]), device=model.device
+            ),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
             logits_mask=logits_mask,
@@ -309,7 +311,9 @@ class GRPOInterface(model_api.ModelInterface):
             trailing_shapes=dict(packed_ref_logprobs=()),
             data=dict(packed_ref_logprobs=logprobs),
             seqlens=dict(
-                packed_ref_logprobs=[[xx - 1  for xx in x] for x in input_.seqlens["packed_input_ids"]]
+                packed_ref_logprobs=[
+                    [xx - 1 for xx in x] for x in input_.seqlens["packed_input_ids"]
+                ]
             ),
         )
         return res

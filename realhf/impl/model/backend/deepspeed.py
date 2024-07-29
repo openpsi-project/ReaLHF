@@ -24,8 +24,8 @@ from deepspeed.runtime.zero.stage_1_and_2 import DeepSpeedZeroOptimizer
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
-from realhf.base.datapack import flat2d
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
 from realhf.impl.model.backend.inference import PipelinableInferenceEngine
 from realhf.impl.model.backend.pipe_runner import PipeTrainInstrSet
@@ -238,7 +238,9 @@ class ReaLDeepSpeedEngine:
                 if i == num_micro_batches - 1:
                     self.ds_engine.set_gradient_accumulation_boundary(True)
                 input_lens = torch.tensor(
-                    flat2d(mb_input.seqlens["packed_input_ids"]), dtype=torch.int32, device="cuda"
+                    flat2d(mb_input.seqlens["packed_input_ids"]),
+                    dtype=torch.int32,
+                    device="cuda",
                 )
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()

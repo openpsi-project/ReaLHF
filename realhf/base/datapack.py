@@ -1,13 +1,12 @@
-from typing import List, Tuple, Union, Any
 import itertools
+from typing import Any, List, Tuple, Union
 
 import numba
 import numpy as np
 
+
 def flat2d(arr: List[List[Any]]) -> List[Any]:
-    return  list(itertools.chain(*arr))
-
-
+    return list(itertools.chain(*arr))
 
 
 @numba.njit

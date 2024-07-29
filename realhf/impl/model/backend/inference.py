@@ -6,11 +6,11 @@ import torch
 import torch.distributed as dist
 import transformers
 
-from realhf.base.datapack import flat2d
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 
@@ -39,8 +39,12 @@ class PipelinableInferenceEngine:
             shared_params = self.module.shared_embedding_or_output_weight().numel()
         unique_params = num_params - shared_params
 
-        params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(self.device)
-        dist.all_reduce(params_tensor, group=constants.grid().get_model_parallel_group())
+        params_tensor = torch.LongTensor(data=[num_params, unique_params]).to(
+            self.device
+        )
+        dist.all_reduce(
+            params_tensor, group=constants.grid().get_model_parallel_group()
+        )
         params_tensor = params_tensor.tolist()
         total_params = params_tensor[0]
         unique_params = params_tensor[1]
@@ -82,7 +86,9 @@ class PipelinableInferenceEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             if num_micro_batches is not None:
-                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
+                num_micro_batches = max(
+                    num_micro_batches, self.pipe_runner.default_inf_mbs
+                )
             return self.pipe_runner.eval_batch(
                 input_=input_,
                 loss_fn=loss_fn,
@@ -94,7 +100,9 @@ class PipelinableInferenceEngine:
             stat = collections.defaultdict(int)
             for mb_input in input_.split(num_micro_batches):
                 input_lens = torch.tensor(
-                    flat2d(mb_input.seqlens["packed_input_ids"]), dtype=torch.int32, device="cuda"
+                    flat2d(mb_input.seqlens["packed_input_ids"]),
+                    dtype=torch.int32,
+                    device="cuda",
                 )
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
@@ -115,7 +123,9 @@ class PipelinableInferenceEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             if num_micro_batches is not None:
-                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
+                num_micro_batches = max(
+                    num_micro_batches, self.pipe_runner.default_inf_mbs
+                )
             return self.pipe_runner.forward(
                 input_=input_,
                 num_micro_batches=num_micro_batches,
@@ -126,7 +136,9 @@ class PipelinableInferenceEngine:
             outputs = []
             for mb_input in input_.split(num_micro_batches):
                 input_lens = torch.tensor(
-                    flat2d(mb_input.seqlens["packed_input_ids"]), dtype=torch.int32, device="cuda"
+                    flat2d(mb_input.seqlens["packed_input_ids"]),
+                    dtype=torch.int32,
+                    device="cuda",
                 )
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
@@ -150,7 +162,9 @@ class PipelinableInferenceEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             if num_micro_batches is not None:
-                num_micro_batches = max(num_micro_batches, self.pipe_runner.default_inf_mbs)
+                num_micro_batches = max(
+                    num_micro_batches, self.pipe_runner.default_inf_mbs
+                )
             return self.pipe_runner.generate(
                 input_=input_,
                 num_micro_batches=num_micro_batches,
@@ -163,7 +177,9 @@ class PipelinableInferenceEngine:
             sequences, scores, logits_mask = [], [], []
             for mb_input in input_.split(num_micro_batches):
                 input_lens = torch.tensor(
-                    flat2d(mb_input.seqlens["packed_input_ids"]), dtype=torch.int32, device="cuda"
+                    flat2d(mb_input.seqlens["packed_input_ids"]),
+                    dtype=torch.int32,
+                    device="cuda",
                 )
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()

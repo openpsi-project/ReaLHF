@@ -8,12 +8,12 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.distributed as dist
 
-from realhf.base.datapack import flat2d
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 import realhf.impl.model.utils.ppo_functional as ppo_functional
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output
 from realhf.impl.model.utils.functional import (
@@ -221,8 +221,9 @@ class PPOActorInterface(model_api.ModelInterface):
             prompt_mask,
         ) = concat_prompt_to_generation_output(
             packed_prompts=input_.data["packed_prompts"],
-            prompt_lengths=torch.tensor(flat2d(input_.seqlens["packed_prompts"]))
-            .to(model.device),
+            prompt_lengths=torch.tensor(flat2d(input_.seqlens["packed_prompts"])).to(
+                model.device
+            ),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
             logits_mask=logits_mask,

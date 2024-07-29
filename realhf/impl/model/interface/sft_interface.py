@@ -5,10 +5,10 @@ import torch.distributed as dist
 import torch.utils.data
 import tqdm
 
-from realhf.base.datapack import flat2d
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.utils.functional import (
     build_shift_one_indices,

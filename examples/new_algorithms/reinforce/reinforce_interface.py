@@ -4,11 +4,11 @@ from typing import Dict, Tuple
 import torch
 import torch.distributed as dist
 
-from realhf.base.datapack import flat2d
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 
 logger = logging.getLogger("Reinforce Interface")
 
@@ -127,7 +127,9 @@ class ReinforceInterface(model_api.ModelInterface):
             prompt_mask,
         ) = concat_prompt_to_generation_output(
             packed_prompts=input_.data["packed_input_ids"],
-            prompt_lengths=torch.tensor(flat2d(input_.seqlens["packed_input_ids"]), device=model.device),
+            prompt_lengths=torch.tensor(
+                flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+            ),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
             logits_mask=logits_mask,
