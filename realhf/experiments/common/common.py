@@ -28,8 +28,8 @@ from realhf.api.core.system_api import (
     TasksGroup,
 )
 from realhf.api.quickstart.device_mesh import (
-    AllocationConfig,
     DeviceMesh,
+    MFCConfig,
     RPCAllocation,
     make_device_mesh_from_name,
 )
@@ -184,11 +184,13 @@ class CommonExperimentConfig(Experiment):
 
         Note that model function call names are different from model
         names. Should be implemented in all subclasses.
+
+        NOTE: in implementation of ReaL, term RPC also refers to MFC.
         """
         raise NotImplementedError(f"rpcs is not implemented in {self.__class__}")
 
     @property
-    def allocations(self) -> Dict[str, AllocationConfig]:
+    def allocations(self) -> Dict[str, MFCConfig]:
         """The allocation configuration for each model function call.
 
         A dictionary mapping MFC names to its allocation configuration.
@@ -424,6 +426,7 @@ class CommonExperimentConfig(Experiment):
                         )
                         else None
                     ),
+                    gradient_accumulation_fusion=model_cfg.backend == "megatron",
                 )
 
                 if any(

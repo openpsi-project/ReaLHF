@@ -25,6 +25,7 @@ def get_activation_fn(activation_function: str) -> Callable:
 
 
 SPLIT_KV_HEADS_WARNED = False
+SEQUENCE_PARALLEL_WARNED = False
 
 
 class LayerNormQKVLinear(nn.Module):
@@ -39,16 +40,15 @@ class LayerNormQKVLinear(nn.Module):
         use_attention_bias: bool,
         layer_norm_type: Optional[str] = None,
         do_layernorm_before: bool = True,
-        # parallelism
-        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
-        gradient_accumulation_fusion: bool = False,
         # dtype and device
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
         layer_index=None,
     ):
         super().__init__()
+        model_parallel = constants.model_parallel_world_size() > 1
         sequence_parallel = constants.sequence_parallel()
+        gradient_accumulation_fusion = constants.gradient_accumulation_fusion()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             global SEQUENCE_PARALLEL_WARNED
             if not SEQUENCE_PARALLEL_WARNED:
@@ -224,7 +224,6 @@ class LayerNormQKVLinear(nn.Module):
 
 
 class LayerNormMLP(nn.Module):
-    SEQUENCE_PARALLEL_WARNED = False
 
     def __init__(
         self,
@@ -234,15 +233,14 @@ class LayerNormMLP(nn.Module):
         activation_function: str,
         layer_norm_epsilon: float,
         do_layernorm_before: bool = True,
-        # parallelism
-        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
-        gradient_accumulation_fusion: bool = False,
         # dtype and device
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
+        model_parallel = constants.model_parallel_world_size() > 1
         sequence_parallel = constants.sequence_parallel()
+        gradient_accumulation_fusion = constants.gradient_accumulation_fusion()
         if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
             global SEQUENCE_PARALLEL_WARNED
             if not SEQUENCE_PARALLEL_WARNED:
@@ -306,9 +304,6 @@ class LlamaLayerNormMLP(nn.Module):
         # layer norm
         layer_norm_epsilon: float = 1e-5,
         layer_norm_type: str = "rms",
-        # parallelism
-        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
-        gradient_accumulation_fusion: bool = False,
         # whether this MLP is used as expert
         is_expert: bool = False,
         # dtype and device
@@ -316,10 +311,14 @@ class LlamaLayerNormMLP(nn.Module):
         device: Optional[Union[str, torch.device]] = None,
     ):
         super().__init__()
-        # when used as experts the MLP always compute without sequence parallel
+        self.model_parallel = constants.model_parallel_world_size() > 1
+        gradient_accumulation_fusion = constants.gradient_accumulation_fusion()
         self.is_expert = is_expert
+        # when used as experts the MLP always compute without sequence parallel
         sequence_parallel = constants.sequence_parallel() and not is_expert
-        if not model_parallel and (sequence_parallel or gradient_accumulation_fusion):
+        if not self.model_parallel and (
+            sequence_parallel or gradient_accumulation_fusion
+        ):
             global SEQUENCE_PARALLEL_WARNED
             if not SEQUENCE_PARALLEL_WARNED:
                 logger.warning(
@@ -348,8 +347,7 @@ class LlamaLayerNormMLP(nn.Module):
             else:
                 raise NotImplementedError()
 
-        self.model_parallel = model_parallel
-        if not model_parallel:
+        if not self.model_parallel:
             self.gate_proj = nn.Linear(
                 self.hidden_size,
                 self.intermediate_size,
@@ -511,9 +509,6 @@ if constants.use_te_impl():
         # layer norm
         layer_norm_epsilon: float = 1e-5,
         layer_norm_type: str = "rms",
-        # parallelism
-        model_parallel: bool = False,  # We set this as an option for replacing this module with layers in transformer engine
-        gradient_accumulation_fusion: bool = False,
         # moe
         is_expert: bool = False,
         # dtype and device
@@ -534,8 +529,8 @@ if constants.use_te_impl():
             bias=False,
             normalization="RMSNorm",
             activation="swiglu",
-            fuse_wgrad_accumulation=gradient_accumulation_fusion,
+            fuse_wgrad_accumulation=constants.gradient_accumulation_fusion(),
             params_dtype=dtype,
-            set_parallel_mode=model_parallel,
+            set_parallel_mode=constants.model_parallel_world_size() > 1,
             device=device,
         )

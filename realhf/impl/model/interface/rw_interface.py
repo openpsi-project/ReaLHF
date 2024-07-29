@@ -111,13 +111,15 @@ class PairedRewardInterface(model_api.ModelInterface):
     train_total_correct_predictions: int = 0
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
+    def inference(
+        self, model: model_api.Model, data: SequenceSample, n_mbs=None
+    ) -> SequenceSample:
 
         module = model.module
 
         module.eval()
 
-        r = module.forward(input_=data)
+        r = module.forward(input_=data, num_micro_batches=n_mbs)
         if r is None:
             return
         scores = r.float()
@@ -154,7 +156,7 @@ class PairedRewardInterface(model_api.ModelInterface):
         return res
 
     def train_step(
-        self, model: model_api.Model, data: SequenceSample
+        self, model: model_api.Model, data: SequenceSample, n_mbs=None
     ) -> SequenceSample:
         module = model.module
         module.train()
@@ -163,6 +165,7 @@ class PairedRewardInterface(model_api.ModelInterface):
             input_=data,
             loss_fn=_paired_rw_loss_from_model_outputs,
             version_steps=model.version.global_step,
+            num_micro_batches=n_mbs,
         )
 
         res = {}

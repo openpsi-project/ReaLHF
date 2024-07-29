@@ -67,7 +67,7 @@ def z_loss_func(logits, z_loss_coeff):
 
 
 def sinkhorn(cost: torch.Tensor, tol: float = 0.0001):
-    """Sinkhorn based MoE routing function"""
+    """Sinkhorn based MoE routing function."""
     cost = torch.exp(cost)
     d0 = torch.ones(cost.size(0), device=cost.device, dtype=cost.dtype)
     d1 = torch.ones(cost.size(1), device=cost.device, dtype=cost.dtype)
@@ -86,8 +86,7 @@ def sinkhorn(cost: torch.Tensor, tol: float = 0.0001):
 def get_capacity(
     num_tokens: int, num_experts: int, capacity_factor: float, min_capacity=None
 ):
-    """
-    Calculate the capacity of each expert.
+    """Calculate the capacity of each expert.
 
     Args:
         num_tokens (int): num of the input tokens.
@@ -129,7 +128,8 @@ class MoEAuxLossAutoScaler(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, output: torch.Tensor, aux_loss: torch.Tensor):
-        """Preserve the aux_loss by storing it in the context to avoid garbage collection.
+        """Preserve the aux_loss by storing it in the context to avoid garbage
+        collection.
 
         Args:
             output (torch.Tensor): The output tensor.
@@ -158,7 +158,7 @@ class MoEAuxLossAutoScaler(torch.autograd.Function):
 
     @staticmethod
     def set_loss_scale(scale: torch.Tensor):
-        """set the scale of the aux loss.
+        """Set the scale of the aux loss.
 
         Args:
             scale (torch.Tensor): The scale value to set. Please ensure that the scale passed in matches the scale of the main_loss.
@@ -202,7 +202,8 @@ def unpermute(
     padded_mode: bool = False,
     restore_shape: torch.Size = None,
 ):
-    """Unpermute a tensor of permuted tokens based on sorted indices, and optionally merge the tokens with their corresponding probabilities.
+    """Unpermute a tensor of permuted tokens based on sorted indices, and
+    optionally merge the tokens with their corresponding probabilities.
 
     Args:
         permuted_tokens (torch.Tensor): The tensor of permuted tokens to be unpermuted.
@@ -265,8 +266,8 @@ def unpermute_with_padded_tokens(
     probs: torch.Tensor,
     restore_shape: torch.Size,
 ) -> torch.Tensor:
-    """
-    Unpermutes a padded permuted tokens based on sorted indices and merges the tokens with their corresponding probabilities.
+    """Unpermutes a padded permuted tokens based on sorted indices and merges
+    the tokens with their corresponding probabilities.
 
     This function takes a tensor of permuted tokens and reorders them according to the provided indices. It also combines the tokens with their associated probabilities.
 
@@ -278,7 +279,6 @@ def unpermute_with_padded_tokens(
 
     Returns:
         torch.Tensor: A tensor of unpermuted tokens, merged with their probabilities.
-
     """
     # Ensure permuted_tokens is 2D
     assert permuted_tokens.dim() == 2, f"Got {permuted_tokens.dim()}D."
@@ -396,6 +396,7 @@ def update_aux_losses_tracker(
     name: str, loss: torch.Tensor, layer_number: int, num_layers: int
 ):
     """Save the auxiliary loss for logging.
+
     Args:
         name (str): The name of the loss.
         loss (torch.Tensor): The loss tensor.

@@ -9,7 +9,7 @@ from realhf.api.core.config import (
 )
 from realhf.api.core.dfg import MFCDef
 from realhf.api.quickstart.dataset import PromptAnswerDatasetConfig
-from realhf.api.quickstart.device_mesh import AllocationConfig
+from realhf.api.quickstart.device_mesh import MFCConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig
 from realhf.experiments.common.common import CommonExperimentConfig
@@ -25,15 +25,17 @@ class SFTConfig(CommonExperimentConfig):
     :param model: Model runtime configuration.
     :type model: ModelTrainEvalConfig
     :param allocation: Device allocation and parallelism configuration.
-    :type allocation: AllocationConfig
+    :type allocation: MFCConfig
     :param dataset: Dataset configuration
     :type dataset: PromptAnswerDatasetConfig
+    :param n_mbs: Number of microbatches.
+    :type n_mbs: int
     """
 
     model: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
-    allocation: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    allocation: MFCConfig = dataclasses.field(default_factory=MFCConfig)
     dataset: PromptAnswerDatasetConfig = dataclasses.field(
         default_factory=PromptAnswerDatasetConfig
     )
@@ -49,6 +51,7 @@ class SFTConfig(CommonExperimentConfig):
         rpc = MFCDef(
             n_seqs=self.dataset.train_bs_n_seqs,
             name="trainDefault",
+            n_mbs=self.allocation.n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=ModelInterfaceAbstraction("sft"),
             model_name="default",

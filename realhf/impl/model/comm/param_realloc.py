@@ -331,11 +331,7 @@ def _derive_reparallelize_comm_plan(
     dst_mp_size = to_topo.get_dim("model")
     assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
     for k, v in dataclasses.asdict(to_model_config).items():
-        if k not in [
-            "is_critic",
-            "sequence_parallel",
-            "gradient_accumulation_fusion",
-        ] and v != getattr(from_model_config, k):
+        if k not in ["is_critic"] and v != getattr(from_model_config, k):
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
                 f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`)."

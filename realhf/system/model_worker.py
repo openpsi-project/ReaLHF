@@ -666,11 +666,17 @@ class ModelWorker(worker_base.Worker):
             data.remap_keys_(rpc.input_key_remap)
 
         if request.handle_name == "inference":
-            res = self._interface.inference(self._model, data)  # -> SequenceSample
+            res = self._interface.inference(
+                self._model, data, n_mbs=rpc.n_mbs
+            )  # -> SequenceSample
         elif request.handle_name == "train_step":
-            res = self._interface.train_step(self._model, data)  # -> Dict
+            res = self._interface.train_step(
+                self._model, data, n_mbs=rpc.n_mbs
+            )  # -> Dict
         elif request.handle_name == "generate":
-            res = self._interface.generate(self._model, data)  # -> SequenceSample
+            res = self._interface.generate(
+                self._model, data, n_mbs=rpc.n_mbs
+            )  # -> SequenceSample
         else:
             raise NotImplementedError(f"Unknown MFC type: {request.handle_name}.")
 

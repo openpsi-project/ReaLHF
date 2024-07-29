@@ -101,12 +101,15 @@ class DPOInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
 
-        logits = module.forward(input_=input_)
+        logits = module.forward(input_=input_, num_micro_batches=n_mbs)
         if logits is None:
             return None
 
@@ -159,7 +162,9 @@ class DPOInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
 
         # Determining whether to disable dropout is a bit tricky.
@@ -170,6 +175,7 @@ class DPOInterface(model_api.ModelInterface):
             input_=input_,
             version_steps=model.version.global_step,
             loss_fn=functools.partial(_dpo_loss_from_model_outputs, beta=self.beta),
+            num_micro_batches=n_mbs,
         )
 
         model.inc_version()

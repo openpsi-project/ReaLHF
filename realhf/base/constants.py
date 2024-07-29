@@ -222,6 +222,17 @@ def sequence_parallel() -> bool:
     return grid().topology().sequence_parallel
 
 
+def gradient_accumulation_fusion() -> bool:
+    _grad_accum_fusion_available = True
+    try:
+        import fused_weight_gradient_mlp_cuda
+    except ImportError:
+        _grad_accum_fusion_available = False
+    return (
+        _grad_accum_fusion_available and grid().topology().gradient_accumulation_fusion
+    )
+
+
 def max_prompt_len() -> int:
     return grid().topology().max_prompt_len
 
@@ -479,12 +490,14 @@ def clear_global_stats_tracker():
 def log_global_stats_tracker(
     return_dict: bool = True, clear_stats_after_logging: bool = True
 ):
-    """Log the global stats tracker and optionally return the stats as a dictionary.
-    This method is expected to be called in interface implementations.
+    """Log the global stats tracker and optionally return the stats as a
+    dictionary. This method is expected to be called in interface
+    implementations.
 
     :param return_dict: Whether to return the stats as a dictionary.
     :type return_dict: bool
-    :param clear_stats_after_logging: Whether to clear the stats after logging.
+    :param clear_stats_after_logging: Whether to clear the stats after
+        logging.
     :type clear_stats_after_logging: bool
     """
     if _model_name is None:

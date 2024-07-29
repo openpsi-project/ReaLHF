@@ -177,7 +177,10 @@ class PPOActorInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def generate(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
 
@@ -195,6 +198,7 @@ class PPOActorInterface(model_api.ModelInterface):
             input_=x,
             tokenizer=model.tokenizer,
             gconfig=self.generation_config,
+            num_micro_batches=n_mbs,
         )
         if res is None:
             return None
@@ -250,12 +254,15 @@ class PPOActorInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
 
-        logits = module.forward(input_=input_)
+        logits = module.forward(input_=input_, num_micro_batches=n_mbs)
         if logits is None:
             return None
 
@@ -277,7 +284,9 @@ class PPOActorInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
@@ -421,6 +430,7 @@ class PPOActorInterface(model_api.ModelInterface):
             stats = module.train_batch(
                 input_=data,
                 version_steps=model.version.global_step,
+                num_micro_batches=n_mbs,
                 loss_fn=functools.partial(
                     _ppo_actor_loss_from_model_outputs,
                     kl_adapter=self.kl_adapter,
@@ -581,12 +591,15 @@ class PPOCriticInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
 
-        scores = module.forward(input_=input_)
+        scores = module.forward(input_=input_, num_micro_batches=n_mbs)
         if scores is None:
             return None
         scores = scores.squeeze(-1)
@@ -597,7 +610,9 @@ class PPOCriticInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
@@ -715,6 +730,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                     kl_adapter=self.kl_adapter,
                     rms=None if not self.value_norm else self.rms,
                 ),
+                num_micro_batches=n_mbs,
             )
 
             if stats:
