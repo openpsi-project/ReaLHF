@@ -86,8 +86,8 @@ def _make_sample_multiple_sequence(bs):
     )
     seqlens = dict(
         input_ids=slens,
-        group_factor=[torch.tensor([1]).int() for _ in range(bs)],
-        seqlogprobs=[torch.tensor([1, 1], dtype=torch.int32) for _ in range(bs)],
+        group_factor=[[1] for _ in range(bs)],
+        seqlogprobs=[[1, 1] for _ in range(bs)],
     )
     return SequenceSample(
         keys=keys,
@@ -134,9 +134,9 @@ def _make_sample_single_prompt_multi_response(bs):
         prompt_mask=torch.bool,
     )
     seqlens = dict(
-        prompt=prompt_lens,
-        seq=gen_lens,
-        prompt_mask=gen_lens,
+        prompt=[x.numpy().tolist() for x in prompt_lens],
+        seq=[x.numpy().tolist() for x in gen_lens],
+        prompt_mask=[x.numpy().tolist() for x in gen_lens],
     )
     return SequenceSample(
         keys=keys,
