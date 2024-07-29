@@ -135,8 +135,6 @@ class ReaLModelBlock(nn.Module):
             rotary_interleaved=config.rotary_interleaved,
             rotary_scaling=config.rotary_scaling,
             rotary_scaling_type=config.rotary_scaling_type,
-            model_parallel=constants.model_parallel_world_size() > 1,
-            gradient_accumulation_fusion=config.gradient_accumulation_fusion,
             dtype=dtype,
             device=device,
         )
@@ -148,8 +146,6 @@ class ReaLModelBlock(nn.Module):
                 do_layernorm_before=config.do_layernorm_before,
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
-                model_parallel=constants.model_parallel_world_size() > 1,
-                gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
             )
@@ -160,8 +156,6 @@ class ReaLModelBlock(nn.Module):
                 activation_function=config.activation_function,
                 layer_norm_epsilon=config.layer_norm_epsilon,
                 layer_norm_type=config.layer_norm_type,
-                model_parallel=constants.model_parallel_world_size() > 1,
-                gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
             )

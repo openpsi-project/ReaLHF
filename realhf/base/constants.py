@@ -222,6 +222,17 @@ def sequence_parallel() -> bool:
     return grid().topology().sequence_parallel
 
 
+def gradient_accumulation_fusion() -> bool:
+    _grad_accum_fusion_available = True
+    try:
+        import fused_weight_gradient_mlp_cuda
+    except ImportError:
+        _grad_accum_fusion_available = False
+    return (
+        _grad_accum_fusion_available and grid().topology().gradient_accumulation_fusion
+    )
+
+
 def max_prompt_len() -> int:
     return grid().topology().max_prompt_len
 

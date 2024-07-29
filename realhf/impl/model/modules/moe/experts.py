@@ -47,8 +47,6 @@ class SequentialMLP(torch.nn.Module):
                 intermediate_dim=config.intermediate_dim,
                 activation_function=config.activation_function,
                 is_expert=True,
-                model_parallel=constants.model_parallel_world_size() > 1,
-                gradient_accumulation_fusion=config.gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
             )

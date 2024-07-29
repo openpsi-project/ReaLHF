@@ -38,7 +38,7 @@ python3 -m realhf.apps.quickstart sft \
     dataset.train_path=.data/sft_pos-train.jsonl \
     dataset.valid_path=.data/sft_pos-train.jsonl \
     dataset.max_seqlen=1024 \
-    dataset.train_bs_n_seqs=512 \
+    dataset.train_bs_n_seqs=2048 \
     dataset.valid_bs_n_seqs=512 \
     allocation_mode=manual \
     n_nodes=1 \

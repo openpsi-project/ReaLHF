@@ -166,7 +166,7 @@ class GRPOInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def generate(
-        self, model: model_api.Model, input_: SequenceSample
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
     ) -> SequenceSample:
         # NOTE: import here to avoid cuda initialization
         from realhf.impl.model.nn.real_llm_generate import (
@@ -200,6 +200,7 @@ class GRPOInterface(model_api.ModelInterface):
             input_=grouped_input,
             tokenizer=model.tokenizer,
             gconfig=self.generation_config,
+            num_micro_batches=n_mbs,
         )
         if res is None:
             return None
@@ -279,7 +280,7 @@ class GRPOInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
     ) -> SequenceSample:
         from realhf.impl.model.utils.functional import (
             apply_logits_mask,
@@ -289,7 +290,7 @@ class GRPOInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        logits = module.forward(input_=input_)
+        logits = module.forward(input_=input_, num_micro_batches=n_mbs)
         if logits is None:
             return None
 
@@ -307,7 +308,7 @@ class GRPOInterface(model_api.ModelInterface):
         res = SequenceSample(
             keys=["packed_ref_logprobs"],
             ids=input_.ids,
-            dtypes=dict(packed_ref_logprobs=torch.float16),
+            dtypes=dict(packed_ref_logprobs=logprobs.dtype),
             trailing_shapes=dict(packed_ref_logprobs=()),
             data=dict(packed_ref_logprobs=logprobs),
             seqlens=dict(
@@ -318,7 +319,9 @@ class GRPOInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         # NOTE: import here to avoid cuda initialization
         from realhf.impl.model.utils.functional import masked_normalization
         from realhf.impl.model.utils.ppo_functional import (
@@ -428,6 +431,7 @@ class GRPOInterface(model_api.ModelInterface):
                     early_stop_imp_ratio=self.early_stop_imp_ratio,
                     early_stop_kl=self.early_stop_kl,
                 ),
+                num_micro_batches=n_mbs,
             )
             if stats:
                 for k, v in stats.items():

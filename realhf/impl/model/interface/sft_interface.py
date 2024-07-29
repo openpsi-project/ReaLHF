@@ -86,7 +86,7 @@ def compute_packed_sft_loss(
 
 class SFTInterface(model_api.ModelInterface):
 
-    def train_step(self, model: model_api.Model, x: SequenceSample) -> Dict:
+    def train_step(self, model: model_api.Model, x: SequenceSample, n_mbs=None) -> Dict:
         module = model.module
 
         module.train()
@@ -94,7 +94,7 @@ class SFTInterface(model_api.ModelInterface):
         stat = module.train_batch(
             input_=x,
             loss_fn=compute_packed_sft_loss,
-            num_micro_batches=constants.pipe_parallel_world_size() * 2,
+            num_micro_batches=n_mbs,
             version_steps=model.version.global_step,
         )
 

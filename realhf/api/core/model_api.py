@@ -202,10 +202,6 @@ class ReaLModelConfig:
     :type moe: Optional[ReaLMoEConfig]
     :param is_critic: Whether the model is a critic model.
     :type is_critic: bool
-    :param gradient_accumulation_fusion: Whether to fuse
-        gradient accumulation in Megatron.
-        Currently not supported.
-    :type gradient_accumulation_fusion: bool
     """
 
     ### Architectural configurations. ###
@@ -248,9 +244,6 @@ class ReaLModelConfig:
 
     # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False
-
-    ### Running configurations. ###
-    gradient_accumulation_fusion: bool = False
 
     def __post_init__(self):
         if self.is_critic and self.tied_embedding:
@@ -375,17 +368,26 @@ class ModelInterface(abc.ABC):
         pass
 
     def evaluate(
-        self, model: Model, eval_dataloader: torch.utils.data.DataLoader
+        self,
+        model: Model,
+        eval_dataloader: torch.utils.data.DataLoader,
     ) -> Dict:
+        # NOTE: No n_mbs here because the batch size can be configured in the dataloader.
         return {}
 
-    def inference(self, model: Model, data: SequenceSample) -> SequenceSample:
+    def inference(
+        self, model: Model, data: SequenceSample, n_mbs: Optional[int] = None
+    ) -> SequenceSample:
         raise NotImplementedError()
 
-    def generate(self, model: Model, data: SequenceSample) -> SequenceSample:
+    def generate(
+        self, model: Model, data: SequenceSample, n_mbs: Optional[int] = None
+    ) -> SequenceSample:
         raise NotImplementedError()
 
-    def train_step(self, model: Model, data: SequenceSample) -> Dict:
+    def train_step(
+        self, model: Model, data: SequenceSample, n_mbs: Optional[int] = None
+    ) -> Dict:
         raise NotImplementedError()
 
 
