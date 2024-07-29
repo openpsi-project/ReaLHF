@@ -8,6 +8,7 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.distributed as dist
 
+from realhf.base.datapack import flat2d
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
@@ -38,7 +39,8 @@ def _ppo_actor_loss_from_model_outputs(
     packed_input_ids = input_.data["packed_input_ids"]
     cu_seqlens = (
         torch.nn.functional.pad(
-            torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
+            torch.tensor(flat2d(input_.seqlens["packed_input_ids"])).cumsum(0),
+            (1, 0),
         )
         .int()
         .cuda()
@@ -130,7 +132,6 @@ class PPOActorInterface(model_api.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     enable_save: bool = True
-    force_no_logits_mask: bool = False
 
     value_norm: bool = False
     value_norm_type: str = dataclasses.field(
@@ -220,17 +221,15 @@ class PPOActorInterface(model_api.ModelInterface):
             prompt_mask,
         ) = concat_prompt_to_generation_output(
             packed_prompts=input_.data["packed_prompts"],
-            prompt_lengths=torch.cat(input_.seqlens["packed_prompts"]).to(model.device),
+            prompt_lengths=torch.tensor(flat2d(input_.seqlens["packed_prompts"]))
+            .to(model.device),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
             logits_mask=logits_mask,
             gen_lengths=gen_lengths,
         )
 
-        seqlens = [
-            torch.tensor([s], dtype=torch.int32)
-            for s in seq_lengths.cpu().numpy().tolist()
-        ]
+        seqlens = [[s] for s in seq_lengths.cpu().numpy().tolist()]
         res = SequenceSample.from_default(
             ids=input_.ids,
             seqlens=seqlens,
@@ -240,7 +239,8 @@ class PPOActorInterface(model_api.ModelInterface):
                 packed_logprobs=packed_logprobs,
                 packed_logits_mask=(
                     packed_logits_mask.bool()
-                    if not self.force_no_logits_mask and packed_logits_mask is not None
+                    if not self.generation_config.force_no_logits_mask
+                    and packed_logits_mask is not None
                     else None
                 ),
                 prompt_mask=prompt_mask,
@@ -265,7 +265,7 @@ class PPOActorInterface(model_api.ModelInterface):
             and input_.data["packed_logits_mask"] is not None
         ):
             apply_logits_mask(logits, input_.data["packed_logits_mask"])
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         logprobs = gather_packed_shifted_log_probs(
             logits, cu_seqlens, input_.data["packed_input_ids"]
@@ -285,7 +285,7 @@ class PPOActorInterface(model_api.ModelInterface):
         old_logp: torch.FloatTensor = input_.data["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = input_.data["packed_ref_logprobs"].float()
         prompt_mask = input_.data["prompt_mask"]
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"])).cuda()
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         reward_score = input_.data["rewards"].float()
         values = input_.data["values"].float()
@@ -463,7 +463,8 @@ def _ppo_critic_loss_from_model_outputs(
 
     cu_seqlens = (
         torch.nn.functional.pad(
-            torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
+            torch.tensor(flat2d(input_.seqlens["packed_input_ids"])),
+            (1, 0),
         )
         .int()
         .cuda()
@@ -484,8 +485,8 @@ def _ppo_critic_loss_from_model_outputs(
             for i in range(cu_seqlens.shape[0] - 1)
         ]
     )
-    new_values = new_values[leave_one_indices].squeeze(-1).float()
-    values = values[leave_one_indices].squeeze(-1).float()
+    new_values = new_values[leave_one_indices].view(-1).float()
+    values = values[leave_one_indices].view(-1).float()
 
     loss, loss_stat = ppo_functional.critic_loss_fn(
         value=new_values,
@@ -589,7 +590,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         scores = module.forward(input_=input_)
         if scores is None:
             return None
-        scores = scores.squeeze(-1)
+        scores = scores.view(-1)
         res = SequenceSample.from_default(
             ids=input_.ids,
             data=dict(values=scores),
@@ -606,7 +607,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         old_logp: torch.FloatTensor = input_.data["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = input_.data["packed_ref_logprobs"].float()
         prompt_mask = input_.data["prompt_mask"]
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         reward_score = input_.data["rewards"].float()
         values = input_.data["values"].float()

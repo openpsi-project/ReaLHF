@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import tqdm
 
+from realhf.base.datapack import flat2d
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
@@ -35,7 +36,7 @@ def _paired_rw_loss_from_model_outputs(
         device=scores.device,
     )
 
-    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
 
     assert scores.shape[0] == input_lens.sum(), (scores.shape, input_lens.sum())
     scores = scores[input_lens.cumsum(0) - 1].view(-1, 2).float()
@@ -122,8 +123,8 @@ class PairedRewardInterface(model_api.ModelInterface):
             return
         scores = r.float()
 
-        input_lens = torch.cat(data.seqlens["packed_input_ids"])
-        scores = scores.squeeze(-1)[input_lens.cumsum(0) - 1].float()  # [bs]
+        input_lens = torch.tensor(flat2d(data.seqlens["packed_input_ids"]))
+        scores = scores.view(-1)[input_lens.cumsum(0) - 1].float()  # [bs]
         scores = (scores - self.output_bias) * self.output_scaling
 
         ###################### logging ######################
@@ -145,8 +146,7 @@ class PairedRewardInterface(model_api.ModelInterface):
             ids=data.ids,
             seqlens=dict(
                 rewards=[
-                    torch.tensor([1 for _ in range(len(x))], dtype=torch.int32)
-                    for x in data.seqlens["packed_input_ids"]
+                    [1 for _ in range(len(x))] for x in data.seqlens["packed_input_ids"]
                 ]
             ),
             data=dict(rewards=scores),

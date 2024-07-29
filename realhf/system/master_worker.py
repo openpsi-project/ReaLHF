@@ -521,10 +521,10 @@ async def model_rpc_request_func(
         # If such keys do not exist, we will use the key with the longest
         # sequence length in this model function call.
         acc_seqlens = {
-            k: sum(x.sum() for x in slens) for k, slens in sample.seqlens.items()
+            k: sum(sum(x) for x in slens) for k, slens in sample.seqlens.items()
         }
         seqlen_key = max(sample.seqlens, key=acc_seqlens.get)
-        flops_seqlens = [x.sum() for x in sample.seqlens[seqlen_key]]
+        flops_seqlens = [sum(x) for x in sample.seqlens[seqlen_key]]
         if rpc.interface_type == dfg.ModelInterfaceType.GENERATE:
             ctrl.data_amount.gen_configs.append(model_configs[rpc.model_name])
             ctrl.data_amount.gen_bs.append(sample.bs)
@@ -739,7 +739,7 @@ async def load_data_func(
         # Since different keys may have different sequence lengths, we cannot
         # count tokens accurately. Here we just assume that the key with the
         # longest sequence length is the number of tokens.
-        seqlens = [max(v[0].sum() for v in x.seqlens.values()) for x in all_data]
+        seqlens = [max(sum(v[0]) for v in x.seqlens.values()) for x in all_data]
         avg_tokens_per_batch = sum(seqlens) / steps_per_epoch
         logger.info(
             f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "

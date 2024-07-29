@@ -148,8 +148,8 @@ class RewardModelingPairedDataset(torch.utils.data.Dataset):
             ),
             ids=[self.ids[idx]],
             seqlens=dict(
-                packed_input_ids=[torch.tensor(input_lens, dtype=torch.int32)],
-                prompt_lens=[torch.tensor([1], dtype=torch.int32)],
+                packed_input_ids=[input_lens],
+                prompt_lens=[[1]],
             ),
         )
 
