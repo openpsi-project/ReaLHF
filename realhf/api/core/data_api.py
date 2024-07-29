@@ -141,7 +141,7 @@ class SequenceSample:
         Used to amend new data into the buffer after a model function call.
     :type ids: List[Hashable]
     :param seqlens: The sequence lengths of each sequence in the data. For a given key,
-        it should be a list of list of integers. The outer list is the batch size, 
+        it should be a list of list of integers. The outer list is the batch size,
         while the inner list is the sequence lengths for this key.
         We use python-native list here because (1) pickling torch.Tensor or numpy array is inefficient
         and (2) the size of the inner list can be different across the batch, so we cannot create 2D arrays easily.
