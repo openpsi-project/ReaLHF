@@ -239,7 +239,7 @@ def run_data_transfer(
 
                     # Receive metadata if not cached.
                     if not metadata_cached:
-                        metadatas = [None for _ in step.ids]
+                        metadatas = [{} for _ in step.ids]
                         dist.broadcast_object_list(
                             metadatas, src=step.src, group=step.group
                         )

@@ -716,6 +716,8 @@ async def load_data_func(
 
             # Unpack batched sequences into individual sequences.
             for x in data_batches:
+                if x.meta_sample is None:
+                    continue
                 for xx in x.meta_sample.unpack():
                     all_data.append(xx)
                     if xx.ids[0] in received_ids:
@@ -728,6 +730,8 @@ async def load_data_func(
             # RPCs corountines will use this information to
             # determine the src and dst of data transfer.
             for dp_rank, db_meta in enumerate(data_batches):
+                if db_meta.meta_sample is None:
+                    continue
                 for s in db_meta.meta_sample.unpack():
                     for k in s.keys:
                         data_owner[(s.ids[0], k)] = (src_rpc_model_name, dp_rank)

@@ -396,7 +396,8 @@ class SequenceSample:
 
     def unpack(self):
         """Unpack a batch of data into individual pieces of data."""
-        return self.split(self.bs, min_size=1)
+        partitions = [(i, i + 1) for i in range(self.bs)]
+        return self.split_with_spec(SequenceSplitSpec(partitions=partitions))
 
     def cuda(self):
         """Move the data to GPU inplace."""
@@ -587,10 +588,6 @@ class DataBatchMeta:
     meta_sample: SequenceSample
     epoch: int
     is_final_batch: bool
-
-    def __post_init__(self):
-        if self.meta_sample.data is not None:
-            raise ValueError("meta_sample should not contain any data.")
 
 
 @dataclasses.dataclass
