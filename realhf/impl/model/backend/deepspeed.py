@@ -202,7 +202,7 @@ class ReaLDeepSpeedEngine:
     ):
         if constants.pipe_parallel_world_size() > 1:
             if num_micro_batches is not None:
-                if num_micro_batches > self.pipe_runner.default_train_mbs:
+                if num_micro_batches < self.pipe_runner.default_train_mbs:
                     logger.warning(
                         "When training with pipeline parallel, num micro batches should be "
                         "larger than 2 x num_pipeline_stages to avoid idle time. "

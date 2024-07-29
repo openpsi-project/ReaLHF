@@ -15,9 +15,7 @@ from realhf.impl.model.utils.moe import custom_histc, permute, unpermute
 
 
 class MoETokenDispatcher:
-    """
-    AlltoAll Based Token dispatcher.
-    """
+    """AlltoAll Based Token dispatcher."""
 
     def __init__(
         self,
@@ -25,8 +23,8 @@ class MoETokenDispatcher:
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ) -> None:
-        """
-        Initialize the AlltoAll token dispatcher. Currently does not support expert parallel.
+        """Initialize the AlltoAll token dispatcher. Currently does not support
+        expert parallel.
 
         Args:
             num_local_experts (int): Number of local experts on the current device.
@@ -60,10 +58,11 @@ class MoETokenDispatcher:
         self.num_out_tokens = torch.tensor(0, dtype=torch.long, device=self.device)
 
     def preprocess(self, indices: torch.Tensor) -> torch.Tensor:
-        """
-        Preprocess token indices for AlltoAll communication and token permutation. This method computes the number of tokens assigned to each expert based on the input indices.
-        It also initializes the necessary data structures for AlltoAll communication, such as input
-        and output splits, and the mapping between global tokens and local experts.
+        """Preprocess token indices for AlltoAll communication and token
+        permutation. This method computes the number of tokens assigned to each
+        expert based on the input indices. It also initializes the necessary
+        data structures for AlltoAll communication, such as input and output
+        splits, and the mapping between global tokens and local experts.
 
         Args:
             indices (torch.Tensor): Tensor of indices mapping tokens to experts.
@@ -94,8 +93,7 @@ class MoETokenDispatcher:
         probs: torch.Tensor,
         indices: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Dispatch tokens to local experts using AlltoAll communication.
+        """Dispatch tokens to local experts using AlltoAll communication.
 
         Args:
             hidden_states (torch.Tensor): Input token embeddings.
@@ -135,8 +133,7 @@ class MoETokenDispatcher:
         self,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Reverse the token permutation to restore the original order.
+        """Reverse the token permutation to restore the original order.
 
         Args:
             hidden_states (torch.Tensor): Output from local experts.

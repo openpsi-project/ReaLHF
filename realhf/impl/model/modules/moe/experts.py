@@ -25,6 +25,7 @@ except ImportError:
 
 class SequentialMLP(torch.nn.Module):
     """An implementation of the Experts layer using a sequence of MLP layers.
+
     This class executes each expert sequentially.
     """
 
@@ -73,9 +74,8 @@ class SequentialMLP(torch.nn.Module):
 
 
 class ExpertParam(torch.nn.Module):
-    """A dummy class that maps weight tensors in GroupedMLP to pytorch parameters
-    for compatibility of weight saving/loading.
-    """
+    """A dummy class that maps weight tensors in GroupedMLP to pytorch
+    parameters for compatibility of weight saving/loading."""
 
     def __init__(
         self,

@@ -733,7 +733,7 @@ class ReaLMegatronEngine:
             self.engine.zero_grad()
             if constants.pipe_parallel_world_size() > 1:
                 if num_micro_batches is not None:
-                    if num_micro_batches > self.pipe_runner.default_train_mbs:
+                    if num_micro_batches < self.pipe_runner.default_train_mbs:
                         logger.warning(
                             "When training with pipeline parallel, num micro batches should be "
                             "larger than 2 x num_pipeline_stages to avoid idle time. "
@@ -757,7 +757,7 @@ class ReaLMegatronEngine:
                     num_micro_batches = 1
                 no_sync_ctx = self.engine.ddp.no_sync()
                 no_sync_ctx.__enter__()
-                _stat = collections.defaultdict(int)
+                stat = collections.defaultdict(int)
                 for i, mb_input in enumerate(input_.split(num_micro_batches)):
                     if i == num_micro_batches - 1:
                         no_sync_ctx.__exit__(None, None, None)
@@ -773,10 +773,10 @@ class ReaLMegatronEngine:
                         cu_seqlens=cu_seqlens,
                         max_seqlen=max_seqlen,
                     ).logits
-                    loss, stat = loss_fn(model_output, mb_input)
+                    loss, _stat = loss_fn(model_output, mb_input)
                     self.engine.optim.scale_loss(loss).backward()
-                    for k, v in stat.items():
-                        _stat[k] += v
+                    for k, v in _stat.items():
+                        stat[k] += v
 
                 finalize_grads_megatron(self.engine)
 
@@ -797,7 +797,7 @@ class ReaLMegatronEngine:
                         f"Grad Norm: {grad_norm}. "
                         f"Current loss scale: {self.engine.optim.get_loss_scale()}. "
                     )
-                return _stat
+                return stat
 
     @torch.no_grad()
     def eval_batch(

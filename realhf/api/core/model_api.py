@@ -78,21 +78,24 @@ class ReaLMoEConfig:
     :param top_k: The number of experts to route per-token, can be also
         interpreted as the `top-k` routing parameter.
     :type top_k: int
-    :param routing_type: The load balancing type for the MoE router.
-        Can be "aux_loss", "sinkhorn", or "none".
+    :param routing_type: The load balancing type for the MoE router. Can
+        be "aux_loss", "sinkhorn", or "none".
     :type routing_type: str
-    :param aux_loss_coeff: The coefficient for the auxiliary loss.
-        Only effective when routing_type="aux_loss".
+    :param aux_loss_coeff: The coefficient for the auxiliary loss. Only
+        effective when routing_type="aux_loss".
     :type aux_loss_coeff: float
-    :param capacity_factor: The capacity factor of each expert.
-        An expert will drop tokens if the number of tokens exceeds capacity_factor * (num_tokens / num_experts).
-        Drop nothing when capacity_factor is None.
+    :param capacity_factor: The capacity factor of each expert. An
+        expert will drop tokens if the number of tokens exceeds
+        capacity_factor * (num_tokens / num_experts). Drop nothing when
+        capacity_factor is None.
     :type capacity_factor: float
-    :param pad_to_capacity: Whether to pad the input to the capacity of the expert.
+    :param pad_to_capacity: Whether to pad the input to the capacity of
+        the expert.
     :type pad_to_capacity: bool
-    :param token_drop_policy: The token drop policy for the MoE. Can be either "prob" or "position".
-        If "prob", the tokens with the lowest probabilities will be dropped.
-        If "position", tokens at the end of each batch will be dropped.
+    :param token_drop_policy: The token drop policy for the MoE. Can be
+        either "prob" or "position". If "prob", the tokens with the
+        lowest probabilities will be dropped. If "position", tokens at
+        the end of each batch will be dropped.
     :type token_drop_policy: str
     :param z_loss_coeff: The coefficient for the z-loss.
     :type z_loss_coeff: float

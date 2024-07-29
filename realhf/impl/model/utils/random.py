@@ -313,8 +313,9 @@ def _initialize_affine_weight_cpu(
 ):
     """Initialize affine weight for model parallel.
 
-    Build the master weight on all processes and scatter
-    the relevant chunk."""
+    Build the master weight on all processes and scatter the relevant
+    chunk.
+    """
 
     set_tensor_model_parallel_attributes(
         tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
