@@ -295,7 +295,9 @@ class PPOActorInterface(model_api.ModelInterface):
         old_logp: torch.FloatTensor = input_.data["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = input_.data["packed_ref_logprobs"].float()
         prompt_mask = input_.data["prompt_mask"]
-        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"])).cuda()
+        input_lens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         reward_score = input_.data["rewards"].float()
         values = input_.data["values"].float()
@@ -474,7 +476,7 @@ def _ppo_critic_loss_from_model_outputs(
 
     cu_seqlens = (
         torch.nn.functional.pad(
-            torch.tensor(flat2d(input_.seqlens["packed_input_ids"])),
+            torch.tensor(flat2d(input_.seqlens["packed_input_ids"])).cumsum(0),
             (1, 0),
         )
         .int()
@@ -623,7 +625,9 @@ class PPOCriticInterface(model_api.ModelInterface):
         old_logp: torch.FloatTensor = input_.data["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = input_.data["packed_ref_logprobs"].float()
         prompt_mask = input_.data["prompt_mask"]
-        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
+        input_lens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         reward_score = input_.data["rewards"].float()
         values = input_.data["values"].float()

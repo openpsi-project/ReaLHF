@@ -140,10 +140,6 @@ class ReinforceInterface(model_api.ModelInterface):
             gen_lengths=gen_lengths,
         )
 
-        seqlens = [
-            torch.tensor([s], dtype=torch.int32)
-            for s in seq_lengths.cpu().numpy().tolist()
-        ]
         data = dict(
             packed_input_ids=packed_input_ids,
             prompt_mask=prompt_mask,
@@ -151,7 +147,7 @@ class ReinforceInterface(model_api.ModelInterface):
 
         res = SequenceSample.from_default(
             ids=input_.ids,
-            seqlens=seqlens,
+            seqlens=seq_lengths.cpu().numpy().tolist(),
             data=data,
         )
         return res
@@ -168,7 +164,9 @@ class ReinforceInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        seqlens = torch.tensor(input_.seqlens["packed_input_ids"], device=model.device)
+        seqlens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         short1seqlens = seqlens - 1
         rewards = torch.zeros(
             int(short1seqlens.sum()), dtype=torch.float32, device=model.device

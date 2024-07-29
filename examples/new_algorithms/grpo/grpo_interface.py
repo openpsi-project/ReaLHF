@@ -135,7 +135,6 @@ class GRPOInterface(model_api.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     enable_save: bool = True
-    force_no_logits_mask: bool = False
 
     def __post_init__(self):
         from realhf.impl.model.utils import ppo_functional
@@ -182,14 +181,16 @@ class GRPOInterface(model_api.ModelInterface):
         new_input_ids = []
         offset = 0
         for x in input_.seqlens["packed_input_ids"]:
-            new_input_ids += [packed_input_ids[offset : offset + x]] * self.group_size
-            offset += x
-        assert offset == sum(input_.seqlens["packed_input_ids"])
+            new_input_ids += [
+                packed_input_ids[offset : offset + x[0]]
+            ] * self.group_size
+            offset += x[0]
+        assert offset == sum([x[0] for x in input_.seqlens["packed_input_ids"]])
 
         grouped_input = SequenceSample.from_default(
             ids=list(range(input_.bs * self.group_size)),
             seqlens=[
-                int(x)
+                int(x[0])
                 for _ in range(self.group_size)
                 for x in input_.seqlens["packed_input_ids"]
             ],
@@ -243,7 +244,8 @@ class GRPOInterface(model_api.ModelInterface):
             packed_logprobs=packed_logprobs,
             packed_logits_mask=(
                 packed_logits_mask.bool()
-                if not self.force_no_logits_mask and packed_logits_mask is not None
+                if not self.generation_config.force_no_logits_mask
+                and packed_logits_mask is not None
                 else None
             ),
         )
@@ -332,7 +334,9 @@ class GRPOInterface(model_api.ModelInterface):
         module.eval()
 
         # Get the useful sequence length indices.
-        seqlens = torch.tensor(input_.seqlens["packed_input_ids"], device=model.device)
+        seqlens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         cu_seqlens = torch.nn.functional.pad(seqlens.cumsum(0), (1, 0)).int()
         short1seqlens = seqlens - 1
         short1cu_seqlens = torch.nn.functional.pad(
@@ -410,7 +414,7 @@ class GRPOInterface(model_api.ModelInterface):
                 ref_logp=input_.data["packed_ref_logprobs"],
                 packed_logits_mask=(
                     None
-                    if self.force_no_logits_mask
+                    if self.generation_config.force_no_logits_mask
                     else input_.data.get("packed_logits_mask")
                 ),
             ),
