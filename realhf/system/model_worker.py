@@ -465,7 +465,8 @@ class ModelWorker(worker_base.Worker):
                     f"so it can't use offload."
                 )
                 return
-            m.async_offload()
+            if not m._offloaded:
+                m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
         blogger.debug(
