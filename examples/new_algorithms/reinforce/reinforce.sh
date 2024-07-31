@@ -33,6 +33,7 @@ TRIAL_NAME=$MODEL_FAMILY-$MODE-manual
 
 # The following command shows an example of manual allocation on two nodes,
 # but it can be modified according to the specific model and the available GPUs.
+unset CLUSTER_SPEC_PATH
 python3 examples/new_algorithms/reinforce/reinforce_exp.py reinforce \
     mode=$MODE \
     experiment_name=$EXP_NAME \

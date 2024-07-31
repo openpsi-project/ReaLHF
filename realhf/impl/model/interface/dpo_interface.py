@@ -11,6 +11,7 @@ import realhf.base.logging as logging
 import realhf.impl.model.utils.dpo_functional as dpo_functional
 from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
 
@@ -22,7 +23,7 @@ def _dpo_loss_from_model_outputs(
     input_: SequenceSample,
     beta: float,
 ):
-    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
     cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
     packed_input_ids = input_.data["packed_input_ids"]
     prompt_lens = input_.data["prompt_lens"]
@@ -113,7 +114,7 @@ class DPOInterface(model_api.ModelInterface):
         if logits is None:
             return None
 
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         prompt_lens = input_.data["prompt_lens"]
 
@@ -154,10 +155,7 @@ class DPOInterface(model_api.ModelInterface):
             ids=input_.ids,
             data=dict(seqlogp=seqlogp),
             seqlens=dict(
-                seqlogp=[
-                    torch.tensor([len(slens)], dtype=torch.int32)
-                    for slens in input_.seqlens["packed_input_ids"]
-                ]
+                seqlogp=[[len(slens)] for slens in input_.seqlens["packed_input_ids"]]
             ),
         )
         return res

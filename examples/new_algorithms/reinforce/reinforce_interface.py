@@ -8,6 +8,7 @@ import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 
 logger = logging.getLogger("Reinforce Interface")
 
@@ -20,7 +21,7 @@ def _reinforce_loss_from_model_outputs(
     from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
 
     packed_input_ids = input_.data["packed_input_ids"]
-    seqlens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+    seqlens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
     cu_seqlens = torch.nn.functional.pad(seqlens.cumsum(0), (1, 0)).int()
     shift_one_indices = torch.cat(
         [
@@ -130,8 +131,8 @@ class ReinforceInterface(model_api.ModelInterface):
             prompt_mask,
         ) = concat_prompt_to_generation_output(
             packed_prompts=input_.data["packed_input_ids"],
-            prompt_lengths=torch.cat(input_.seqlens["packed_input_ids"]).to(
-                model.device
+            prompt_lengths=torch.tensor(
+                flat2d(input_.seqlens["packed_input_ids"]), device=model.device
             ),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
@@ -139,10 +140,6 @@ class ReinforceInterface(model_api.ModelInterface):
             gen_lengths=gen_lengths,
         )
 
-        seqlens = [
-            torch.tensor([s], dtype=torch.int32)
-            for s in seq_lengths.cpu().numpy().tolist()
-        ]
         data = dict(
             packed_input_ids=packed_input_ids,
             prompt_mask=prompt_mask,
@@ -150,7 +147,7 @@ class ReinforceInterface(model_api.ModelInterface):
 
         res = SequenceSample.from_default(
             ids=input_.ids,
-            seqlens=seqlens,
+            seqlens=seq_lengths.cpu().numpy().tolist(),
             data=data,
         )
         return res
@@ -167,7 +164,9 @@ class ReinforceInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        seqlens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+        seqlens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         short1seqlens = seqlens - 1
         rewards = torch.zeros(
             int(short1seqlens.sum()), dtype=torch.float32, device=model.device
@@ -233,6 +232,9 @@ class ReinforceInterface(model_api.ModelInterface):
 
         model.inc_version()
 
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stats:
             bs = int(stats["bs"])
             stats = dict(
@@ -241,5 +243,6 @@ class ReinforceInterface(model_api.ModelInterface):
                 rewards=float(stats["rewards"] / bs),
             )
             stats["advantage"] = stats["rewards"] - stats["baseline_rewards"]
+            stats.update(global_stats)
 
         return dict(stats) if stats else {}
