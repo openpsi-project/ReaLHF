@@ -164,6 +164,7 @@ def prepare_generate_inputs(
         ys[-1].cache_seqlens = cache_seqlens
         block_ys = block_ys[:-1]
 
+    alloc_kvcache_time = 0
     for y, layer_idx in zip(block_ys, layer_indices):
         assert (
             y.k_cache is not None
@@ -176,6 +177,11 @@ def prepare_generate_inputs(
         )
         k_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "k_caches")
         v_cache_handle = cuda_graph.input_buffer_handle(cuda_graph_name, "v_caches")
+
+        # FIXME:
+        import time
+
+        st = time.monotonic()
         if k_cache_handle is not None and v_cache_handle is not None:
             k_cache = k_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
             v_cache = v_cache_handle[layer_idx - min_layer_index][:bs, :kvcache_seqlen]
@@ -190,6 +196,10 @@ def prepare_generate_inputs(
                 dtype=y.v_cache.dtype,
                 device=y.v_cache.device,
             )
+        torch.cuda.synchronize()
+        et = time.monotonic()
+        alloc_kvcache_time += et - st
+
         indices = (
             torch.arange(kvcache_seqlen, device=module.device, dtype=torch.long)[
                 None, :
@@ -201,6 +211,8 @@ def prepare_generate_inputs(
         y.k_cache = k_cache
         y.v_cache = v_cache
         y.cache_seqlens = cache_seqlens
+
+    logger.info(f"ALLOC KVCACHE MEM: {alloc_kvcache_time:.4f}s")
 
     return x, ys
 
@@ -351,6 +363,10 @@ def generate(
     gen_tokens, log_probs, logits_mask = _gather_gen_output_from_list(
         gen_token_ph, gen_logprob_ph, gen_logits_mask_ph
     )
+
+    if gconfig.use_cuda_graph:
+        cuda_graph.destroy(cuda_graph_name)
+
     return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
 
 

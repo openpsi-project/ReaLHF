@@ -253,6 +253,23 @@ if _is_cuda():
     )
     ext_modules.append(interval_op_cuda)
 
+    # FIXME: check version compatibility
+    if torch.__version__.startswith("2.3.1"):
+        print("torch==2.3.1, install custom cudagraph")
+        custom_cudagraph = CUDAExtension(
+            name="realhf._C.custom_cudagraph",
+            sources=[
+                "csrc/custom_cudagraph/custom_cudagraph.cpp",
+                "csrc/custom_cudagraph/pybind.cpp",
+            ],
+            extra_compile_args={
+                "cxx": CXX_FLAGS,
+                "nvcc": NVCC_FLAGS,
+            },
+            libraries=["cuda"],
+        )
+        ext_modules.append(custom_cudagraph)
+
 search_extension = setuptools.Extension(
     name="realhf._C.mdm_search",
     sources=[

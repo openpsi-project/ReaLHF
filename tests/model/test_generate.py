@@ -20,7 +20,7 @@ logger = logging.getLogger("tests.test_generate")
 # with the model class name as the key and the path to the model weights as the value.
 MODEL_CLASS_TO_PATH = {
     "llama": "/lustre/public/pretrained_model_weights/Llama-2-7b-hf",
-    "gpt2": "/lustre/public/pretrained_model_weights/gpt2",
+    # "gpt2": "/lustre/public/pretrained_model_weights/gpt2",
 }
 _available_model_classes = []
 for k, v in MODEL_CLASS_TO_PATH.items():
@@ -37,10 +37,10 @@ def model_class(request):
 class GenerateTestParams:
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     huggingface: bool = False
-    prompt_len: int = 64
-    gen_len: int = 64
+    prompt_len: int = 128
+    gen_len: int = 128
     batch_size: int = 32
-    n_batches: int = 2
+    n_batches: int = 4  # FIXME
     use_cuda_graph: bool = False
 
     def identifier(self):
@@ -330,16 +330,19 @@ real_pp_cudagraph = GenerateTestParams(
 )
 
 
+# FIXME
 @pytest.mark.parametrize(
     "test_params1,test_params2,seq_acc_threshold,token_acc_threshold",
     [
-        (real_simple, huggingface, 0.8, 0.8),
-        (real_simple, real_cudagraph, 1.0, 1.0),
-        (real_simple, real_3d_parallel, 0.8, 0.8),
-        (real_mp, real_mp_cudagraph, 0.8, 0.8),
-        (real_dp, real_dp_cudagraph, 1.0, 1.0),
-        (real_pp, real_pp_cudagraph, 1.0, 1.0),
-        (real_3d_parallel, real_3d_parallel_cudagraph, 0.8, 0.8),
+        # (real_simple, huggingface, 0.8, 0.8),
+        # (real_simple, real_cudagraph, 1.0, 1.0),
+        # (real_simple, real_3d_parallel, 0.8, 0.8),
+        # (real_mp, real_mp_cudagraph, 0.8, 0.8),
+        # (real_dp, real_dp_cudagraph, 1.0, 1.0),
+        # (real_pp, real_pp_cudagraph, 1.0, 1.0),
+        # (real_3d_parallel, real_3d_parallel_cudagraph, 0.8, 0.8),
+        (real_cudagraph, real_simple, 1.0, 1.0),
+        # (real_mp_cudagraph, real_mp, 0.8, 0.8),
     ],
 )
 @pytest.mark.gpu

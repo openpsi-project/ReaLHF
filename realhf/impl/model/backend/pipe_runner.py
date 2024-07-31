@@ -854,6 +854,11 @@ class PipelineRunner:
             *list(zip(*generate_output))
         )
 
+        if gconfig.use_cuda_graph:
+            for mbid in range(num_micro_batches):
+                cuda_graph_name = f"decoding_{mbid}"
+                cuda_graph.destroy(cuda_graph_name)
+
         return gen_tokens, log_probs, logits_mask, None, None
 
     def train_batch(
