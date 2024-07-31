@@ -179,6 +179,9 @@ class DPOInterface(model_api.ModelInterface):
         model.inc_version()
 
         res = {}
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stats:
             res = dict(
                 loss=float(stats["loss"]) / int(stats["n_seqs"]),
@@ -186,6 +189,7 @@ class DPOInterface(model_api.ModelInterface):
                 neg_score=float(stats["neg_score"]) / int(stats["n_seqs"]),
                 kl=float(stats["kl"]) / int(stats["n_seqs"]),
                 n_seqs=int(stats["n_seqs"]),
+                **global_stats,
             )
         return res
 

@@ -449,6 +449,7 @@ class PPOActorInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
 
+        # FIXME: It only logs the MoE aux loss of the final PPO mini-batch.
         global_stats.update(
             constants.log_global_stats_tracker(
                 return_dict=True, clear_stats_after_logging=True
@@ -717,11 +718,6 @@ class PPOCriticInterface(model_api.ModelInterface):
         dist.all_reduce(returns, group=constants.data_parallel_group())
         dist.all_reduce(n_tokens, group=constants.data_parallel_group())
         global_stats = dict(returns=float(returns / n_tokens), n_tokens=int(n_tokens))
-        global_stats.update(
-            constants.log_global_stats_tracker(
-                return_dict=True, clear_stats_after_logging=True
-            )
-        )
 
         # Run mini-batched PPO training!
         train_stats = collections.defaultdict(lambda: 0)
@@ -746,6 +742,12 @@ class PPOCriticInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
 
+        # FIXME: It only logs the MoE aux loss of the final PPO mini-batch.
+        global_stats.update(
+            constants.log_global_stats_tracker(
+                return_dict=True, clear_stats_after_logging=True
+            )
+        )
         if train_stats:
             train_stats = dict(
                 value_loss=float(train_stats["value_loss"] / n_tokens),

@@ -232,6 +232,9 @@ class ReinforceInterface(model_api.ModelInterface):
 
         model.inc_version()
 
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stats:
             bs = int(stats["bs"])
             stats = dict(
@@ -240,5 +243,6 @@ class ReinforceInterface(model_api.ModelInterface):
                 rewards=float(stats["rewards"] / bs),
             )
             stats["advantage"] = stats["rewards"] - stats["baseline_rewards"]
+            stats.update(global_stats)
 
         return dict(stats) if stats else {}

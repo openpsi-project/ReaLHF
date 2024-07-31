@@ -465,6 +465,10 @@ class GRPOInterface(model_api.ModelInterface):
                 advantages=float(stats["advantages"]) / token_denorm,
                 rewards=rewards_mean,
                 rewards_std=rewards_std,
+                # FIXME: It only logs the MoE aux loss of the final PPO mini-batch.
+                **constants.log_global_stats_tracker(
+                    return_dict=True, clear_stats_after_logging=True
+                ),
             )
 
         return dict(stats) if stats else {}
