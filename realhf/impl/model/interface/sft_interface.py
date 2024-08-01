@@ -8,6 +8,7 @@ import tqdm
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.utils.functional import (
     build_shift_one_indices,
@@ -20,7 +21,7 @@ def compute_packed_sft_loss(
     input_: SequenceSample,
 ) -> torch.Tensor:
     packed_input_ids: torch.Tensor = input_.data["packed_input_ids"]
-    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
     cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
     prompt_mask = input_.data["prompt_mask"]
 

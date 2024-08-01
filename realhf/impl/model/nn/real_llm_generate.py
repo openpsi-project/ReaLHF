@@ -128,9 +128,12 @@ def genstep(
         unfinished_sequences.logical_and_(generated_idx < gconfig.max_new_tokens - 1)
         terminate = unfinished_sequences.max() == 0
 
-    logits_mask = next_token_logits == torch.finfo(next_token_logits.dtype).min
-    if not logits_mask.any():
+    if gconfig.force_no_logits_mask:
         logits_mask = None
+    else:
+        logits_mask = next_token_logits == torch.finfo(next_token_logits.dtype).min
+        if not logits_mask.any():
+            logits_mask = None
 
     if constants.model_parallel_world_size() > 1:
         handle.wait()
@@ -145,6 +148,9 @@ def prepare_generate_inputs(
     ys: List[PipeCacheData],
     cuda_graph_name: str,
 ):
+    if gconfig.top_p >= 1 and gconfig.top_k >= module.config.vocab_size:
+        gconfig.force_no_logits_mask = True
+
     cu_seqlens = x.cu_seqlens
     input_lens = cu_seqlens[1:] - cu_seqlens[:-1]
     # assert constants.pipe_parallel_world_size() >= 2

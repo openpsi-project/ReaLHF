@@ -10,6 +10,7 @@ import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 
 logger = logging.getLogger("GRPO Interface")
 
@@ -30,7 +31,7 @@ def _grpo_loss(
     )
 
     packed_input_ids = input_.data["packed_input_ids"]
-    seqlens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+    seqlens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]), device="cuda")
     cu_seqlens = torch.nn.functional.pad(seqlens.cumsum(0), (1, 0)).int()
     ppo_loss_mask = input_.data["ppo_loss_mask"]
     advantages = input_.data["advantages"].float()
@@ -134,7 +135,6 @@ class GRPOInterface(model_api.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     enable_save: bool = True
-    force_no_logits_mask: bool = False
 
     def __post_init__(self):
         from realhf.impl.model.utils import ppo_functional
@@ -181,14 +181,16 @@ class GRPOInterface(model_api.ModelInterface):
         new_input_ids = []
         offset = 0
         for x in input_.seqlens["packed_input_ids"]:
-            new_input_ids += [packed_input_ids[offset : offset + x]] * self.group_size
-            offset += x
-        assert offset == sum(input_.seqlens["packed_input_ids"])
+            new_input_ids += [
+                packed_input_ids[offset : offset + x[0]]
+            ] * self.group_size
+            offset += x[0]
+        assert offset == sum([x[0] for x in input_.seqlens["packed_input_ids"]])
 
         grouped_input = SequenceSample.from_default(
             ids=list(range(input_.bs * self.group_size)),
             seqlens=[
-                int(x)
+                int(x[0])
                 for _ in range(self.group_size)
                 for x in input_.seqlens["packed_input_ids"]
             ],
@@ -222,8 +224,8 @@ class GRPOInterface(model_api.ModelInterface):
             prompt_mask,
         ) = concat_prompt_to_generation_output(
             packed_prompts=grouped_input.data["packed_input_ids"],
-            prompt_lengths=torch.cat(grouped_input.seqlens["packed_input_ids"]).to(
-                model.device
+            prompt_lengths=torch.tensor(
+                flat2d(grouped_input.seqlens["packed_input_ids"]), device=model.device
             ),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
@@ -242,7 +244,8 @@ class GRPOInterface(model_api.ModelInterface):
             packed_logprobs=packed_logprobs,
             packed_logits_mask=(
                 packed_logits_mask.bool()
-                if not self.force_no_logits_mask and packed_logits_mask is not None
+                if not self.generation_config.force_no_logits_mask
+                and packed_logits_mask is not None
                 else None
             ),
         )
@@ -299,7 +302,7 @@ class GRPOInterface(model_api.ModelInterface):
             and input_.data["packed_logits_mask"] is not None
         ):
             apply_logits_mask(logits, input_.data["packed_logits_mask"])
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         logprobs = gather_packed_shifted_log_probs(
             logits, cu_seqlens, input_.data["packed_input_ids"]
@@ -311,7 +314,9 @@ class GRPOInterface(model_api.ModelInterface):
             trailing_shapes=dict(packed_ref_logprobs=()),
             data=dict(packed_ref_logprobs=logprobs),
             seqlens=dict(
-                packed_ref_logprobs=[x - 1 for x in input_.seqlens["packed_input_ids"]]
+                packed_ref_logprobs=[
+                    [xx - 1 for xx in x] for x in input_.seqlens["packed_input_ids"]
+                ]
             ),
         )
         return res
@@ -329,7 +334,9 @@ class GRPOInterface(model_api.ModelInterface):
         module.eval()
 
         # Get the useful sequence length indices.
-        seqlens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+        seqlens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         cu_seqlens = torch.nn.functional.pad(seqlens.cumsum(0), (1, 0)).int()
         short1seqlens = seqlens - 1
         short1cu_seqlens = torch.nn.functional.pad(
@@ -407,7 +414,7 @@ class GRPOInterface(model_api.ModelInterface):
                 ref_logp=input_.data["packed_ref_logprobs"],
                 packed_logits_mask=(
                     None
-                    if self.force_no_logits_mask
+                    if self.generation_config.force_no_logits_mask
                     else input_.data.get("packed_logits_mask")
                 ),
             ),
@@ -458,6 +465,10 @@ class GRPOInterface(model_api.ModelInterface):
                 advantages=float(stats["advantages"]) / token_denorm,
                 rewards=rewards_mean,
                 rewards_std=rewards_std,
+                # FIXME: It only logs the MoE aux loss of the final PPO mini-batch.
+                **constants.log_global_stats_tracker(
+                    return_dict=True, clear_stats_after_logging=True
+                ),
             )
 
         return dict(stats) if stats else {}

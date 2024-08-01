@@ -10,6 +10,7 @@ import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 
@@ -98,9 +99,11 @@ class PipelinableInferenceEngine:
                 num_micro_batches = 1
             stat = collections.defaultdict(int)
             for mb_input in input_.split(num_micro_batches):
-                input_lens = torch.cat(
-                    mb_input.seqlens["packed_input_ids"], dim=0
-                ).cuda()
+                input_lens = torch.tensor(
+                    flat2d(mb_input.seqlens["packed_input_ids"]),
+                    dtype=torch.int32,
+                    device="cuda",
+                )
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
                 model_output = self.module(
@@ -132,9 +135,11 @@ class PipelinableInferenceEngine:
                 num_micro_batches = 1
             outputs = []
             for mb_input in input_.split(num_micro_batches):
-                input_lens = torch.cat(
-                    mb_input.seqlens["packed_input_ids"], dim=0
-                ).cuda()
+                input_lens = torch.tensor(
+                    flat2d(mb_input.seqlens["packed_input_ids"]),
+                    dtype=torch.int32,
+                    device="cuda",
+                )
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
                 model_output = self.module(
@@ -171,9 +176,11 @@ class PipelinableInferenceEngine:
                 num_micro_batches = 1
             sequences, scores, logits_mask = [], [], []
             for mb_input in input_.split(num_micro_batches):
-                input_lens = torch.cat(
-                    mb_input.seqlens["packed_input_ids"], dim=0
-                ).cuda()
+                input_lens = torch.tensor(
+                    flat2d(mb_input.seqlens["packed_input_ids"]),
+                    dtype=torch.int32,
+                    device="cuda",
+                )
                 max_seqlen = int(max(input_lens))
                 cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
                 res = self.module.generate(

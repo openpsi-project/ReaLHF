@@ -53,6 +53,19 @@ class GenerationHyperparameters:
         This will introduce minor overhead but released the kvcache
         when not running generation.
     :type force_cudagraph_recapture: bool
+    :param force_no_logits_mask: Whether to omit logits mask.
+        The logits mask will be produced when using top-k or top-p sampling,
+        where it is used to mark tokens that are filtered out.
+        This mask will be used by the reference model and the actor model
+        during training in order to align inferred logits with that during
+        generation and produce accurate KLs.
+        Logits mask with top-k/top-p sampling will largely improve the
+        stability of PPO training because it narrows the action space.
+        However, this benefit does not come for free.
+        The logits mask will occupy a large amount of additional GPU memory.
+        If this option is set to True, logits mask will be forcely omitted to
+        save GPU memory, but the learning performance may also drop.
+    :type force_no_logits_mask: bool
     """
 
     max_new_tokens: int = 256
@@ -63,6 +76,7 @@ class GenerationHyperparameters:
     temperature: float = 1.0
     use_cuda_graph: bool = False
     force_cudagraph_recapture: bool = True
+    force_no_logits_mask: bool = False
 
     def __post_init__(self):
         if self.temperature == 0.0:

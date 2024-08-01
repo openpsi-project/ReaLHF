@@ -14,6 +14,7 @@ import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedu
 import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core.data_api import SequenceSample
 from realhf.api.core.model_api import GenerationHyperparameters
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.nn.real_llm_generate import (
@@ -54,7 +55,9 @@ def _split_and_prefill_pipe_input(
     partition_min_size = input_.bs // n_mbs
     splitted = input_.split(n_mbs, min_size=partition_min_size)
 
-    batch_seqlens = [torch.cat(s.seqlens["packed_input_ids"]) for s in splitted]
+    batch_seqlens = [
+        torch.tensor(flat2d(s.seqlens["packed_input_ids"])) for s in splitted
+    ]
     assert all(all(x > 0 for x in sls) for sls in batch_seqlens)
 
     # Sanity check to ensure that the order of splitted sequences

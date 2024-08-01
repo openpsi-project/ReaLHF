@@ -34,6 +34,7 @@ except (ModuleNotFoundError, ImportError):
 from realhf.api.core import model_api
 from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants, logging
+from realhf.base.datapack import flat2d
 from realhf.impl.model.backend.inference import PipelinableInferenceEngine
 from realhf.impl.model.backend.pipe_runner import PipelineRunner, PipeTrainInstrSet
 from realhf.impl.model.modules.mlp import get_activation_fn
@@ -761,9 +762,11 @@ class ReaLMegatronEngine:
                 for i, mb_input in enumerate(input_.split(num_micro_batches)):
                     if i == num_micro_batches - 1:
                         no_sync_ctx.__exit__(None, None, None)
-                    input_lens = torch.cat(
-                        mb_input.seqlens["packed_input_ids"], dim=0
-                    ).cuda()
+                    input_lens = torch.tensor(
+                        flat2d(mb_input.seqlens["packed_input_ids"]),
+                        dtype=torch.int32,
+                        device="cuda",
+                    )
                     max_seqlen = int(max(input_lens))
                     cu_seqlens = torch.nn.functional.pad(
                         input_lens.cumsum(0), (1, 0)

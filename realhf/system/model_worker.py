@@ -465,7 +465,8 @@ class ModelWorker(worker_base.Worker):
                     f"so it can't use offload."
                 )
                 return
-            m.async_offload()
+            if not m._offloaded:
+                m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
         blogger.debug(
@@ -582,9 +583,13 @@ class ModelWorker(worker_base.Worker):
                         self.__data_storage[x.ids[0]] = x
                         data_loaded.append(x)
 
+                if len(data_loaded) > 0:
+                    meta_sample = data_api.SequenceSample.gather(data_loaded).meta()
+                else:
+                    meta_sample = None
                 res = data_api.DataBatchMeta(
                     dp_rank=self._dp_rank,
-                    meta_sample=data_api.SequenceSample.gather(data_loaded).meta(),
+                    meta_sample=meta_sample,
                     epoch=self.__dataset_epoch,
                     is_final_batch=(
                         self.__dataset_batch_counter == len(self.__dataloader) - 1

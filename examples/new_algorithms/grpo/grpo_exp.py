@@ -86,7 +86,6 @@ class GRPOConfig(CommonExperimentConfig):
                 **copy.deepcopy(self.ppo_kwargs),
                 "generation_config": self.ppo.gen,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                "force_no_logits_mask": self.ppo.force_no_logits_mask,
                 "adv_norm": self.ppo.adv_norm,
                 "group_size": self.group_size,
             },
@@ -138,7 +137,7 @@ class GRPOConfig(CommonExperimentConfig):
         )
 
         inf_ref_inputs = [f"packed_input_ids"]
-        if not self.ppo.force_no_logits_mask:
+        if not self.ppo.gen.force_no_logits_mask:
             inf_ref_inputs.append(
                 f"packed_logits_mask",
             )
@@ -167,7 +166,7 @@ class GRPOConfig(CommonExperimentConfig):
             f"prompt_mask",
             f"packed_logits_mask",
         ]
-        if self.ppo.force_no_logits_mask:
+        if self.ppo.gen.force_no_logits_mask:
             train_actor_inputs.remove(f"packed_logits_mask")
         train_actor = MFCDef(
             name="actor_train",
