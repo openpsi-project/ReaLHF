@@ -64,8 +64,8 @@ RUN pip3 install -r /requirements.txt && rm /requirements.txt
 # environment, please build them first.
 # If you can't build these packages, use our provided docker images.
 
-ENV TE_WHL_NAME=transformer_engine-1.7.0+4e7caa1-cp310-cp310-linux_x86_64.whl
-ENV FLA_WHL_NAME=flash_attn-2.5.9-cp310-cp310-linux_x86_64.whl
+ENV TE_WHL_NAME=transformer_engine-1.8.0+3ec998e-cp310-cp310-linux_x86_64.whl
+ENV FLA_WHL_NAME=flash_attn-2.6.3-cp310-cp310-linux_x86_64.whl
 COPY ./dist/$TE_WHL_NAME /$TE_WHL_NAME
 # We don't use TransformerEngine's flash-attn integration, so it's okay to disrespect dependencies
 RUN pip3 install /$TE_WHL_NAME --no-dependencies && rm /$TE_WHL_NAME

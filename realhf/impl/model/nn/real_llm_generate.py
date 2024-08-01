@@ -210,6 +210,7 @@ def maybe_capture_cudagraph(
     x: PipeTransferData,
     ys: List[PipeCacheData],
     cuda_graph_name: str,
+    force_recapture: bool,
 ):
     bs = x.cu_seqlens.shape[0] - 1
     cache_seqlens = ys[0].cache_seqlens
@@ -234,7 +235,7 @@ def maybe_capture_cudagraph(
         cuda_graph_name,
         module._forward,
         input_buffers,
-        force_recapture=False,
+        force_recapture=force_recapture,
         no_grad=True,
     )
 
@@ -310,7 +311,11 @@ def generate(
     graph = None
     if gconfig.use_cuda_graph:
         graph, input_buffers, output_buffers = maybe_capture_cudagraph(
-            model, x, ys, cuda_graph_name
+            model,
+            x,
+            ys,
+            cuda_graph_name,
+            force_recapture=gconfig.force_cudagraph_recapture,
         )
 
     # The main loop.
@@ -351,6 +356,9 @@ def generate(
     gen_tokens, log_probs, logits_mask = _gather_gen_output_from_list(
         gen_token_ph, gen_logprob_ph, gen_logits_mask_ph
     )
+    if gconfig.use_cuda_graph and gconfig.force_cudagraph_recapture:
+        cuda_graph.destroy(cuda_graph_name)
+
     return gen_tokens, log_probs, logits_mask, ys[1:-1], prompt_logits
 
 

@@ -399,7 +399,13 @@ class PipeGenInstrSet:
             assert constants.pipe_parallel_world_size() >= 2
             x, ys = prepare_generate_inputs(module, gconfig, x, ys, cuda_graph_name)
             if gconfig.use_cuda_graph:
-                graph, _, _ = maybe_capture_cudagraph(module, x, ys, cuda_graph_name)
+                graph, _, _ = maybe_capture_cudagraph(
+                    module,
+                    x,
+                    ys,
+                    cuda_graph_name,
+                    force_recapture=gconfig.force_cudagraph_recapture,
+                )
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
 
@@ -853,6 +859,10 @@ class PipelineRunner:
         gen_tokens, log_probs, logits_mask = _gather_minibatch_gen_outputs(
             *list(zip(*generate_output))
         )
+
+        if gconfig.use_cuda_graph and gconfig.force_cudagraph_recapture:
+            for micro_batch_id in range(num_micro_batches):
+                cuda_graph.destroy(f"decoding_{micro_batch_id}")
 
         return gen_tokens, log_probs, logits_mask, None, None
 
