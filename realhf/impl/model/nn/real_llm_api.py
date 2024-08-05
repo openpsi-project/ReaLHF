@@ -33,9 +33,6 @@ from .real_llm_base import (
     ReaLModelBlock,
     SequenceParallelCriticHead,
     VocabPositionEmbedding,
-    real_model_embed_param_count,
-    real_model_head_param_count,
-    real_model_tblock_param_count,
 )
 from .real_llm_generate import generate
 from .real_llm_parallel import partition_pipeline_layers
@@ -119,9 +116,8 @@ class ReaLModel(nn.Module):
         self.layer_mapping = partition_pipeline_layers(
             config,
             constants.pipe_parallel_world_size(),
-            real_model_embed_param_count,
-            real_model_tblock_param_count,
-            real_model_head_param_count,
+            dtype=self.dtype,
+            mp_size=constants.model_parallel_world_size(),
         )
         self.layer_idx_start = self.layer_mapping[constants.pipe_parallel_rank()][0]
         self.layer_idx_end = self.layer_mapping[constants.pipe_parallel_rank()][1]
@@ -156,7 +152,6 @@ class ReaLModel(nn.Module):
             mp_size=constants.model_parallel_world_size(),
             pp_size=constants.pipe_parallel_world_size(),
             dp_size=constants.data_parallel_world_size(),
-            sequence_parallel=constants.sequence_parallel(),
             head_param_point_to_embedding=self.head_param_point_to_embedding,
         )
         self.contiguous_param = None
@@ -553,9 +548,8 @@ class ReaLModel(nn.Module):
         to_layer_mapping = partition_pipeline_layers(
             to_model_config,
             to_topo.get_dim("pipe"),
-            real_model_embed_param_count,
-            real_model_tblock_param_count,
-            real_model_head_param_count,
+            dtype=self.dtype,
+            mp_size=to_topo.get_dim("model"),
         )
         to_layers_handle_dict = {}
         to_layer_indices = []
@@ -584,7 +578,6 @@ class ReaLModel(nn.Module):
             mp_size=to_topo.get_dim("model"),
             dp_size=to_topo.get_dim("data"),
             pp_size=to_topo.get_dim("pipe"),
-            sequence_parallel=to_topo.sequence_parallel,
             head_param_point_to_embedding=to_model_head_param_point_to_embedding,
         )
         if len(to_layer_indices) > 0:
@@ -873,6 +866,7 @@ def make_real_model(
     init_critic_from_actor: bool,
     dtype: Optional[str] = None,
     hf_model_family: Optional[str] = None,
+    approx_n_tokens_per_call: Optional[int] = None,
 ) -> model_api.Model:
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
@@ -888,6 +882,7 @@ def make_real_model(
         model_path=model_path,
         is_critic=is_critic,
     )
+    mconfig.approx_n_tokens_per_call = approx_n_tokens_per_call
     m = ReaLModel(mconfig, dtype=dtype, device=device)
     m._instantiation_hooks.append(
         lambda: getattr(m, f"from_{hf_model_family}")(

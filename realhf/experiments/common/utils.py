@@ -13,7 +13,6 @@ from realhf.api.quickstart.device_mesh import RPCAllocation
 from realhf.api.quickstart.model import (
     ModelTrainEvalConfig,
     ParallelismConfig,
-    get_real_model_config,
     parallelism_eq,
 )
 from realhf.base import logging

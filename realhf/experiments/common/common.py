@@ -412,6 +412,11 @@ class CommonExperimentConfig(Experiment):
                 rpcs = [rpc_alloc.rpc for rpc_alloc in model_rpc_allocs]
                 rpc_alloc = model_rpc_allocs[0]
                 model_cfg = self.models[model_name.role]
+                approx_n_tokens_per_call = None
+                if any(rpc.approx_n_tokens is not None for rpc in rpcs):
+                    approx_n_tokens_per_call = max(
+                        filter(None, (rpc.approx_n_tokens for rpc in rpcs))
+                    )
                 model = get_real_model_config(
                     model_path=model_cfg.path,
                     hf_model_family=model_cfg.type._class,
@@ -419,6 +424,7 @@ class CommonExperimentConfig(Experiment):
                     init_critic_from_actor=model_cfg.init_critic_from_actor,
                     dtype="bf16" if model_cfg.enable_bf16 else "fp16",
                     lora=model_cfg.lora,
+                    approx_n_tokens_per_call=approx_n_tokens_per_call,
                 )
                 mapping = rpc_alloc.device_mesh.mapping
                 gradient_checkpointing = model_cfg.gradient_checkpointing and any(

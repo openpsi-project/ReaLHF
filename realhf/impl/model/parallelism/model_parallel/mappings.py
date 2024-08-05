@@ -127,6 +127,8 @@ def _reduce_scatter_along_first_dim(input_):
 
     dim_size[0] = dim_size[0] // world_size
 
+    # NOTE: We don't use in-place reduce-scatter because we don't want to
+    # corrupt the activations which will be used during the backward pass.
     output = torch.empty(
         dim_size, dtype=input_.dtype, device=torch.cuda.current_device()
     )

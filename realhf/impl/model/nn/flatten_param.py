@@ -15,16 +15,12 @@ from realhf.api.core import model_api
 from realhf.api.core.config import ModelName
 from realhf.base import logging
 
-from .real_llm_base import (
-    real_model_embedding_param_keys,
-    real_model_head_param_keys,
-    real_model_tblock_param_keys,
-)
+from .real_llm_base import ReaLModelParamKeys
 from .real_llm_parallel import (
+    IntervalPartitionFunctor,
+    ShapePartitionFunctor,
     get_real_model_param_shape,
-    intervals_partition_fn,
     mp_partition_key,
-    shape_partition_fn,
 )
 
 try:
@@ -189,7 +185,6 @@ def set_intervals(
 def param_size_from_keys(
     config: model_api.ReaLModelConfig,
     src_mp_size: int,
-    sequence_parallel: bool,
     sd_keys: List[str],
     src2dst_tp_size: int,
     src2dst_tp_rank: int,
@@ -205,11 +200,11 @@ def param_size_from_keys(
             continue
         new_shape = mp_partition_key(
             k,
-            get_real_model_param_shape(k, config, src_mp_size, sequence_parallel),
+            get_real_model_param_shape(k, config, src_mp_size),
             src2dst_tp_rank,
             src2dst_tp_size,
             config,
-            partition_fn=shape_partition_fn,
+            pfunctor=ShapePartitionFunctor,
         )
         param_size += int(np.prod(new_shape))
     return param_size
@@ -221,11 +216,11 @@ def build_param_spec(
     dp_size: int,
     mp_size: int,
     pp_size: int,
-    sequence_parallel: bool,
     head_param_point_to_embedding: bool,
     bucket_size: int = 40000000,
 ) -> Tuple[Dict[str, ContiguousParamSpec], int]:
     # TODO: omit parameters that do not require gradient?
+    # TODO: allow different dtypes for different buckets
     if len(layer_indices) == 0:
         return {}, 0
 
@@ -234,11 +229,11 @@ def build_param_spec(
     sd_keys = []
     for layer_idx in sorted(layer_indices):
         if layer_idx == 0:
-            sd_keys += real_model_embedding_param_keys(config)
+            sd_keys += ReaLModelParamKeys.embed(config)
         elif layer_idx == config.n_layers + 1:
-            sd_keys += real_model_head_param_keys(config)
+            sd_keys += ReaLModelParamKeys.head(config)
         else:
-            sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
+            sd_keys += ReaLModelParamKeys.tblock(config, layer_idx - 1)
 
     # In the reverse order as backpropagation, consistent with Megatron.
     sd_keys = list(reversed(sd_keys))
@@ -274,7 +269,7 @@ def build_param_spec(
         if head_param_point_to_embedding and k == f"{config.n_layers + 1}.weight":
             continue
 
-        shape = get_real_model_param_shape(k, config, mp_size, sequence_parallel)
+        shape = get_real_model_param_shape(k, config, mp_size)
         numel = int(np.prod(shape))
         data_end_index = data_start_index + numel
 
@@ -309,7 +304,6 @@ def param_intervals_from_keys(
     head_param_point_to_embedding: bool,
     param_spec: Dict[str, ContiguousParamSpec],
     mp_size: int,
-    sequence_parallel: bool,
     sd_keys: List[str],
     portion_size: int,
     portion_rank: int,
@@ -317,7 +311,6 @@ def param_intervals_from_keys(
     param_size = param_size_from_keys(
         config=config,
         src_mp_size=mp_size,
-        sequence_parallel=sequence_parallel,
         sd_keys=sd_keys,
         src2dst_tp_size=portion_size,
         src2dst_tp_rank=portion_rank,
@@ -342,11 +335,11 @@ def param_intervals_from_keys(
         ) not in _FLAT_PARAM_INDICES_CACHE:
             zero_start_intervals = mp_partition_key(
                 k,
-                get_real_model_param_shape(k, config, mp_size, sequence_parallel),
+                get_real_model_param_shape(k, config, mp_size),
                 portion_rank,
                 portion_size,
                 config,
-                partition_fn=intervals_partition_fn,
+                pfunctor=IntervalPartitionFunctor,
             )
             _FLAT_PARAM_INDICES_CACHE[
                 (

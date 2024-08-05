@@ -245,6 +245,10 @@ class ReaLModelConfig:
     # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False
 
+    # A helper attribute to do balanced partition
+    # according to memory.
+    approx_n_tokens_per_call: Optional[int] = None
+
     def __post_init__(self):
         if self.is_critic and self.tied_embedding:
             raise ValueError("Critic model cannot share embeddings and output weights.")

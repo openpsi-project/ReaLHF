@@ -1,10 +1,14 @@
+import abc
+import dataclasses
 from typing import *
 
+import numba
 import numpy as np
 import torch
 
 from realhf.api.core import model_api
 from realhf.base import constants, logging
+from realhf.impl.model.nn.real_llm_base import ReaLModelParamKeys
 
 logger = logging.getLogger("ReaL parallel")
 
@@ -35,90 +39,116 @@ if constants.use_te_impl():
     ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.fc2_weight"]
 
 
-def tensor_slice_partition_fn(
-    tensor: torch.Tensor,
-    mp_rank: Optional[int],
-    mp_world_size: int,
-    dim: Optional[int],
-) -> Union[List[torch.Tensor], torch.Tensor]:
-    """Partition a pytorch tensor for model parallelism."""
-    if dim is None:
-        splits = [tensor for _ in range(mp_world_size)]
-    else:
-        assert tensor.shape[dim] % mp_world_size == 0
-        splits = torch.split(tensor, tensor.shape[dim] // mp_world_size, dim=dim)
-    if mp_rank is None:
-        return [s.contiguous() for s in splits]
-    else:
-        return splits[mp_rank].contiguous()
+class PartitionFunctor:
+    """An abstract class for partitioning tensors, tensor shapes, or intervals
+    in a flattened view.
+
+    See concrete implementations below.
+    """
+
+    @staticmethod
+    @abc.abstractmethod
+    def partition(
+        x: Any, mp_rank: Optional[int], mp_world_size: int, dim: Optional[int]
+    ) -> Any:
+        raise NotImplementedError()
 
 
-def intervals_partition_fn(
-    shape: torch.Size,
-    mp_rank: Optional[int],
-    mp_world_size: int,
-    dim: Optional[int],
-) -> Union[List[torch.Tensor], torch.Tensor]:
+class TensorSlicingFunctor(PartitionFunctor):
+    """Partition a tensor by slicing along a dimension for tensor-model
+    parallelism."""
+
+    def partition(
+        tensor: torch.Tensor,
+        mp_rank: Optional[int],
+        mp_world_size: int,
+        dim: Optional[int],
+    ) -> Union[List[torch.Tensor], torch.Tensor]:
+        if dim is None:
+            splits = [tensor for _ in range(mp_world_size)]
+        else:
+            assert tensor.shape[dim] % mp_world_size == 0
+            splits = torch.split(tensor, tensor.shape[dim] // mp_world_size, dim=dim)
+        if mp_rank is None:
+            return [s.contiguous() for s in splits]
+        else:
+            return splits[mp_rank].contiguous()
+
+
+class IntervalPartitionFunctor(PartitionFunctor):
     """Get the intervals of a MP-partitioned tensor in the flatten view.
 
     For example, if a tensor of shape (2, 4) is partitioned along the
-    second dimension into 2 parts, then the intervals are [(0, 2), (2,
-    4)].
+    second dimension into 2 parts, then the intervals of the first part
+    are [(0, 2), (2, 4)].
+
+    Used by parameter reallocation. Return a numpy array of shape [N,
+    2], where N is the number of intervals.
     """
-    assert mp_rank is not None
-    param_size = int(np.prod(shape))
-    if dim is None:
-        return np.array([(0, param_size)], dtype=np.int64)
 
-    if dim < 0:
-        dim = len(shape) + dim
-    assert shape[dim] % mp_world_size == 0
+    def partition(
+        shape: torch.Size,
+        mp_rank: Optional[int],
+        mp_world_size: int,
+        dim: Optional[int],
+    ) -> np.ndarray:
 
-    if len(shape) == 1:
-        assert dim == 0
-        partition_size = shape[0] // mp_world_size
-        return np.array(
-            [(partition_size * mp_rank, partition_size * (mp_rank + 1))],
-            dtype=np.int64,
-        )
-    else:
-        assert len(shape) == 2, shape
-        if dim == 0:
-            row_start = mp_rank * shape[0] // mp_world_size
-            row_end = (mp_rank + 1) * shape[0] // mp_world_size
-            return np.array(
-                [(row_start * shape[1], row_end * shape[1])], dtype=np.int64
-            )
-        else:
-            assert dim == 1
-            col_start = mp_rank * shape[1] // mp_world_size
-            col_end = (mp_rank + 1) * shape[1] // mp_world_size
-            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[1] + np.array(
-                [(col_start, col_end)], dtype=np.int64
-            )
+        assert mp_rank is not None
+        param_size = int(np.prod(shape))
+        if dim is None:
+            return np.array([(0, param_size)], dtype=np.int64)
 
-
-def shape_partition_fn(
-    shape: torch.Size,
-    mp_rank: Optional[int],
-    mp_world_size: int,
-    dim: Optional[int],
-):
-    """Get the partitioned shape of a tensor for model parallelism."""
-    if dim is None:
-        splits = [shape for _ in range(mp_world_size)]
-    else:
         if dim < 0:
             dim = len(shape) + dim
         assert shape[dim] % mp_world_size == 0
-        splits = [
-            (*shape[:dim], shape[dim] // mp_world_size, *shape[dim + 1 :])
-            for _ in range(mp_world_size)
-        ]
-    if mp_rank is None:
-        return [s for s in splits]
-    else:
-        return splits[mp_rank]
+
+        if len(shape) == 1:
+            assert dim == 0
+            partition_size = shape[0] // mp_world_size
+            return np.array(
+                [(partition_size * mp_rank, partition_size * (mp_rank + 1))],
+                dtype=np.int64,
+            )
+        else:
+            assert len(shape) == 2, shape
+            if dim == 0:
+                row_start = mp_rank * shape[0] // mp_world_size
+                row_end = (mp_rank + 1) * shape[0] // mp_world_size
+                return np.array(
+                    [(row_start * shape[1], row_end * shape[1])], dtype=np.int64
+                )
+            else:
+                assert dim == 1
+                col_start = mp_rank * shape[1] // mp_world_size
+                col_end = (mp_rank + 1) * shape[1] // mp_world_size
+                return np.arange(shape[0], dtype=np.int64)[:, None] * shape[
+                    1
+                ] + np.array([(col_start, col_end)], dtype=np.int64)
+
+
+class ShapePartitionFunctor(PartitionFunctor):
+    """Get the partitioned shape of a tensor for tensor-model parallelism."""
+
+    def partition(
+        shape: torch.Size,
+        mp_rank: Optional[int],
+        mp_world_size: int,
+        dim: Optional[int],
+    ) -> Union[List[torch.Size], torch.Size]:
+        if dim is None:
+            splits = [shape for _ in range(mp_world_size)]
+        else:
+            if dim < 0:
+                dim = len(shape) + dim
+            assert shape[dim] % mp_world_size == 0
+            splits = [
+                (*shape[:dim], shape[dim] // mp_world_size, *shape[dim + 1 :])
+                for _ in range(mp_world_size)
+            ]
+        if mp_rank is None:
+            return [s for s in splits]
+        else:
+            return splits[mp_rank]
 
 
 def mp_partition_key(
@@ -127,16 +157,17 @@ def mp_partition_key(
     mp_rank: Optional[int],
     mp_size: Optional[int],
     config: model_api.ReaLModelConfig,
-    partition_fn: Callable[
-        [torch.Tensor, Optional[int], int, Optional[int]],
-        Union[List[torch.Tensor], torch.Tensor],
-    ] = tensor_slice_partition_fn,
+    pfunctor: PartitionFunctor = TensorSlicingFunctor,
 ) -> torch.Tensor:
-    """Partition a parameter of ReaLModel with name `key` by the method
-    `partition_fn`."""
+    """Run the partition functor on the tensor or shape based on the key.
+
+    The key determines the partitioning strategy, e.g., whether to
+    perform partition and along which dimension.
+    """
+
     if any([ek in key for ek in EMBEDDING_KEYS]):
         assert "weight" in key
-        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
+        return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif key == f"{config.n_layers + 1}.weight":  # output head
         if (
             isinstance(tensor_or_shape, torch.Tensor) and tensor_or_shape.shape[0] == 1
@@ -144,25 +175,25 @@ def mp_partition_key(
             not isinstance(tensor_or_shape, torch.Tensor) and tensor_or_shape[0] == 1
         ):
             assert config.is_critic
-            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
+            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=None)
         else:
-            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
+            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([ck in key for ck in COLUMN_LINEAR_KEYS]):
         if (
             ("k_attn" in key) or ("v_attn" in key)
         ) and config.n_kv_heads % mp_size != 0:
-            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
+            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=None)
         # partition both weight and bias
-        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
+        return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([rk in key for rk in ROW_LINEAR_KEYS]):
         # only partition weight
         if "weight" in key:
-            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=1)
+            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=1)
         else:
             assert "bias" in key, key
-            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
+            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=None)
     else:
-        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
+        return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=None)
 
 
 def mp_partition_real_model_state_dict(
@@ -171,6 +202,7 @@ def mp_partition_real_model_state_dict(
     mp_size: int,
     mp_rank: Optional[int] = None,
 ) -> Union[Dict, List[Dict]]:
+    """A helper function to partition a state dict using `mp_partition_key`."""
     if mp_size == 1:
         if mp_rank is None:
             return [state_dict]
@@ -191,10 +223,7 @@ def mp_partition_real_model_state_dict(
 
 
 def get_real_model_param_shape(
-    k: str,
-    config: model_api.ReaLModelConfig,
-    mp_size: int,
-    sequence_parallel: bool,
+    k: str, config: model_api.ReaLModelConfig, mp_size: int
 ) -> Tuple:
     if "wte.weight" in k:
         assert config.vocab_size % mp_size == 0
@@ -215,16 +244,13 @@ def get_real_model_param_shape(
     elif ".ln." in k or ".ln_f." in k:
         return (config.hidden_dim,)
     elif k == f"{config.n_layers + 1}.weight":  # output head
-        if config.is_critic and sequence_parallel:
+        if config.is_critic:
             return (1, config.hidden_dim)
-        elif not config.is_critic and mp_size > 1:
+        elif mp_size > 1:
             assert config.vocab_size % mp_size == 0
             return (config.vocab_size // mp_size, config.hidden_dim)
         else:
-            return (
-                config.vocab_size if not config.is_critic else 1,
-                config.hidden_dim,
-            )
+            return (config.vocab_size, config.hidden_dim)
     elif any([ck in k for ck in COLUMN_LINEAR_KEYS]):
         if "k_attn" in k or "v_attn" in k:
             if "weight" in k:
@@ -304,24 +330,335 @@ def mp_merge_real_model_state_dict(
     return new_state_dict
 
 
+class ReaLModelParamCount:
+    """Paramter count, used for partitioning pipeline stages."""
+
+    @staticmethod
+    def _derive_count_from_keys(
+        keys: List[str], config: model_api.ReaLModelConfig, mp_size: int
+    ) -> int:
+        count = 0
+        for k in keys:
+            count += np.prod(get_real_model_param_shape(k, config, mp_size))
+        return int(count)
+
+    @staticmethod
+    def embed(config: model_api.ReaLModelConfig, mp_size: int) -> int:
+        return ReaLModelParamCount._derive_count_from_keys(
+            ReaLModelParamKeys.embed(config), config, mp_size
+        )
+
+    @staticmethod
+    def tblock(config: model_api.ReaLModelConfig, idx: int, mp_size: int) -> int:
+        return ReaLModelParamCount._derive_count_from_keys(
+            ReaLModelParamKeys.tblock(config, idx), config, mp_size
+        )
+
+    @staticmethod
+    def head(config: model_api.ReaLModelConfig, mp_size: int) -> int:
+        return ReaLModelParamCount._derive_count_from_keys(
+            ReaLModelParamKeys.head(config), config, mp_size
+        )
+
+
+@dataclasses.dataclass
+class LayerActivationMemSpec:
+    """The memory consumption of a layer in ReaLModel in Bytes.
+
+    Used to make a memory-balanced pipeline partition.
+    The memory of a stage, which is composed of several layers,
+    is computed as
+
+    .. math::
+        \text{input_mem}_0 + \max_{i} \text{peak_mem}_i + \sum_{i} \text{output_mem}_i
+
+    where :math:`i` is the layer index.
+
+    We only count the maximum peak memory across all layers because
+    we enable gradient checkpointing by default.
+    """
+
+    input_mem: int
+    peak_mem: int
+    output_mem: int
+
+
+class ReaLModelActivationMem:
+    """The memroy consumption of hidden activations in ReaLModel.
+
+    Used for devising a better pipeline partitioning strategy. Not
+    accurate. Only used for a rough estimation.
+
+    Ignoring sequence parallel here, because it will equally partition
+    the activation memory across all tensor-parallel ranks.
+    """
+
+    @staticmethod
+    def embed(
+        config: model_api.ReaLModelConfig,
+        n_tokens: int,
+        dtype: torch.dtype,
+        mp_size: int,
+    ) -> LayerActivationMemSpec:
+        input_mem = n_tokens * 2 * 8  # input_ids and position_ids, long
+
+        # NOTE: ParallelEmbedding performs a full embedding lookup
+        # followed by an all-reduce, which does not change peak memory.
+        # WTE
+        peak_mem = n_tokens * config.hidden_dim * dtype.itemsize()
+        if not config.apply_rotary:
+            # WPE
+            peak_mem += n_tokens * config.hidden_dim * dtype.itemsize()
+        if config.normalize_embed:
+            peak_mem += n_tokens * config.hidden_dim * dtype.itemsize()
+            if dtype != torch.float32:
+                # Type casting to float32
+                assert dtype.itemsize() < 4, dtype
+                peak_mem += n_tokens * config.hidden_dim * torch.float32.itemsize()
+                peak_mem += n_tokens * config.hidden_dim * dtype.itemsize()
+
+        # NOTE: Ignoring dropout. It is counted in the output_mem,
+        output_mem = n_tokens * config.hidden_dim * dtype.itemsize()
+        return LayerActivationMemSpec(input_mem, peak_mem, output_mem)
+
+    @staticmethod
+    def tblock(
+        config: model_api.ReaLModelConfig,
+        layer_idx: int,
+        n_tokens: int,
+        dtype: torch.dtype,
+        mp_size: int,
+    ) -> LayerActivationMemSpec:
+        x = config.hidden_dim * n_tokens * dtype.itemsize()
+
+        # Since we enable gradient_checkpointing by default,
+        # the only saved memory is the input/output hidden state.
+        input_mem = output_mem = x
+
+        def _attn_mem():
+            nonlocal x
+            mem = 0
+            # layernorm before qkv linear
+            mem += x
+            if dtype != torch.float32:
+                # Type casting to float32
+                assert dtype.itemsize() < 4, dtype
+                mem += x
+                mem += x // dtype.itemsize * torch.float32.itemsize()
+
+            # QKV linear
+            qmem = (
+                config.n_q_heads
+                * config.head_dim
+                * n_tokens
+                * dtype.itemsize()
+                // mp_size
+            )
+            mem += qmem
+            if config.n_kv_heads % mp_size == 0:
+                kvmem = (
+                    config.n_kv_heads
+                    * config.head_dim
+                    * n_tokens
+                    * dtype.itemsize()
+                    // mp_size
+                )
+            else:
+                # Replicated KV because of uneven partitioning.
+                kvmem = (
+                    config.n_kv_heads * config.head_dim * n_tokens * dtype.itemsize()
+                )
+            mem += 2 * kvmem
+
+            # Rotary embedding
+            if config.apply_rotary:
+                # In the extreme case, the batch has a maximum sequence length of `n_tokens`
+                # The rotary dim is `head_dim // 2` for both cos and sin
+                mem += config.head_dim * n_tokens * dtype.itemsize()
+                mem += qmem + kvmem  # rotary embedding on qk
+
+            # Attention out and projection.
+            mem += qmem + config.hidden_dim * n_tokens * dtype.itemsize()
+            # dropout
+            mem += x
+            return mem
+
+        def _mlp_mem():
+            nonlocal x
+            mem = 0
+            # layernorm before qkv linear
+            mem += x
+            if dtype != torch.float32:
+                # Type casting to float32
+                assert dtype.itemsize() < 4, dtype
+                mem += x
+                mem += x // dtype.itemsize * torch.float32.itemsize()
+
+            if config.mlp_type is None:
+                # FC1 + act
+                mem += (
+                    config.intermediate_dim * n_tokens * dtype.itemsize() // mp_size * 2
+                )
+                # FC2
+                mem += config.hidden_dim * n_tokens * dtype.itemsize()
+                # dropout
+                mem += x
+            elif config.mlp_type == "llama" or config.mlp_type == "moe":
+                # gate/up proj, act, multiplication
+                mem += (
+                    config.intermediate_dim * n_tokens * dtype.itemsize() // mp_size * 4
+                )
+                # down proj (no dropout)
+                mem += config.hidden_dim * n_tokens * dtype.itemsize()
+                if config.mlp_type == "moe":
+                    # router logits have shape (n_tokens, n_experts)
+                    # since n_experts is ususally far smaller than hidden_dim, ignore the
+                    # memory consumption of the router
+
+                    # token dispatcher permute/unpermute and allocated MLP output
+                    mem += config.hidden_dim * n_tokens * dtype.itemsize() * 3
+
+            # Output layernorm.
+            if layer_idx == config.n_layers - 1:
+                mem += x
+                if dtype != torch.float32:
+                    # Type casting to float32
+                    assert dtype.itemsize() < 4, dtype
+                    mem += x
+                    mem += x // dtype.itemsize * torch.float32.itemsize()
+            return mem
+
+        # Attention and MLP creates a new tensor with memory `x` and a residual tensor of memory `x`.
+        # The second residual tensor is counted in output_mem.
+        peak_mem = _attn_mem() + x + _mlp_mem()
+
+        return LayerActivationMemSpec(input_mem, peak_mem, output_mem)
+
+    @staticmethod
+    def head(
+        config: model_api.ReaLModelConfig,
+        n_tokens: int,
+        dtype: torch.dtype,
+        mp_size: int,
+    ) -> LayerActivationMemSpec:
+        x = config.hidden_dim * n_tokens * dtype.itemsize()
+
+        input_mem = x
+
+        peak_mem = 0
+
+        if config.is_critic:
+            output_mem = n_tokens * dtype.itemsize()
+        elif mp_size > 1:
+            # Use parallel_lm_logits. We only count large activations
+            # (i.e., with a size of at least n_tokens * vocab_size).
+            # parallel logits
+            output_mem = n_tokens * dtype.itemsize() * config.vocab_size // mp_size
+            # subtract maximum value
+            output_mem += n_tokens * dtype.itemsize() * config.vocab_size // mp_size
+            # exp and div are both in-place, ignoring them.
+        else:
+            # count both logits and logprobs after log_softmax
+            output_mem = n_tokens * dtype.itemsize() * config.vocab_size * 2
+        return LayerActivationMemSpec(input_mem, peak_mem, output_mem)
+
+
+@numba.njit
+def _memory_partition_balanced(
+    param_mem: np.ndarray,
+    input_mem: np.ndarray,
+    output_mem: np.ndarray,
+    peak_mem: np.ndarray,
+    k: int,
+    min_size: int = 1,
+):
+    """Partition an array into k balanced subarrays. Each subarray should have
+    a minimum size of min_size.
+
+    A customized implementation for datapack.partition_balanced.
+    """
+    n = len(param_mem)
+
+    dp = np.full((n + 1, k + 1), dtype=np.float64, fill_value=(1e10))
+    maxval = np.full((n + 1, k + 1), dtype=np.float64, fill_value=-(1e10))
+    minval = np.full((n + 1, k + 1), dtype=np.float64, fill_value=(1e10))
+    prefix_sums = np.concatenate(
+        (np.zeros(1, dtype=np.float64), np.cumsum(param_mem + input_mem)), axis=0
+    )
+    split = np.zeros((n + 1, k + 1), dtype=np.int64)
+
+    max_peak_mem = np.full((n + 1, n + 1), dtype=np.float64, fill_value=-(1e10))
+    for i in range(1, n + 1):
+        for j in range(i, n + 1):
+            max_peak_mem[i, j] = max(max_peak_mem[i, j - 1], peak_mem[j - 1])
+
+    dp[0, 1] = maxval[0, 1] = minval[0, 1] = 0
+    for i in range(1, n + 1):
+        dp[i, 1] = 0
+        maxval[i, 1] = minval[i, 1] = (
+            prefix_sums[i] + output_mem[i - 1] + max_peak_mem[1, i]
+        )
+
+    for j in range(2, k + 1):
+        for i in range(j * min_size, n + 1):
+            for x in range(min_size, i - min_size + 1):
+                assert max_peak_mem[x, i] > 0, (x, i)
+                xx = (
+                    prefix_sums[i]
+                    - prefix_sums[x]
+                    + max_peak_mem[x, i]
+                    + output_mem[i - 1]
+                )
+                min_diff = max(
+                    dp[x, j - 1], maxval[x, j - 1] - xx, xx - minval[x, j - 1]
+                )
+                dp[i, j] = min(dp[i, j], min_diff)
+
+                if dp[i, j] == min_diff:
+                    split[i][j] = x
+                    if dp[i, j] == maxval[x, j - 1] - xx:
+                        maxval[i, j] = maxval[x, j - 1]
+                        minval[i, j] = xx
+                    elif dp[i, j] == xx - minval[x, j - 1]:
+                        maxval[i, j] = xx
+                        minval[i, j] = minval[x, j - 1]
+                    else:
+                        maxval[i, j] = maxval[x, j - 1]
+                        minval[i, j] = minval[x, j - 1]
+    res = [n]
+    idx = n
+    for i in range(k, 0, -1):
+        idx = split[idx][i]
+        res.append(idx)
+    return res[::-1]
+
+
 def partition_pipeline_layers(
     config: model_api.ReaLModelConfig,
     num_stages: int,
-    embed_param_counter: Callable[[model_api.ReaLModelConfig], int],
-    transformer_block_param_counter: Callable[[model_api.ReaLModelConfig, int], int],
-    head_param_counter: Callable[[model_api.ReaLModelConfig], int],
-    method: str = "parameters_balanced",
+    method: str = "memory",
+    dtype: Optional[torch.dtype] = None,
+    mp_size: Optional[int] = None,
 ) -> Dict[int, Tuple[int, int]]:
-    # TODO: partition according to occupied GPU memory, e.g., logits occupy larger memory
     from deepspeed.runtime import utils as ds_utils
 
     from realhf.base.datapack import partition_balanced as true_partition_balanced
 
+    if (
+        config.approx_n_tokens_per_call is None or dtype is None or mp_size is None
+    ) and method == "memory":
+        logger.warning(
+            f"`approx_n_tokens_per_call`, `dtype`, or `mp_size` is not set, "
+            f"cannot calculate activation memory in pipeline partitioning. "
+            "Use uniform partitioning according to the number of parameters instead."
+        )
+        method = "parameters_balanced"
+
     # Each stage gets a simple uniform number of layers.
     param_counts = (
-        [embed_param_counter(config)]
-        + [transformer_block_param_counter(config, i) for i in range(config.n_layers)]
-        + [head_param_counter(config)]
+        [ReaLModelParamCount.embed(config)]
+        + [ReaLModelParamCount.tblock(config, i) for i in range(config.n_layers)]
+        + [ReaLModelParamCount.head(config)]
     )
     parts = None
     if method == "uniform":
@@ -329,10 +666,46 @@ def partition_pipeline_layers(
             num_items=config.n_layers + 2, num_parts=num_stages
         )
     elif method == "parameters":
+        # DeepSpeed partitioning is not really "balanced". Remained as a legacy solution.
         parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
     elif method == "parameters_balanced":
         param_counts = np.array(param_counts)
-        parts = true_partition_balanced(nums=param_counts, k=num_stages)
+        parts = true_partition_balanced(param_mem=param_counts, k=num_stages)
+    elif method == "memory":
+        param_mem = np.array(param_counts) * dtype.itemsize()
+        mp_size = constants.model_parallel_world_size()
+        mems = (
+            [
+                ReaLModelActivationMem.embed(
+                    config, config.approx_n_tokens_per_call, dtype, mp_size
+                )
+            ]
+            + [
+                ReaLModelActivationMem.tblock(
+                    config,
+                    i,
+                    config.approx_n_tokens_per_call,
+                    dtype,
+                    mp_size,
+                )
+                for i in range(config.n_layers)
+            ]
+            + [
+                ReaLModelActivationMem.head(
+                    config, config.approx_n_tokens_per_call, dtype, mp_size
+                )
+            ]
+        )
+        input_mem = np.array([x.input_mem for x in mems])
+        output_mem = np.array([x.output_mem for x in mems])
+        peak_mem = np.array([x.peak_mem for x in mems])
+        parts = _memory_partition_balanced(
+            param_mem,
+            input_mem=input_mem,
+            output_mem=output_mem,
+            peak_mem=peak_mem,
+            k=num_stages,
+        )
     else:
         raise NotImplementedError(f"Partitioning method {method} not implemented.")
 
