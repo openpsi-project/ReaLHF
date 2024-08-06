@@ -419,6 +419,7 @@ class PPOConfig(CommonExperimentConfig):
                 args=dict(
                     dataset_path=self.dataset.path,
                     max_length=self.dataset.max_prompt_len,
+                    pad_to_max_length=self.dataset.pad_to_max_length,
                 ),
             )
         ]

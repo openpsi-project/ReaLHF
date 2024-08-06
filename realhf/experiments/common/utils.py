@@ -161,7 +161,7 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                 )
 
         # Add offload hooks for inference and generate rpcs.
-        # Add the offload hook only if the role will no be trained (e.g., reward model)
+        # Add the offload hook only if the role will not be trained (e.g., reward model)
         # and its allocation is overlapped with at least one other RPCs.
         # As a result, a single inference/generate RPC will not be offloaded.
         overlapped_with_other = False
