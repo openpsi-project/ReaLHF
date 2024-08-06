@@ -91,10 +91,6 @@ class MFCDef:
     :type balanced_dp: bool
     :param log_return_value: Whether to log the return value of the interface implementation.
     :type log_return_value: bool
-    :param approx_n_tokens: The estimated number of tokens per call.
-        Used to calculate activation memory and devise a better pipeline partitioning strategy.
-        If None, partition accroding to the number of parameters.
-    :type approx_n_tokens: Optional[int]
     :param model_type: The specification of the LLM, e.g., LLaMA-7B.
         Used by the profiler and search engine to produce an optimal execution plan.
         Can be omited if the search engine is not used.
@@ -127,8 +123,6 @@ class MFCDef:
     n_mbs: Optional[int] = None
     balanced_dp: bool = False
     log_return_value: bool = False
-
-    approx_n_tokens: Optional[int] = None
 
     # Only used by search.
     model_type: Optional[Any | ModelFamily] = None

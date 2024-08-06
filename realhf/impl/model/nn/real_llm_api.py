@@ -862,7 +862,6 @@ def make_real_model(
     init_critic_from_actor: bool,
     dtype: Optional[str] = None,
     hf_model_family: Optional[str] = None,
-    approx_n_tokens_per_call: Optional[int] = None,
 ) -> model_api.Model:
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
@@ -878,7 +877,6 @@ def make_real_model(
         model_path=model_path,
         is_critic=is_critic,
     )
-    mconfig.approx_n_tokens_per_call = approx_n_tokens_per_call
     m = ReaLModel(mconfig, dtype=dtype, device=device)
     m._instantiation_hooks.append(
         lambda: getattr(m, f"from_{hf_model_family}")(

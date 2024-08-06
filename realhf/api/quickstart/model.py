@@ -211,7 +211,6 @@ def get_real_model_config(
     is_critic: bool,
     init_critic_from_actor: bool,
     dtype: Optional[str] = None,
-    approx_n_tokens_per_call: Optional[int] = None,
     # LoRA config
     lora: Optional[LoRAConfig] = None,
     is_sft_lora: bool = False,
@@ -228,7 +227,6 @@ def get_real_model_config(
             init_critic_from_actor=init_critic_from_actor,
             dtype=dtype,
             hf_model_family=hf_model_family,
-            approx_n_tokens_per_call=approx_n_tokens_per_call,
         ),
     )
     if is_sft_lora:
