@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from realhf.api.core import model_api
-from realhf.base import constants, logging
+from realhf.base import constants, datapack, logging
 from realhf.impl.model.nn.real_llm_base import ReaLModelParamKeys
 
 logger = logging.getLogger("ReaL parallel")
@@ -361,351 +361,31 @@ class ReaLModelParamCount:
         )
 
 
-@dataclasses.dataclass
-class LayerActivationMemSpec:
-    """The memory consumption of a layer in ReaLModel in Bytes.
-
-    Used to make a memory-balanced pipeline partition.
-    The memory of a stage, which is composed of several layers,
-    is computed as
-
-    .. math::
-        \text{input_mem}_0 + \max_{i} \text{peak_mem}_i + \sum_{i} \text{output_mem}_i
-
-    where :math:`i` is the layer index.
-
-    We only count the maximum peak memory across all layers because
-    we enable gradient checkpointing by default.
-    """
-
-    input_mem: int
-    peak_mem: int
-    output_mem: int
-
-
-class ReaLModelActivationMem:
-    """The memroy consumption of hidden activations in ReaLModel.
-
-    Used for devising a better pipeline partitioning strategy. Not
-    accurate. Only used for a rough estimation.
-
-    Ignoring sequence parallel here, because it will equally partition
-    the activation memory across all tensor-parallel ranks.
-    """
-
-    @staticmethod
-    def embed(
-        config: model_api.ReaLModelConfig,
-        n_tokens: int,
-        dtype: torch.dtype,
-        mp_size: int,
-    ) -> LayerActivationMemSpec:
-        input_mem = n_tokens * 2 * 8  # input_ids and position_ids, long
-
-        # NOTE: ParallelEmbedding performs a full embedding lookup
-        # followed by an all-reduce, which does not change peak memory.
-        # WTE
-        peak_mem = n_tokens * config.hidden_dim * dtype.itemsize()
-        if not config.apply_rotary:
-            # WPE
-            peak_mem += n_tokens * config.hidden_dim * dtype.itemsize()
-        if config.normalize_embed:
-            peak_mem += n_tokens * config.hidden_dim * dtype.itemsize()
-            if dtype != torch.float32:
-                # Type casting to float32
-                assert dtype.itemsize() < 4, dtype
-                peak_mem += n_tokens * config.hidden_dim * torch.float32.itemsize()
-                peak_mem += n_tokens * config.hidden_dim * dtype.itemsize()
-
-        # NOTE: Ignoring dropout. It is counted in the output_mem,
-        output_mem = n_tokens * config.hidden_dim * dtype.itemsize()
-        return LayerActivationMemSpec(input_mem, peak_mem, output_mem)
-
-    @staticmethod
-    def tblock(
-        config: model_api.ReaLModelConfig,
-        layer_idx: int,
-        n_tokens: int,
-        dtype: torch.dtype,
-        mp_size: int,
-    ) -> LayerActivationMemSpec:
-        x = config.hidden_dim * n_tokens * dtype.itemsize()
-
-        # Since we enable gradient_checkpointing by default,
-        # the only saved memory is the input/output hidden state.
-        input_mem = output_mem = x
-
-        def _attn_mem():
-            nonlocal x
-            mem = 0
-            # layernorm before qkv linear
-            mem += x
-            if dtype != torch.float32:
-                # Type casting to float32
-                assert dtype.itemsize() < 4, dtype
-                mem += x
-                mem += x // dtype.itemsize * torch.float32.itemsize()
-
-            # QKV linear
-            qmem = (
-                config.n_q_heads
-                * config.head_dim
-                * n_tokens
-                * dtype.itemsize()
-                // mp_size
-            )
-            mem += qmem
-            if config.n_kv_heads % mp_size == 0:
-                kvmem = (
-                    config.n_kv_heads
-                    * config.head_dim
-                    * n_tokens
-                    * dtype.itemsize()
-                    // mp_size
-                )
-            else:
-                # Replicated KV because of uneven partitioning.
-                kvmem = (
-                    config.n_kv_heads * config.head_dim * n_tokens * dtype.itemsize()
-                )
-            mem += 2 * kvmem
-
-            # Rotary embedding
-            if config.apply_rotary:
-                # In the extreme case, the batch has a maximum sequence length of `n_tokens`
-                # The rotary dim is `head_dim // 2` for both cos and sin
-                mem += config.head_dim * n_tokens * dtype.itemsize()
-                mem += qmem + kvmem  # rotary embedding on qk
-
-            # Attention out and projection.
-            mem += qmem + config.hidden_dim * n_tokens * dtype.itemsize()
-            # dropout
-            mem += x
-            return mem
-
-        def _mlp_mem():
-            nonlocal x
-            mem = 0
-            # layernorm before qkv linear
-            mem += x
-            if dtype != torch.float32:
-                # Type casting to float32
-                assert dtype.itemsize() < 4, dtype
-                mem += x
-                mem += x // dtype.itemsize * torch.float32.itemsize()
-
-            if config.mlp_type is None:
-                # FC1 + act
-                mem += (
-                    config.intermediate_dim * n_tokens * dtype.itemsize() // mp_size * 2
-                )
-                # FC2
-                mem += config.hidden_dim * n_tokens * dtype.itemsize()
-                # dropout
-                mem += x
-            elif config.mlp_type == "llama" or config.mlp_type == "moe":
-                # gate/up proj, act, multiplication
-                mem += (
-                    config.intermediate_dim * n_tokens * dtype.itemsize() // mp_size * 4
-                )
-                # down proj (no dropout)
-                mem += config.hidden_dim * n_tokens * dtype.itemsize()
-                if config.mlp_type == "moe":
-                    # router logits have shape (n_tokens, n_experts)
-                    # since n_experts is ususally far smaller than hidden_dim, ignore the
-                    # memory consumption of the router
-
-                    # token dispatcher permute/unpermute and allocated MLP output
-                    mem += config.hidden_dim * n_tokens * dtype.itemsize() * 3
-
-            # Output layernorm.
-            if layer_idx == config.n_layers - 1:
-                mem += x
-                if dtype != torch.float32:
-                    # Type casting to float32
-                    assert dtype.itemsize() < 4, dtype
-                    mem += x
-                    mem += x // dtype.itemsize * torch.float32.itemsize()
-            return mem
-
-        # Attention and MLP creates a new tensor with memory `x` and a residual tensor of memory `x`.
-        # The second residual tensor is counted in output_mem.
-        peak_mem = _attn_mem() + x + _mlp_mem()
-
-        return LayerActivationMemSpec(input_mem, peak_mem, output_mem)
-
-    @staticmethod
-    def head(
-        config: model_api.ReaLModelConfig,
-        n_tokens: int,
-        dtype: torch.dtype,
-        mp_size: int,
-    ) -> LayerActivationMemSpec:
-        x = config.hidden_dim * n_tokens * dtype.itemsize()
-
-        input_mem = x
-
-        peak_mem = 0
-
-        if config.is_critic:
-            output_mem = n_tokens * dtype.itemsize()
-        elif mp_size > 1:
-            # Use parallel_lm_logits. We only count large activations
-            # (i.e., with a size of at least n_tokens * vocab_size).
-            # parallel logits
-            output_mem = n_tokens * dtype.itemsize() * config.vocab_size // mp_size
-            # subtract maximum value
-            output_mem += n_tokens * dtype.itemsize() * config.vocab_size // mp_size
-            # exp and div are both in-place, ignoring them.
-        else:
-            # count both logits and logprobs after log_softmax
-            output_mem = n_tokens * dtype.itemsize() * config.vocab_size * 2
-        return LayerActivationMemSpec(input_mem, peak_mem, output_mem)
-
-
-@numba.njit
-def _memory_partition_balanced(
-    param_mem: np.ndarray,
-    input_mem: np.ndarray,
-    output_mem: np.ndarray,
-    peak_mem: np.ndarray,
-    k: int,
-    min_size: int = 1,
-):
-    """Partition an array into k balanced subarrays. Each subarray should have
-    a minimum size of min_size.
-
-    A customized implementation for datapack.partition_balanced.
-    """
-    n = len(param_mem)
-
-    dp = np.full((n + 1, k + 1), dtype=np.float64, fill_value=(1e10))
-    maxval = np.full((n + 1, k + 1), dtype=np.float64, fill_value=-(1e10))
-    minval = np.full((n + 1, k + 1), dtype=np.float64, fill_value=(1e10))
-    prefix_sums = np.concatenate(
-        (np.zeros(1, dtype=np.float64), np.cumsum(param_mem + input_mem)), axis=0
-    )
-    split = np.zeros((n + 1, k + 1), dtype=np.int64)
-
-    max_peak_mem = np.full((n + 1, n + 1), dtype=np.float64, fill_value=-(1e10))
-    for i in range(1, n + 1):
-        for j in range(i, n + 1):
-            max_peak_mem[i, j] = max(max_peak_mem[i, j - 1], peak_mem[j - 1])
-
-    dp[0, 1] = maxval[0, 1] = minval[0, 1] = 0
-    for i in range(1, n + 1):
-        dp[i, 1] = 0
-        maxval[i, 1] = minval[i, 1] = (
-            prefix_sums[i] + output_mem[i - 1] + max_peak_mem[1, i]
-        )
-
-    for j in range(2, k + 1):
-        for i in range(j * min_size, n + 1):
-            for x in range(min_size, i - min_size + 1):
-                assert max_peak_mem[x, i] > 0, (x, i)
-                xx = (
-                    prefix_sums[i]
-                    - prefix_sums[x]
-                    + max_peak_mem[x, i]
-                    + output_mem[i - 1]
-                )
-                min_diff = max(
-                    dp[x, j - 1], maxval[x, j - 1] - xx, xx - minval[x, j - 1]
-                )
-                dp[i, j] = min(dp[i, j], min_diff)
-
-                if dp[i, j] == min_diff:
-                    split[i][j] = x
-                    if dp[i, j] == maxval[x, j - 1] - xx:
-                        maxval[i, j] = maxval[x, j - 1]
-                        minval[i, j] = xx
-                    elif dp[i, j] == xx - minval[x, j - 1]:
-                        maxval[i, j] = xx
-                        minval[i, j] = minval[x, j - 1]
-                    else:
-                        maxval[i, j] = maxval[x, j - 1]
-                        minval[i, j] = minval[x, j - 1]
-    res = [n]
-    idx = n
-    for i in range(k, 0, -1):
-        idx = split[idx][i]
-        res.append(idx)
-    return res[::-1]
-
-
 def partition_pipeline_layers(
     config: model_api.ReaLModelConfig,
     num_stages: int,
-    method: str = "memory",
-    dtype: Optional[torch.dtype] = None,
-    mp_size: Optional[int] = None,
+    method: str = "parameters",
 ) -> Dict[int, Tuple[int, int]]:
-    from deepspeed.runtime import utils as ds_utils
-
-    from realhf.base.datapack import partition_balanced as true_partition_balanced
-
-    if (
-        config.approx_n_tokens_per_call is None or dtype is None or mp_size is None
-    ) and method == "memory":
-        logger.warning(
-            f"`approx_n_tokens_per_call`, `dtype`, or `mp_size` is not set, "
-            f"cannot calculate activation memory in pipeline partitioning. "
-            "Use uniform partitioning according to the number of parameters instead."
-        )
-        method = "parameters_balanced"
-
-    # Each stage gets a simple uniform number of layers.
+    # Ignoring mp_size in param count because tensor parallel equally partitions parameters.
+    # It is irrelevant to how we partition pipeline stages.
     param_counts = (
-        [ReaLModelParamCount.embed(config)]
-        + [ReaLModelParamCount.tblock(config, i) for i in range(config.n_layers)]
-        + [ReaLModelParamCount.head(config)]
+        [ReaLModelParamCount.embed(config, 1)]
+        + [ReaLModelParamCount.tblock(config, i, 1) for i in range(config.n_layers)]
+        + [ReaLModelParamCount.head(config, 1)]
     )
+
     parts = None
     if method == "uniform":
+        # Each stage gets a simple uniform number of layers.
+        from deepspeed.runtime import utils as ds_utils
+
         parts = ds_utils.partition_uniform(
             num_items=config.n_layers + 2, num_parts=num_stages
         )
     elif method == "parameters":
-        # DeepSpeed partitioning is not really "balanced". Remained as a legacy solution.
-        parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
-    elif method == "parameters_balanced":
+        # Partition according to the parameter count.
         param_counts = np.array(param_counts)
-        parts = true_partition_balanced(param_mem=param_counts, k=num_stages)
-    elif method == "memory":
-        param_mem = np.array(param_counts) * dtype.itemsize()
-        mp_size = constants.model_parallel_world_size()
-        mems = (
-            [
-                ReaLModelActivationMem.embed(
-                    config, config.approx_n_tokens_per_call, dtype, mp_size
-                )
-            ]
-            + [
-                ReaLModelActivationMem.tblock(
-                    config,
-                    i,
-                    config.approx_n_tokens_per_call,
-                    dtype,
-                    mp_size,
-                )
-                for i in range(config.n_layers)
-            ]
-            + [
-                ReaLModelActivationMem.head(
-                    config, config.approx_n_tokens_per_call, dtype, mp_size
-                )
-            ]
-        )
-        input_mem = np.array([x.input_mem for x in mems])
-        output_mem = np.array([x.output_mem for x in mems])
-        peak_mem = np.array([x.peak_mem for x in mems])
-        parts = _memory_partition_balanced(
-            param_mem,
-            input_mem=input_mem,
-            output_mem=output_mem,
-            peak_mem=peak_mem,
-            k=num_stages,
-        )
+        parts = datapack.partition_balanced(param_counts, k=num_stages)
     else:
         raise NotImplementedError(f"Partitioning method {method} not implemented.")
 

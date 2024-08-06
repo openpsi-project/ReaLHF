@@ -74,6 +74,7 @@ class SFTConfig(CommonExperimentConfig):
                 args=dict(
                     max_length=self.dataset.max_seqlen,
                     dataset_path=self.dataset.train_path,
+                    pad_to_max_length=self.dataset.pad_to_max_length,
                 ),
             )
         ]

@@ -116,8 +116,6 @@ class ReaLModel(nn.Module):
         self.layer_mapping = partition_pipeline_layers(
             config,
             constants.pipe_parallel_world_size(),
-            dtype=self.dtype,
-            mp_size=constants.model_parallel_world_size(),
         )
         self.layer_idx_start = self.layer_mapping[constants.pipe_parallel_rank()][0]
         self.layer_idx_end = self.layer_mapping[constants.pipe_parallel_rank()][1]
@@ -548,8 +546,6 @@ class ReaLModel(nn.Module):
         to_layer_mapping = partition_pipeline_layers(
             to_model_config,
             to_topo.get_dim("pipe"),
-            dtype=self.dtype,
-            mp_size=to_topo.get_dim("model"),
         )
         to_layers_handle_dict = {}
         to_layer_indices = []

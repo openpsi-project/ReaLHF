@@ -336,8 +336,6 @@ def _derive_reparallelize_comm_plan(
     from_layer_mapping = partition_pipeline_layers(
         from_model_config,
         from_topo.get_dim("pipe"),
-        dtype=dtype,
-        mp_size=from_topo.get_dim("model"),
     )
     from_layer_mapping = {
         k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()
@@ -345,8 +343,6 @@ def _derive_reparallelize_comm_plan(
     to_layer_mapping = partition_pipeline_layers(
         to_model_config,
         to_topo.get_dim("pipe"),
-        dtype=dtype,
-        mp_size=to_topo.get_dim("model"),
     )
     to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
     repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)

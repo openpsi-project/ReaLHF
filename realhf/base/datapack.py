@@ -1,5 +1,5 @@
 import itertools
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Tuple, Union
 
 import numba
 import numpy as np
@@ -10,53 +10,38 @@ def flat2d(arr: List[List[Any]]) -> List[Any]:
 
 
 @numba.njit
-def partition_balanced(
-    nums: np.ndarray, boundary_cost: np.ndarray, k: int, min_size: int = 1
-):
+def partition_balanced(nums: np.ndarray, k: int, min_size: int = 1):
     """Partition an array into k subarrays with a minimum absolute difference
-    of sums. Each subarray should have a minimum size of min_size.
+    of sums and minimum subarray size.
 
     Dynamic programming solution.
 
     Args:
         nums (np.ndarray): The array to be partitioned.
-        boundary_cost (np.ndarray): When partitioning at position m [0, m) + [m, n),
-            the boundary cost of the first partition is boundary_cost[m] + boudnary_cost[0],
-            and the boundary cost of the second partition is boundary_cost[m] + boundary_cost[n].
-            Useful when we need to compute the memory of activations (pipeline input/output)
-            when partitioning pipeline layers. Its length should be len(nums) + 1.
         k (int): Number of partitions.
         min_size (int): Minimum size of each subarray.
 
     Returns:
         List[int]: Partition slicing point indices in a list including start and end points.
-                   Length equals to k + 1. Slicing point m means partitioning into [..., m) + [m, ...).
+                   Length equals to k + 1.
     """
     n = len(nums)
 
-    dp = np.full((n + 1, k + 1), dtype=np.float64, fill_value=(1e10))
-    maxval = np.full((n + 1, k + 1), dtype=np.float64, fill_value=-(1e10))
-    minval = np.full((n + 1, k + 1), dtype=np.float64, fill_value=(1e10))
-    prefix_sums = np.concatenate(
-        (np.zeros(1, dtype=np.float64), np.cumsum(nums)), axis=0
-    )
+    dp = np.full((n + 1, k + 1), dtype=np.int64, fill_value=int(1e10))
+    maxval = np.full((n + 1, k + 1), dtype=np.int64, fill_value=-int(1e10))
+    minval = np.full((n + 1, k + 1), dtype=np.int64, fill_value=int(1e10))
+    prefix_sums = np.concatenate((np.zeros(1, dtype=np.int64), np.cumsum(nums)), axis=0)
     split = np.zeros((n + 1, k + 1), dtype=np.int64)
 
-    dp[0, 1] = maxval[0, 1] = minval[0, 1] = 0
-    for i in range(1, n + 1):
+    for i in range(n + 1):
         dp[i, 1] = 0
-        maxval[i, 1] = prefix_sums[i] + boundary_cost[i] + boundary_cost[0]
-        minval[i, 1] = prefix_sums[i] + boundary_cost[i] + boundary_cost[0]
+        maxval[i, 1] = prefix_sums[i] - prefix_sums[0]
+        minval[i, 1] = prefix_sums[i] - prefix_sums[0]
 
     for j in range(2, k + 1):
         for i in range(j * min_size, n + 1):
             for x in range(min_size, i - min_size + 1):
-                xx = (
-                    prefix_sums[i]
-                    - prefix_sums[x]
-                    + boundary_cost[i]
-                    + boundary_cost[x]
-                )
+                xx = prefix_sums[i] - prefix_sums[x]
                 min_diff = max(
                     dp[x, j - 1], maxval[x, j - 1] - xx, xx - minval[x, j - 1]
                 )
@@ -82,30 +67,22 @@ def partition_balanced(
 
 
 def partition_balanced_tuples(
-    nums: np.ndarray, boundary_cost: np.ndarray, k: int, min_size: int = 1
+    nums: np.ndarray, k: int, min_size: int = 1
 ) -> List[Tuple[int, int]]:
-    lst = partition_balanced(nums, boundary_cost, k, min_size)
+    lst = partition_balanced(nums, k, min_size)
     return [(lst[i], lst[i + 1]) for i in range(k)]
 
 
 def min_abs_diff_partition(
-    arr: Union[np.ndarray, List],
-    k: int,
-    min_size: int = 1,
-    boundary_cost: Optional[Union[np.ndarray, List]] = None,
+    arr: Union[np.ndarray, List], k: int, min_size: int = 1
 ) -> List[Tuple[int, int]]:
-    if isinstance(arr, list):
-        arr = np.array(arr, dtype=np.float64)
-    if boundary_cost is None:
-        boundary_cost = np.zeros(len(arr) + 1, dtype=np.float64)
-    arr = arr.astype(np.float64)
-    boundary_cost = boundary_cost.astype(np.float64)
-    assert len(boundary_cost) == len(arr) + 1, (len(boundary_cost), len(arr))
-
     err_hint = (
         " Errors should not be reported in this function. It is probably a bug in the dataset code"
         " or too small batch size in pipeline parallel realhf.experiments."
     )
+
+    if isinstance(arr, list):
+        arr = np.array(arr)
     if len(arr.shape) > 1:
         raise ValueError(f"The array to be partitioned must be 1D. ({arr})" + err_hint)
     if len(arr) < k:
@@ -117,7 +94,7 @@ def min_abs_diff_partition(
         raise ValueError(
             f"Length of the array to be partitioned must be at least k * min_size ({k} * {min_size}), current length {len(arr)}."
         )
-    partitions = partition_balanced_tuples(arr, boundary_cost, k, min_size)
+    partitions = partition_balanced_tuples(arr, k, min_size)
     last_end = 0
 
     err_type = None
