@@ -6,13 +6,13 @@ import os
 import queue
 import socket
 import time
-import tabulate
 import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import deepspeed
 import numpy as np
 import pynvml
+import tabulate
 import torch
 import torch.distributed as dist
 import torch.utils.data
@@ -938,7 +938,7 @@ class ModelWorker(worker_base.Worker):
         max_reserved_gpu_id = _decode_gpu_id(np.argmax(mem_stats[:, -2]))
         max_tensor_gpu_id = _decode_gpu_id(np.argmax(mem_stats[:, -3]))
 
-        # NOTE: We only log the peak memory because it's 
+        # NOTE: We only log the peak memory because it's
         # the most important for detecting OOM issues.
         headers = [
             " ",
