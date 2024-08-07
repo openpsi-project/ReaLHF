@@ -1,4 +1,3 @@
-import abc
 from typing import *
 
 import numpy as np
@@ -37,43 +36,31 @@ if constants.use_te_impl():
     ROW_LINEAR_KEYS = [".attn.c_proj", ".mlp.fc2_weight"]
 
 
-class PartitionFunctor:
-    """An abstract class for partitioning tensors, tensor shapes, or intervals
-    in a flattened view.
-
-    See concrete implementations below.
-    """
-
-    @staticmethod
-    @abc.abstractmethod
-    def partition(
-        x: Any, mp_rank: Optional[int], mp_world_size: int, dim: Optional[int]
-    ) -> Any:
-        raise NotImplementedError()
-
-
-class TensorSlicingFunctor(PartitionFunctor):
+def tensor_slice_partition_fn(
+    tensor: torch.Tensor,
+    mp_rank: Optional[int],
+    mp_world_size: int,
+    dim: Optional[int],
+) -> Union[List[torch.Tensor], torch.Tensor]:
     """Partition a tensor by slicing along a dimension for tensor-model
     parallelism."""
-
-    def partition(
-        tensor: torch.Tensor,
-        mp_rank: Optional[int],
-        mp_world_size: int,
-        dim: Optional[int],
-    ) -> Union[List[torch.Tensor], torch.Tensor]:
-        if dim is None:
-            splits = [tensor for _ in range(mp_world_size)]
-        else:
-            assert tensor.shape[dim] % mp_world_size == 0
-            splits = torch.split(tensor, tensor.shape[dim] // mp_world_size, dim=dim)
-        if mp_rank is None:
-            return [s.contiguous() for s in splits]
-        else:
-            return splits[mp_rank].contiguous()
+    if dim is None:
+        splits = [tensor for _ in range(mp_world_size)]
+    else:
+        assert tensor.shape[dim] % mp_world_size == 0
+        splits = torch.split(tensor, tensor.shape[dim] // mp_world_size, dim=dim)
+    if mp_rank is None:
+        return [s.contiguous() for s in splits]
+    else:
+        return splits[mp_rank].contiguous()
 
 
-class IntervalPartitionFunctor(PartitionFunctor):
+def intervals_partition_fn(
+    shape: torch.Size,
+    mp_rank: Optional[int],
+    mp_world_size: int,
+    dim: Optional[int],
+) -> Union[List[torch.Tensor], torch.Tensor]:
     """Get the intervals of a MP-partitioned tensor in the flatten view.
 
     For example, if a tensor of shape (2, 4) is partitioned along the
@@ -83,70 +70,60 @@ class IntervalPartitionFunctor(PartitionFunctor):
     Used by parameter reallocation. Return a numpy array of shape [N,
     2], where N is the number of intervals.
     """
+    assert mp_rank is not None
+    param_size = int(np.prod(shape))
+    if dim is None:
+        return np.array([(0, param_size)], dtype=np.int64)
 
-    def partition(
-        shape: torch.Size,
-        mp_rank: Optional[int],
-        mp_world_size: int,
-        dim: Optional[int],
-    ) -> np.ndarray:
+    if dim < 0:
+        dim = len(shape) + dim
+    assert shape[dim] % mp_world_size == 0
 
-        assert mp_rank is not None
-        param_size = int(np.prod(shape))
-        if dim is None:
-            return np.array([(0, param_size)], dtype=np.int64)
+    if len(shape) == 1:
+        assert dim == 0
+        partition_size = shape[0] // mp_world_size
+        return np.array(
+            [(partition_size * mp_rank, partition_size * (mp_rank + 1))],
+            dtype=np.int64,
+        )
+    else:
+        assert len(shape) == 2, shape
+        if dim == 0:
+            row_start = mp_rank * shape[0] // mp_world_size
+            row_end = (mp_rank + 1) * shape[0] // mp_world_size
+            return np.array(
+                [(row_start * shape[1], row_end * shape[1])], dtype=np.int64
+            )
+        else:
+            assert dim == 1
+            col_start = mp_rank * shape[1] // mp_world_size
+            col_end = (mp_rank + 1) * shape[1] // mp_world_size
+            return np.arange(shape[0], dtype=np.int64)[:, None] * shape[1] + np.array(
+                [(col_start, col_end)], dtype=np.int64
+            )
 
+
+def shape_partition_fn(
+    shape: torch.Size,
+    mp_rank: Optional[int],
+    mp_world_size: int,
+    dim: Optional[int],
+):
+    """Get the partitioned shape of a tensor for tensor-model parallelism."""
+    if dim is None:
+        splits = [shape for _ in range(mp_world_size)]
+    else:
         if dim < 0:
             dim = len(shape) + dim
         assert shape[dim] % mp_world_size == 0
-
-        if len(shape) == 1:
-            assert dim == 0
-            partition_size = shape[0] // mp_world_size
-            return np.array(
-                [(partition_size * mp_rank, partition_size * (mp_rank + 1))],
-                dtype=np.int64,
-            )
-        else:
-            assert len(shape) == 2, shape
-            if dim == 0:
-                row_start = mp_rank * shape[0] // mp_world_size
-                row_end = (mp_rank + 1) * shape[0] // mp_world_size
-                return np.array(
-                    [(row_start * shape[1], row_end * shape[1])], dtype=np.int64
-                )
-            else:
-                assert dim == 1
-                col_start = mp_rank * shape[1] // mp_world_size
-                col_end = (mp_rank + 1) * shape[1] // mp_world_size
-                return np.arange(shape[0], dtype=np.int64)[:, None] * shape[
-                    1
-                ] + np.array([(col_start, col_end)], dtype=np.int64)
-
-
-class ShapePartitionFunctor(PartitionFunctor):
-    """Get the partitioned shape of a tensor for tensor-model parallelism."""
-
-    def partition(
-        shape: torch.Size,
-        mp_rank: Optional[int],
-        mp_world_size: int,
-        dim: Optional[int],
-    ) -> Union[List[torch.Size], torch.Size]:
-        if dim is None:
-            splits = [shape for _ in range(mp_world_size)]
-        else:
-            if dim < 0:
-                dim = len(shape) + dim
-            assert shape[dim] % mp_world_size == 0
-            splits = [
-                (*shape[:dim], shape[dim] // mp_world_size, *shape[dim + 1 :])
-                for _ in range(mp_world_size)
-            ]
-        if mp_rank is None:
-            return [s for s in splits]
-        else:
-            return splits[mp_rank]
+        splits = [
+            (*shape[:dim], shape[dim] // mp_world_size, *shape[dim + 1 :])
+            for _ in range(mp_world_size)
+        ]
+    if mp_rank is None:
+        return [s for s in splits]
+    else:
+        return splits[mp_rank]
 
 
 def mp_partition_key(
@@ -155,7 +132,10 @@ def mp_partition_key(
     mp_rank: Optional[int],
     mp_size: Optional[int],
     config: model_api.ReaLModelConfig,
-    pfunctor: PartitionFunctor = TensorSlicingFunctor,
+    partition_fn: Callable[
+        [torch.Tensor, Optional[int], int, Optional[int]],
+        Union[List[torch.Tensor], torch.Tensor],
+    ] = tensor_slice_partition_fn,
 ) -> torch.Tensor:
     """Run the partition functor on the tensor or shape based on the key.
 
@@ -165,7 +145,7 @@ def mp_partition_key(
 
     if any([ek in key for ek in EMBEDDING_KEYS]):
         assert "weight" in key
-        return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=0)
+        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif key == f"{config.n_layers + 1}.weight":  # output head
         if (
             isinstance(tensor_or_shape, torch.Tensor) and tensor_or_shape.shape[0] == 1
@@ -173,25 +153,25 @@ def mp_partition_key(
             not isinstance(tensor_or_shape, torch.Tensor) and tensor_or_shape[0] == 1
         ):
             assert config.is_critic
-            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=None)
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
         else:
-            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=0)
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([ck in key for ck in COLUMN_LINEAR_KEYS]):
         if (
             ("k_attn" in key) or ("v_attn" in key)
         ) and config.n_kv_heads % mp_size != 0:
-            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=None)
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
         # partition both weight and bias
-        return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=0)
+        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
     elif any([rk in key for rk in ROW_LINEAR_KEYS]):
         # only partition weight
         if "weight" in key:
-            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=1)
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=1)
         else:
             assert "bias" in key, key
-            return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=None)
+            return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
     else:
-        return pfunctor.partition(tensor_or_shape, mp_rank, mp_size, dim=None)
+        return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=None)
 
 
 def mp_partition_real_model_state_dict(

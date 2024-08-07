@@ -17,10 +17,10 @@ from realhf.base import logging
 
 from .real_llm_base import ReaLModelParamKeys
 from .real_llm_parallel import (
-    IntervalPartitionFunctor,
-    ShapePartitionFunctor,
     get_real_model_param_shape,
+    intervals_partition_fn,
     mp_partition_key,
+    shape_partition_fn,
 )
 
 try:
@@ -204,7 +204,7 @@ def param_size_from_keys(
             src2dst_tp_rank,
             src2dst_tp_size,
             config,
-            pfunctor=ShapePartitionFunctor,
+            partition_fn=shape_partition_fn,
         )
         param_size += int(np.prod(new_shape))
     return param_size
@@ -339,7 +339,7 @@ def param_intervals_from_keys(
                 portion_rank,
                 portion_size,
                 config,
-                pfunctor=IntervalPartitionFunctor,
+                partition_fn=intervals_partition_fn,
             )
             _FLAT_PARAM_INDICES_CACHE[
                 (
