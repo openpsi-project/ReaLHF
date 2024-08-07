@@ -268,7 +268,6 @@ class LayerNormMLP(nn.Module):
             self.c_fc = ColumnParallelLinear(
                 hidden_dim,
                 intermediate_dim,
-                async_tensor_model_parallel_allreduce=not sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,
@@ -276,7 +275,6 @@ class LayerNormMLP(nn.Module):
             self.c_proj = RowParallelLinear(
                 intermediate_dim,
                 hidden_dim,
-                async_tensor_model_parallel_allreduce=not sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 dtype=dtype,
                 device=device,

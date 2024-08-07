@@ -391,132 +391,80 @@ class ParallelActorHead(ColumnParallelLinear):
         )
 
 
-# Paramter count, used for partitioning pipeline stages
-# Ignoring tensor model parallel since it will evenly partition parameters.
-def real_model_embed_param_count(config: model_api.ReaLModelConfig) -> int:
-    count = config.vocab_size * config.hidden_dim
-    if not config.apply_rotary:
-        count += (
-            config.n_positions + config.abs_position_embedding_offset
-        ) * config.hidden_dim
-    return count
+class ReaLModelParamKeys:
+    """The keys of parameters in ReaLModel, used for parameter reallocation.
 
+    **IMPORTANT**: The returned keys are **ordered**. They should have
+    the same order as we iterate layer indices and call
+    layer.state_dict().
+    """
 
-def real_model_embedding_param_keys(config: model_api.ReaLModelConfig) -> int:
-    keys = ["0.wte.weight"]
-    if not config.apply_rotary:
-        keys += ["0.wpe.weight"]
-    return keys
+    @staticmethod
+    def embed(config: model_api.ReaLModelConfig) -> int:
+        keys = ["0.wte.weight"]
+        if not config.apply_rotary:
+            keys += ["0.wpe.weight"]
+        return keys
 
-
-def real_model_tblock_param_count(config: model_api.ReaLModelConfig, idx: int) -> int:
-    count = 0
-    nq = config.n_q_heads
-
-    if config.layer_norm_type is None:
-        # nn.LayerNorm
-        ln_count = 2 * config.hidden_dim
-    elif config.layer_norm_type in ["gemma", "rms"]:
-        # Llama RMSNorm
-        ln_count = config.hidden_dim
-    else:
-        raise NotImplementedError()
-
-    # layernorm qkv linear
-    count += (
-        ln_count + config.head_dim * (nq + config.n_kv_heads * 2) * config.hidden_dim
-    )
-    if config.use_attention_bias:
-        count += config.head_dim * (nq + config.n_kv_heads * 2)
-
-    # attention projection
-    count += config.hidden_dim * config.hidden_dim
-    if config.use_attn_proj_bias:
-        count += config.hidden_dim
-    # NOTE: we ignore the parameters of RotoaryEmbedding here
-
-    # mlp
-    count += ln_count
-    if config.mlp_type is None:
-        count += 2 * config.hidden_dim * config.intermediate_dim
-    elif config.mlp_type == "llama":
-        count += 3 * config.hidden_dim * config.intermediate_dim
-    elif config.mlp_type == "moe":
-        num_experts = config.moe.num_experts
-        count += num_experts * 3 * config.hidden_dim * config.hidden_dim
-    else:
-        raise NotImplementedError()
-
-    if idx == config.n_layers - 1:
-        count += ln_count
-    return count
-
-
-def real_model_tblock_param_keys(
-    config: model_api.ReaLModelConfig, idx: int
-) -> List[str]:
-    # NOTE: The order matters, we should not change the order of keys.
-    keys = [f"{idx + 1}.attn.c_attn.ln.weight"]
-    if config.layer_norm_type is None:
-        keys += [f"{idx + 1}.attn.c_attn.ln.bias"]
-    keys += [f"{idx + 1}.attn.c_attn.q_attn.weight"]
-    if config.use_attention_bias:
-        keys += [f"{idx + 1}.attn.c_attn.q_attn.bias"]
-    keys += [f"{idx + 1}.attn.c_attn.k_attn.weight"]
-    if config.use_attention_bias:
-        keys += [f"{idx + 1}.attn.c_attn.k_attn.bias"]
-    keys += [f"{idx + 1}.attn.c_attn.v_attn.weight"]
-    if config.use_attention_bias:
-        keys += [f"{idx + 1}.attn.c_attn.v_attn.bias"]
-    keys += [f"{idx + 1}.attn.c_proj.weight"]
-    if config.use_attn_proj_bias:
-        keys += [f"{idx + 1}.attn.c_proj.bias"]
-    keys += [f"{idx + 1}.mlp.ln.weight"]
-    if config.layer_norm_type is None:
-        keys += [f"{idx + 1}.mlp.ln.bias"]
-
-    if config.mlp_type is None:
-        keys += [
-            f"{idx + 1}.mlp.c_fc.weight",
-            f"{idx + 1}.mlp.c_fc.bias",
-            f"{idx + 1}.mlp.c_proj.weight",
-            f"{idx + 1}.mlp.c_proj.bias",
-        ]
-    elif config.mlp_type == "llama":
-        keys += [
-            f"{idx + 1}.mlp.gate_proj.weight",
-            f"{idx + 1}.mlp.up_proj.weight",
-            f"{idx + 1}.mlp.down_proj.weight",
-        ]
-    elif config.mlp_type == "moe":
-        num_experts = config.moe.num_experts
-        keys += [
-            f"{idx + 1}.mlp.router.weight",
-        ]
-        for j in range(num_experts):
-            keys += [
-                f"{idx + 1}.mlp.experts.local_experts.{j}.gate_proj.weight",
-                f"{idx + 1}.mlp.experts.local_experts.{j}.up_proj.weight",
-                f"{idx + 1}.mlp.experts.local_experts.{j}.down_proj.weight",
-            ]
-    else:
-        raise NotImplementedError()
-    if idx == config.n_layers - 1:
-        keys += [f"{idx + 1}.ln_f.weight"]
+    @staticmethod
+    def tblock(config: model_api.ReaLModelConfig, idx: int) -> List[str]:
+        # NOTE: `idx`` is the index of transformer blocks,
+        # i.e, 0 for the first block or the second layer of the transformer.
+        # NOTE: The order matters, we should not change the order of keys.
+        keys = [f"{idx + 1}.attn.c_attn.ln.weight"]
         if config.layer_norm_type is None:
-            keys += [f"{idx + 1}.ln_f.bias"]
-    return keys
+            keys += [f"{idx + 1}.attn.c_attn.ln.bias"]
+        keys += [f"{idx + 1}.attn.c_attn.q_attn.weight"]
+        if config.use_attention_bias:
+            keys += [f"{idx + 1}.attn.c_attn.q_attn.bias"]
+        keys += [f"{idx + 1}.attn.c_attn.k_attn.weight"]
+        if config.use_attention_bias:
+            keys += [f"{idx + 1}.attn.c_attn.k_attn.bias"]
+        keys += [f"{idx + 1}.attn.c_attn.v_attn.weight"]
+        if config.use_attention_bias:
+            keys += [f"{idx + 1}.attn.c_attn.v_attn.bias"]
+        keys += [f"{idx + 1}.attn.c_proj.weight"]
+        if config.use_attn_proj_bias:
+            keys += [f"{idx + 1}.attn.c_proj.bias"]
+        keys += [f"{idx + 1}.mlp.ln.weight"]
+        if config.layer_norm_type is None:
+            keys += [f"{idx + 1}.mlp.ln.bias"]
 
+        if config.mlp_type is None:
+            keys += [
+                f"{idx + 1}.mlp.c_fc.weight",
+                f"{idx + 1}.mlp.c_fc.bias",
+                f"{idx + 1}.mlp.c_proj.weight",
+                f"{idx + 1}.mlp.c_proj.bias",
+            ]
+        elif config.mlp_type == "llama":
+            keys += [
+                f"{idx + 1}.mlp.gate_proj.weight",
+                f"{idx + 1}.mlp.up_proj.weight",
+                f"{idx + 1}.mlp.down_proj.weight",
+            ]
+        elif config.mlp_type == "moe":
+            num_experts = config.moe.num_experts
+            keys += [
+                f"{idx + 1}.mlp.router.weight",
+            ]
+            for j in range(num_experts):
+                keys += [
+                    f"{idx + 1}.mlp.experts.local_experts.{j}.gate_proj.weight",
+                    f"{idx + 1}.mlp.experts.local_experts.{j}.up_proj.weight",
+                    f"{idx + 1}.mlp.experts.local_experts.{j}.down_proj.weight",
+                ]
+        else:
+            raise NotImplementedError()
+        if idx == config.n_layers - 1:
+            keys += [f"{idx + 1}.ln_f.weight"]
+            if config.layer_norm_type is None:
+                keys += [f"{idx + 1}.ln_f.bias"]
+        return keys
 
-def real_model_head_param_count(config: model_api.ReaLModelConfig) -> int:
-    # NOTE: To hold consistent partitions between actor and critic models,
-    # we count the number of parameters of the critic head as config.hidden_dim * config.vocab_size.
-    # This is the intended behavior rather than a bug.
-    return config.hidden_dim * config.vocab_size
-
-
-def real_model_head_param_keys(config: model_api.ReaLModelConfig) -> List[str]:
-    return [f"{config.n_layers + 1}.weight"]
+    @staticmethod
+    def head(config: model_api.ReaLModelConfig) -> List[str]:
+        return [f"{config.n_layers + 1}.weight"]
 
 
 def keys_from_layer_indices(
@@ -526,9 +474,9 @@ def keys_from_layer_indices(
     sd_keys = []
     for layer_idx in sorted(layer_indices):
         if layer_idx == 0:
-            sd_keys += real_model_embedding_param_keys(config)
+            sd_keys += ReaLModelParamKeys.embed(config)
         elif layer_idx == config.n_layers + 1:
-            sd_keys += real_model_head_param_keys(config)
+            sd_keys += ReaLModelParamKeys.head(config)
         else:
-            sd_keys += real_model_tblock_param_keys(config, layer_idx - 1)
+            sd_keys += ReaLModelParamKeys.tblock(config, layer_idx - 1)
     return sd_keys
