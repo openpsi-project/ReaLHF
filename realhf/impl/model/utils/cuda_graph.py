@@ -1,6 +1,4 @@
-import dataclasses
 import gc
-import os
 import time
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
@@ -33,9 +31,6 @@ def capture_context(graph: torch.cuda.CUDAGraph):
     t3 = time.monotonic()
 
     print(f"capture begin {t1-t0:.4f} run {t2-t1:.4f} capture end {t3-t2:.4f} ")
-
-
-CAPTURE_STREAM = None
 
 
 @contextmanager
@@ -129,13 +124,13 @@ def capture_func(
     custom_all_reduce_assertion()
     stream = torch.cuda.Stream()
     st = time.monotonic()
-    logger.info(f"Rank {dist.get_rank()}: Capturing CUDA graph for {name}")
+    logger.debug(f"Rank {dist.get_rank()}: Capturing CUDA graph for {name}")
     first_capture = CUDA_GRAPH_FIRST_CAPTURE[name]
 
     with outer_capture_context(stream, no_grad):
         if first_capture:
             func(**input_buffer)  # warmup
-            logger.info(
+            logger.debug(
                 f"before clear cache before capture "
                 f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
                 f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}"
@@ -143,7 +138,7 @@ def capture_func(
             torch.cuda.synchronize()
             gc.collect()
             torch.cuda.empty_cache()
-            logger.info(
+            logger.debug(
                 f"after clear cache after capture "
                 f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
                 f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}"
@@ -154,31 +149,13 @@ def capture_func(
         with capture_context(graph):
             output = func(**input_buffer)
 
-    # torch.cuda.synchronize()
-    logger.info(
+    logger.debug(
         f"Rank {dist.get_rank()}: Capturing CUDA graph {name} "
         f"takes {time.monotonic() - st:.4f} seconds."
     )
 
     assert torch.is_tensor(output)
     output_buffer = dict(output=output)
-
-    # logger.info(f"before clear cache after capture "
-    #             f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
-    #             f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}")
-    # st = time.monotonic()
-    # gc.collect()
-    # torch.cuda.empty_cache()
-    # gc.collect()
-    # et = time.monotonic()
-    # logger.info(
-    #     f"clear cache after capture takes {et - st:.4f} seconds."
-    # )
-    logger.info(
-        f"after capture "
-        f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
-        f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}"
-    )
 
     CUDA_GRAPH_STORAGE[name] = graph
     CUDA_GRAPH_INPUT_BUFFER[name] = input_buffer
@@ -249,32 +226,8 @@ def destroy(name):
         memory_in_bytes = tensor.element_size() * tensor.numel()
         memory_in_megabytes += memory_in_bytes / (1024**2)
 
-    logger.info(f"buffer memory {memory_in_megabytes} MB")
-    # logger.info(
-    #     f"before destroy "
-    #     f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
-    #     f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}"
-    # )
     CUDA_GRAPH_STORAGE[name].reset()
     CUDA_GRAPH_STORAGE[name] = None
     CUDA_GRAPH_INPUT_BUFFER[name] = None
     CUDA_GRAPH_OUTPUT_BUFFER[name] = None
     CUDA_GRAPH_DESTROYED[name] = True
-
-    # logger.info(
-    #     f"after destroy "
-    #     f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
-    #     f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}"
-    # )
-
-    # st = time.monotonic()
-    # gc.collect()
-    # torch.cuda.empty_cache()
-    # gc.collect()
-    # et = time.monotonic()
-    # logger.info(
-    #     f"clear cache after destroy takes {et - st:.4f} seconds."
-    # )
-    # logger.info(f"after clear cache after destroy "
-    #             f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
-    #             f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}")

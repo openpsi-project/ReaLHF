@@ -333,9 +333,9 @@ real_pp_cudagraph = GenerateTestParams(
 @pytest.mark.parametrize(
     "test_params1,test_params2,seq_acc_threshold,token_acc_threshold",
     [
-        # (real_simple, huggingface, 0.8, 0.8),
+        (real_simple, huggingface, 0.8, 0.8),
         (real_simple, real_cudagraph, 1.0, 1.0),
-        # (real_simple, real_3d_parallel, 0.8, 0.8),
+        (real_simple, real_3d_parallel, 0.8, 0.8),
         (real_mp, real_mp_cudagraph, 0.8, 0.8),
         (real_dp, real_dp_cudagraph, 1.0, 1.0),
         (real_pp, real_pp_cudagraph, 1.0, 1.0),

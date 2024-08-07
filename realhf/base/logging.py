@@ -106,6 +106,7 @@ log_config = {
             "level": LOGLEVEL,
         },
     },
+    "disable_existing_loggers": True,
 }
 
 
@@ -113,6 +114,13 @@ def getLogger(
     name: Optional[str] = None,
     type_: Optional[Literal["plain", "benchmark", "colored", "system"]] = None,
 ):
+    # Fix the logging config automatically set by transformer_engine
+    from logging import WARNING, Logger, Manager, RootLogger, root
+
+    root = RootLogger(WARNING)
+    Logger.root = root
+    Logger.manager = Manager(Logger.root)
+    # Cover config everytime getLogger is called
     logging.config.dictConfig(log_config)
     if name is None:
         name = "plain"
