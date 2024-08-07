@@ -295,7 +295,7 @@ class PipeModelDataParallelTopology(ProcessTopology):
         self.sequence_parallel = sequence_parallel
         self.gradient_checkpointing = gradient_checkpointing
         self.max_prompt_len = max_prompt_len
-        self.gradient_accumulation_fusion = gradient_accumulation_fusion
+        self.gradient_accumulation_fusion = gradient_accumulation_fusion and num_mp > 1
 
 
 class ParallelGrid:

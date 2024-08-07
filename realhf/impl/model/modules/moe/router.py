@@ -47,7 +47,7 @@ class TopKRouter(torch.nn.Module):
 
     def gating(self, input: torch.Tensor):
         """Forward pass of the router gate."""
-        logits = torch.nn.functional.linear(input, self.weight)
+        logits = torch.nn.functional.linear(input.float(), self.weight.float())
         return logits
 
     def sinkhorn_load_balancing(self, logits: torch.Tensor):

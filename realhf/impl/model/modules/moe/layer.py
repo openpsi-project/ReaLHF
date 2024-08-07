@@ -56,6 +56,7 @@ class LayerNormMoELayer(torch.nn.Module):
     def forward(self, hidden_states: torch.Tensor):
         hidden_states = self.ln(hidden_states)
         probs, indices = self.router(hidden_states)
+        probs = probs.to(self.dtype)
         (dispatched_input, tokens_per_expert) = self.token_dispatcher.token_permutation(
             hidden_states, probs, indices
         )
