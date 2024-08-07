@@ -46,9 +46,13 @@ class GenerationHyperparameters:
     :param temperature: The temperature of the sampling process.
     :type temperature: float
     :param use_cuda_graph: Whether to use CUDA graph to reduce kernel
-        launch overhead during generation. Recommended for pure
-        generation.
+        launch overhead during generation.
     :type use_cuda_graph: bool
+    :param force_cudagraph_recapture: Capture CUDAGraph everytime when
+        calling `generate` even if the graph has been captured before.
+        This will introduce minor overhead but released the kvcache
+        when not running generation.
+    :type force_cudagraph_recapture: bool
     :param force_no_logits_mask: Whether to omit logits mask.
         The logits mask will be produced when using top-k or top-p sampling,
         where it is used to mark tokens that are filtered out.
@@ -71,6 +75,7 @@ class GenerationHyperparameters:
     top_k: int = 200
     temperature: float = 1.0
     use_cuda_graph: bool = False
+    force_cudagraph_recapture: bool = True
     force_no_logits_mask: bool = False
 
     def __post_init__(self):
