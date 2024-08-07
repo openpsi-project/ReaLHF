@@ -20,6 +20,11 @@ class PromptAnswerDatasetConfig:
     :type train_bs_n_seqs: int
     :param valid_bs_n_seqs: Number of sequences in each batch during validation.
     :type valid_bs_n_seqs: int
+    :param pad_to_max_length: Whether to pad sequences to the maximum length.
+        If True, all mini-batches created by the DP balanced partitioning algorithm
+        will have the same number of tokens, making MFC time predictable.
+        Used only for benchmarking.
+    :type pad_to_max_length: bool
     """
 
     train_path: str = ""
@@ -27,6 +32,7 @@ class PromptAnswerDatasetConfig:
     max_seqlen: int = 1024
     train_bs_n_seqs: int = 256
     valid_bs_n_seqs: int = 256
+    pad_to_max_length: bool = False
 
 
 @dataclasses.dataclass
@@ -76,8 +82,14 @@ class PromptOnlyDatasetConfig:
     :type max_prompt_len: int
     :param train_bs_n_seqs: Number of prompts in each batch.
     :type train_bs_n_seqs: int
+    :param pad_to_max_length: Whether to pad sequences to the maximum length.
+        If True, all mini-batches created by the DP balanced partitioning algorithm
+        will have the same number of tokens, making MFC time predictable.
+        Used only for benchmarking.
+    :type pad_to_max_length: bool
     """
 
     path: str = ""
     max_prompt_len: int = 256
     train_bs_n_seqs: int = 256
+    pad_to_max_length: bool = False

@@ -33,12 +33,15 @@ from realhf.api.quickstart.device_mesh import (
     RPCAllocation,
     make_device_mesh_from_name,
 )
-from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
+from realhf.api.quickstart.model import (
+    ModelTrainEvalConfig,
+    ParallelismConfig,
+    get_real_model_config,
+)
 from realhf.experiments.common.check import check_is_realhf_native_model_interface
 from realhf.experiments.common.utils import (
     get_topo,
     make_inf_backend_config,
-    make_model_config,
     make_train_backend_config,
     resolve_replica_ids,
     resolve_rpc_hooks,
@@ -409,7 +412,14 @@ class CommonExperimentConfig(Experiment):
                 rpcs = [rpc_alloc.rpc for rpc_alloc in model_rpc_allocs]
                 rpc_alloc = model_rpc_allocs[0]
                 model_cfg = self.models[model_name.role]
-                model = make_model_config(model_cfg)
+                model = get_real_model_config(
+                    model_path=model_cfg.path,
+                    hf_model_family=model_cfg.type._class,
+                    is_critic=model_cfg.type.is_critic,
+                    init_critic_from_actor=model_cfg.init_critic_from_actor,
+                    dtype="bf16" if model_cfg.enable_bf16 else "fp16",
+                    lora=model_cfg.lora,
+                )
                 mapping = rpc_alloc.device_mesh.mapping
                 gradient_checkpointing = model_cfg.gradient_checkpointing and any(
                     rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs

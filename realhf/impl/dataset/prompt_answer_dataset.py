@@ -19,6 +19,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
         max_length: int,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
+        pad_to_max_length: bool = False,
     ):
         """A dataset with prompts and corresponding answers. Usually used for
         SFT.
@@ -31,6 +32,9 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
                 a key "prompt" and a key "answer". Defaults to None.
             dataset_builder (Optional[Callable[[], List[Dict]]], optional): Alternative to dataset_path.
                 A callable that returns a list of dictionary. Defaults to None.
+            pad_to_max_length (bool): Whether to pad sequences to the maximum length.
+                Used only for benchmarking. If True, all mini-batches created by the DP balanced partition
+                algorithm will have the same number of tokens, making MFC time predictable. Defaults to False.
         """
         self._util = util
         tokenizer = self.util.tokenizer
@@ -43,11 +47,11 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
 
         self.tokens = tokenizer(
             seqs,
-            padding=False,
             truncation=True,
             max_length=max_length,
             return_length=True,
             return_attention_mask=False,
+            padding=pad_to_max_length,
         )
         prompt_tokens = tokenizer(
             prompts,

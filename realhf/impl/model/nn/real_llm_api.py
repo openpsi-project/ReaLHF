@@ -33,9 +33,6 @@ from .real_llm_base import (
     ReaLModelBlock,
     SequenceParallelCriticHead,
     VocabPositionEmbedding,
-    real_model_embed_param_count,
-    real_model_head_param_count,
-    real_model_tblock_param_count,
 )
 from .real_llm_generate import generate
 from .real_llm_parallel import partition_pipeline_layers
@@ -119,9 +116,6 @@ class ReaLModel(nn.Module):
         self.layer_mapping = partition_pipeline_layers(
             config,
             constants.pipe_parallel_world_size(),
-            real_model_embed_param_count,
-            real_model_tblock_param_count,
-            real_model_head_param_count,
         )
         self.layer_idx_start = self.layer_mapping[constants.pipe_parallel_rank()][0]
         self.layer_idx_end = self.layer_mapping[constants.pipe_parallel_rank()][1]
@@ -156,7 +150,6 @@ class ReaLModel(nn.Module):
             mp_size=constants.model_parallel_world_size(),
             pp_size=constants.pipe_parallel_world_size(),
             dp_size=constants.data_parallel_world_size(),
-            sequence_parallel=constants.sequence_parallel(),
             head_param_point_to_embedding=self.head_param_point_to_embedding,
         )
         self.contiguous_param = None
@@ -553,9 +546,6 @@ class ReaLModel(nn.Module):
         to_layer_mapping = partition_pipeline_layers(
             to_model_config,
             to_topo.get_dim("pipe"),
-            real_model_embed_param_count,
-            real_model_tblock_param_count,
-            real_model_head_param_count,
         )
         to_layers_handle_dict = {}
         to_layer_indices = []
@@ -584,7 +574,6 @@ class ReaLModel(nn.Module):
             mp_size=to_topo.get_dim("model"),
             dp_size=to_topo.get_dim("data"),
             pp_size=to_topo.get_dim("pipe"),
-            sequence_parallel=to_topo.sequence_parallel,
             head_param_point_to_embedding=to_model_head_param_point_to_embedding,
         )
         if len(to_layer_indices) > 0:
