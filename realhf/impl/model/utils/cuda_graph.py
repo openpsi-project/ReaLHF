@@ -22,15 +22,9 @@ CUDA_GRAPH_DESTROYED: Dict[str, bool] = defaultdict(lambda: False)
 
 @contextmanager
 def capture_context(graph: torch.cuda.CUDAGraph):
-    t0 = time.monotonic()
     graph.capture_begin()
-    t1 = time.monotonic()
     yield
-    t2 = time.monotonic()
     graph.capture_end()
-    t3 = time.monotonic()
-
-    print(f"capture begin {t1-t0:.4f} run {t2-t1:.4f} capture end {t3-t2:.4f} ")
 
 
 @contextmanager

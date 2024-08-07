@@ -176,10 +176,21 @@ def _exec_pipe_schedule(
         torch.tensor(False, dtype=torch.bool, device=torch.cuda.current_device()),
     )  # a global terminate signal for all micro batches that is transferred across stages
 
-    # A termination machanism to avoid all-reduce at each step.
+    # A termination mechanism to avoid all-reduce at each step.
     # If the schedule is about to terminate (i.e., will_break is True),
     # the last stage will send this message to the previous stages with
     # one more pipeline round (last -> 0 -> 1 -> .. -> last-1 -> last).
+    # After a stage receive terminate signal (or meet the terminate
+    # condition in the last stage), the stage will enter burnout in
+    # the next step. In burnout, the stage will only execute necessary
+    # communication instructions that send terminate to next stage or
+    # avoid communication stuck. Specifically:
+    # 1. The last stage: Send terminal signal to the first stage +
+    #    recv activations for num_stages // 2 + 1 steps;
+    # 2. stage_id % 2 == 0: Burnout one step, send terminal signal to
+    #    the next stage;
+    # 3. stage_id % 2 == 1: No burnout step, since receiving and sending
+    #    terminate signal happen in the same stage.
     if is_last_stage:
         burn_out_steps = num_stages // 2 + 1
     else:
@@ -199,8 +210,6 @@ def _exec_pipe_schedule(
                 )
 
             if will_break:
-                # If stages received terminate signal, execute only neccessary comm instructions
-                # to avoid communication stuck
                 if is_last_stage:
                     if burn_out_steps == num_stages // 2 + 1 and type(cmd) not in [
                         schedule.SendNextTokens,
