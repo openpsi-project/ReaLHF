@@ -949,7 +949,7 @@ class ModelWorker(worker_base.Worker):
             "MaxMemUtil",
             "AvgComputeUtil",
         ]
-        line2 = [
+        line1 = [
             "Value",
             f"{memory_info.total / 1024**2:.2f}MB",
             f"{max(mem_stats[:, -1]) / 1024**2:.2f}MB",
@@ -958,7 +958,7 @@ class ModelWorker(worker_base.Worker):
             f"{max(mem_stats[:, -1]) / memory_info.total * 100:.2f}%",
             f"{gpu_compute_util:.2f}%",
         ]
-        line1 = [
+        line2 = [
             "GPU ID",
             "-",
             max_used_gpu_id,
