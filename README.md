@@ -59,8 +59,8 @@ pip install -r requirements.txt
 export MAX_JOBS=8
 
 # GPU dependencies, not required on the launcher node.
-pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.8 --no-deps --no-build-isolation # compatible with torch version 2.3.1
-pip install flash_attn==2.6.3 --no-build-isolation # compatible with torch version 2.3.1
+pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.8 --no-deps --no-build-isolation
+pip install flash_attn==2.4.2 --no-build-isolation 
 pip install grouped_gemm  # For MoE
 
 REAL_CUDA=1 pip install -e . --no-build-isolation

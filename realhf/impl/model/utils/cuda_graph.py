@@ -22,6 +22,10 @@ CUDA_GRAPH_DESTROYED: Dict[str, bool] = defaultdict(lambda: False)
 
 @contextmanager
 def capture_context(graph: torch.cuda.CUDAGraph):
+    # NOTE: We use lower level API in pytorch CUDAGraph instead of `torch.cuda.graph`
+    # context. This is because in `torch.cuda.graph`, `torch.cuda.empty_cache()` and
+    # `gc.collect()` are unnecessarily called everytime the context is entered.
+    # This will introduce large overhead.
     graph.capture_begin()
     yield
     graph.capture_end()
@@ -85,7 +89,7 @@ def capture_func(
     buffers by name. The input/output metadata should match the inputs and
     outputs of function.
 
-    This function use pytorch original CUDAGraph implementation
+    This function uses pytorch original CUDAGraph implementation
 
     :param name: The identifier of the CUDAGraph to be captured/reused.
     :type name: str
@@ -126,16 +130,16 @@ def capture_func(
             func(**input_buffer)  # warmup
             logger.debug(
                 f"before clear cache before capture "
-                f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
-                f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}"
+                f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f} MB"
+                f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f} MB"
             )
             torch.cuda.synchronize()
             gc.collect()
             torch.cuda.empty_cache()
             logger.debug(
                 f"after clear cache after capture "
-                f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f}"
-                f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f}"
+                f"mem allocated: {torch.cuda.memory_allocated()/1024/1024:.4f} MB"
+                f"mem reserved: {torch.cuda.memory_reserved()/1024/1024:.4f} MB"
             )
 
         graph = torch.cuda.CUDAGraph()
@@ -145,7 +149,7 @@ def capture_func(
 
     logger.debug(
         f"Rank {dist.get_rank()}: Capturing CUDA graph {name} "
-        f"takes {time.monotonic() - st:.4f} seconds."
+        f"takes {time.monotonic() - st:.4f} seconds"
     )
 
     assert torch.is_tensor(output)
@@ -204,21 +208,6 @@ def destroy(name):
         name in CUDA_GRAPH_STORAGE and not CUDA_GRAPH_FIRST_CAPTURE[name]
     ), f"CUDAGraph {name} should be created before destroy."
     assert CUDA_GRAPH_DESTROYED[name] is False, f"CUDAGraph {name} already destroyed."
-
-    memory_in_megabytes = 0
-    for input_tensor in CUDA_GRAPH_INPUT_BUFFER[name].values():
-        if isinstance(input_tensor, list):
-            for t in input_tensor:
-                if torch.is_tensor(t):
-                    memory_in_bytes = t.element_size() * t.numel()
-                    memory_in_megabytes += memory_in_bytes / (1024**2)
-        elif torch.is_tensor(input_tensor):
-            memory_in_bytes = input_tensor.element_size() * input_tensor.numel()
-            memory_in_megabytes += memory_in_bytes / (1024**2)
-
-    for tensor in CUDA_GRAPH_OUTPUT_BUFFER[name].values():
-        memory_in_bytes = tensor.element_size() * tensor.numel()
-        memory_in_megabytes += memory_in_bytes / (1024**2)
 
     CUDA_GRAPH_STORAGE[name].reset()
     CUDA_GRAPH_STORAGE[name] = None
