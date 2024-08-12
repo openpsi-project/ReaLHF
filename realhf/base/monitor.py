@@ -466,8 +466,9 @@ COMPUTE_KERNEL_KEYS = [
 
 COMM_KERNEL_KEYS = [
     "c10d::",
-    "nccl::",
+    "nccl",
     "ncclDevKernel",
+    "vllm::cross_device_reduce",
 ]
 
 MEM_KERNEL_KEYS = [

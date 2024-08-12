@@ -1,8 +1,10 @@
 import collections
+import contextlib
 import gc
 import itertools
 import multiprocessing as mp
 import os
+import pickle
 import queue
 import socket
 import time
@@ -32,6 +34,7 @@ from realhf.base import (
     topology,
 )
 from realhf.base.monitor import (
+    CUDAKernelTime,
     CUDATimeMarkType,
     cuda_tmark,
     cuda_tmarked,
@@ -58,17 +61,20 @@ TIME_RECORD_RPCS = [
 ]
 
 
-def get_pytorch_profiler(with_stack):
-    return torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True,
-        with_flops=True,
-    )
+def get_pytorch_profiler(with_stack: bool, enabled: bool = True):
+    if enabled:
+        return torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=with_stack,
+            with_flops=True,
+        )
+    else:
+        return contextlib.nullcontext()
 
 
 class NoRequestToHandle(Exception):
@@ -651,6 +657,69 @@ class ModelWorker(worker_base.Worker):
 
         self.__request_queue.put_nowait((request, data, True, res))
 
+    @contextlib.contextmanager
+    def __maybe_profile_rpc(self, rpc: dfg.MFCDef):
+        # Whether to enable profiling is controlled by the following environment variables.
+        _enable_stack = os.getenv("REAL_DUMP_TRACE", "0") == "1"
+        _dump_kernel_time = os.getenv("REAL_DUMP_KERNEL_TIME", "0") == "1"
+        _enable_profiler = _enable_stack or _dump_kernel_time
+
+        # pfer ca be a null context if enable_profiler is False
+        pfer = get_pytorch_profiler(with_stack=_enable_stack, enabled=_enable_profiler)
+        pfer.__enter__()
+        # The pytorch profiler will call cuda synchronize for us.
+        profiler_tik = time.perf_counter()
+
+        try:
+            yield self
+        finally:
+            # Dump profiler results.
+            pfer.__exit__(None, None, None)
+            if _enable_profiler:
+                if self._dp_rank == 0 and self._is_dp_head:
+                    blogger.info(
+                        f"RPC {rpc.name} pure execution time "
+                        f"w/o profiler: {time.perf_counter() - profiler_tik:.2f} secs."
+                    )
+                    collect_tik = time.perf_counter()
+                    blogger.debug(
+                        f"Collecting system metrics from the profiler. "
+                        "This may take for a while..."
+                    )
+                if _dump_kernel_time:
+                    kernel_t = CUDAKernelTime.from_profiler(pfer)
+                    _kernel_time_dir = os.path.join(
+                        constants.LOG_ROOT,
+                        constants.experiment_name(),
+                        constants.trial_name(),
+                        "kernelTime",
+                    )
+                    os.makedirs(_kernel_time_dir, exist_ok=True)
+                    with open(
+                        os.path.join(
+                            _kernel_time_dir,
+                            f"{rpc.name}_r{dist.get_rank()}.pkl",
+                        ),
+                        "wb",
+                    ) as f:
+                        pickle.dump(kernel_t, f)
+                if _enable_stack:
+                    trace_dir = os.path.join(
+                        constants.LOG_ROOT,
+                        constants.experiment_name(),
+                        constants.trial_name(),
+                        "trace",
+                    )
+                    os.makedirs(trace_dir, exist_ok=True)
+                    pfer.export_chrome_trace(
+                        os.path.join(trace_dir, f"{rpc.name}_r{dist.get_rank()}.json")
+                    )
+                if self._dp_rank == 0 and self._is_dp_head:
+                    blogger.debug(
+                        f"System metrics collected. Time consumption:"
+                        f" {time.perf_counter() - collect_tik:.2f} secs."
+                    )
+
     def __handle_model_function_calls(
         self, request: request_reply_stream.Payload, data: Any
     ):
@@ -670,20 +739,21 @@ class ModelWorker(worker_base.Worker):
         if rpc.input_key_remap:
             data.remap_keys_(rpc.input_key_remap)
 
-        if request.handle_name == "inference":
-            res = self._interface.inference(
-                self._model, data, n_mbs=rpc.n_mbs
-            )  # -> SequenceSample
-        elif request.handle_name == "train_step":
-            res = self._interface.train_step(
-                self._model, data, n_mbs=rpc.n_mbs
-            )  # -> Dict
-        elif request.handle_name == "generate":
-            res = self._interface.generate(
-                self._model, data, n_mbs=rpc.n_mbs
-            )  # -> SequenceSample
-        else:
-            raise NotImplementedError(f"Unknown MFC type: {request.handle_name}.")
+        with self.__maybe_profile_rpc(rpc):
+            if request.handle_name == "inference":
+                res = self._interface.inference(
+                    self._model, data, n_mbs=rpc.n_mbs
+                )  # -> SequenceSample
+            elif request.handle_name == "train_step":
+                res = self._interface.train_step(
+                    self._model, data, n_mbs=rpc.n_mbs
+                )  # -> Dict
+            elif request.handle_name == "generate":
+                res = self._interface.generate(
+                    self._model, data, n_mbs=rpc.n_mbs
+                )  # -> SequenceSample
+            else:
+                raise NotImplementedError(f"Unknown MFC type: {request.handle_name}.")
 
         if isinstance(res, data_api.SequenceSample) and rpc.output_key_remap:
             res.remap_keys_(rpc.output_key_remap)
