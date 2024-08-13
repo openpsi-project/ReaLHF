@@ -358,8 +358,8 @@ class PipeGenInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
-        cuda_graph_name = f"decoding_{micro_batch_id}"
-        graph = cuda_graph.get_graph(cuda_graph_name)
+        tokenizer = tensor_buffer.get("tokenizer", micro_batch_id)
+        gconfig = tensor_buffer.get("gconfig", micro_batch_id)
 
         is_first_stage = constants.is_first_pipe_stage()
         if is_first_stage:
@@ -384,9 +384,7 @@ class PipeGenInstrSet:
             if is_first_stage:
                 x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
                 ys = tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
-                ys[0].packed_input_ids = (
-                    buf  # sequence parallel forward only accept one dim input_ids
-                )
+                ys[0].packed_input_ids = buf
                 ys[0].packed_position_ids = None
             else:
                 others = tensor_buffer.get(
@@ -397,6 +395,34 @@ class PipeGenInstrSet:
         else:
             x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
 
+        # Capture CUDAGraph in the first decoding step.
+        cuda_graph_name = f"decoding_{micro_batch_id}"
+        # Get the graph from the buffer instead of the global handle.
+        # This is because the graph may not be destroyed in the previous generation call,
+        # but we need to call into the `capture_decoding_graph` function to reinitialize
+        # the graph anyway. Getting from the buffer ensures that the `graph` variable at
+        # the first decoding step is None and we can get into the if branch.
+        graph = tensor_buffer.get(cuda_graph_name, micro_batch_id, raise_error=False)
+        if (
+            tensor_buffer.get("kv_cache_reserved", micro_batch_id)
+            and gconfig.use_cuda_graph
+            and graph is None
+        ):
+            # NOTE: we need to capture separate graphs for different micro-batches
+            # because the addresses of KV-caches are different.
+            # One CUDAGraph operates on exactly one KV-cache address.
+            graph, _, _ = maybe_capture_cudagraph(
+                module,
+                x,
+                ys,
+                cuda_graph_name,
+                force_recapture=gconfig.force_cudagraph_recapture,
+            )
+            tensor_buffer.put(cuda_graph_name, micro_batch_id, graph)
+
+        # Run model forward.
+        # NOTE: `step_id` is not the position of the instruction,
+        # but the position of the generated token.
         if graph is None or step_id == 0:
             x, ys = module.forward(x, ys)
         else:
@@ -425,23 +451,12 @@ class PipeGenInstrSet:
 
         tensor_buffer.put("batch_output_x", micro_batch_id, x)
 
-        tokenizer = tensor_buffer.get("tokenizer", micro_batch_id)
-        gconfig = tensor_buffer.get("gconfig", micro_batch_id)
-
         # Init KV cache.
         is_prefill_phase = False
         if not tensor_buffer.get("kv_cache_reserved", micro_batch_id):
             # KV cache is attached to x and ys.
             assert constants.pipe_parallel_world_size() >= 2
             x, ys = prepare_generate_inputs(module, gconfig, x, ys, cuda_graph_name)
-            if gconfig.use_cuda_graph:
-                graph, _, _ = maybe_capture_cudagraph(
-                    module,
-                    x,
-                    ys,
-                    cuda_graph_name,
-                    force_recapture=gconfig.force_cudagraph_recapture,
-                )
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
 
@@ -876,6 +891,10 @@ class PipelineRunner:
             terminate_condition=terminate_condition,
         )
 
+        if gconfig.use_cuda_graph and gconfig.force_cudagraph_recapture:
+            for micro_batch_id in range(num_micro_batches):
+                cuda_graph.destroy(f"decoding_{micro_batch_id}")
+
         if not constants.is_last_pipe_stage():
             return None
 
@@ -897,10 +916,6 @@ class PipelineRunner:
         gen_tokens, log_probs, logits_mask = _gather_minibatch_gen_outputs(
             *list(zip(*generate_output))
         )
-
-        if gconfig.use_cuda_graph and gconfig.force_cudagraph_recapture:
-            for micro_batch_id in range(num_micro_batches):
-                cuda_graph.destroy(f"decoding_{micro_batch_id}")
 
         return gen_tokens, log_probs, logits_mask, None, None
 

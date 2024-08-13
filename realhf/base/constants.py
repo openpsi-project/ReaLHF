@@ -102,9 +102,6 @@ BASE_ENVIRONS = {
     "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
     # Whether to enable time mark to plot timelines.
     # "REAL_CUDA_TMARK": "1",
-    # Whether to dump kernel time and trace for system-wise analysis.
-    "REAL_DUMP_KERNEL_TIME": str(0),
-    "REAL_DUMP_TRACE": str(0),
 }
 
 
