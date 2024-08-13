@@ -13,6 +13,7 @@ from realhf.api.core.data_api import SequenceSample
 from realhf.base.datapack import flat2d
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
 from realhf.impl.model.nn.real_llm_api import ReaLModel
+from realhf.impl.model.nn.real_llm_generate import _gather_minibatch_gen_outputs
 
 logger = logging.getLogger("PipelinableInferenceEngine")
 
@@ -196,11 +197,7 @@ class PipelinableInferenceEngine:
             if num_micro_batches == 1:
                 return sequences[0], scores[0], logits_mask[0]
             else:
-                return (
-                    torch.cat(sequences, dim=0),
-                    torch.cat(scores, dim=0),
-                    torch.cat(logits_mask, dim=0),
-                )
+                return _gather_minibatch_gen_outputs(sequences, scores, logits_mask)
 
 
 @dataclasses.dataclass
