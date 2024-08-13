@@ -44,6 +44,7 @@ def config_from_mistral(hf_config: transformers.MistralConfig) -> ReaLModelConfi
         use_attn_proj_bias=False,
         embd_pdrop=0.0,
         sliding_window=hf_config.sliding_window,
+        scale_attn_by_inverse_layer_idx=False,
     )
 
 

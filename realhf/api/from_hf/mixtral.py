@@ -47,6 +47,7 @@ def config_from_mixtral(hf_config: transformers.MixtralConfig) -> ReaLModelConfi
         embd_pdrop=0.0,
         sliding_window=hf_config.sliding_window,
         moe=moe,
+        scale_attn_by_inverse_layer_idx=False,
     )
 
 
