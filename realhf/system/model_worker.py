@@ -679,11 +679,11 @@ class ModelWorker(worker_base.Worker):
             if _enable_profiler:
                 if self._dp_rank == 0 and self._is_dp_head:
                     blogger.info(
-                        f"RPC {rpc.name} pure execution time "
-                        f"w/o profiler: {time.perf_counter() - profiler_tik:.2f} secs."
+                        f"RPC {rpc.name} execution time "
+                        f"w/o external data processing: {time.perf_counter() - profiler_tik:.2f} secs."
                     )
                     collect_tik = time.perf_counter()
-                    blogger.debug(
+                    blogger.info(
                         f"Collecting system metrics from the profiler. "
                         "This may take for a while..."
                     )
@@ -716,7 +716,7 @@ class ModelWorker(worker_base.Worker):
                         os.path.join(trace_dir, f"{rpc.name}_r{dist.get_rank()}.json")
                     )
                 if self._dp_rank == 0 and self._is_dp_head:
-                    blogger.debug(
+                    blogger.info(
                         f"System metrics collected. Time consumption:"
                         f" {time.perf_counter() - collect_tik:.2f} secs."
                     )
