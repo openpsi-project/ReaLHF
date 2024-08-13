@@ -18,10 +18,12 @@ def _reduce(input_):
         return input_
 
     # All-reduce.
-    if custom_all_reduce.is_initialized():
-        out = custom_all_reduce.get_handle().custom_all_reduce(input_)
-        if out is not None:
-            return out
+    # NOTE: custom_all_reduce may randomly get stuck.
+    # Since pytorch all-reduce works fine with CUDAGraph, abandon custom_all_reduce.
+    # if custom_all_reduce.is_initialized():
+    #     out = custom_all_reduce.get_handle().custom_all_reduce(input_)
+    #     if out is not None:
+    #         return out
     torch.distributed.all_reduce(input_, group=constants.model_parallel_group())
     return input_
 

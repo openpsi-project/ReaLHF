@@ -3,6 +3,7 @@ import dataclasses
 import enum
 import os
 import pickle
+import re
 import time
 from collections import defaultdict
 from statistics import mean
@@ -468,6 +469,7 @@ COMM_KERNEL_KEYS = [
     "c10d::",
     "nccl::",
     "ncclDevKernel",
+    "vllm::cross_device_reduce",
 ]
 
 MEM_KERNEL_KEYS = [
@@ -501,6 +503,13 @@ class CUDAKernelTime:  # in us
                 continue
             if "waitevent" in x.key.lower():
                 print(x.key)
+            if re.match(r"^nccl:(?!:).*", x.key):
+                # I.e., filter out kernels starting with "nccl:"
+                # but the next character is not ":", e.g., "nccl:recv".
+                # This is the marker probably created by CUDAGraph.
+                # It is overlapped with the actual NCCL kernel.
+                # We don't want to count it twice.
+                continue
             if any(k in x.key for k in COMPUTE_KERNEL_KEYS):
                 compute_time += x.self_cuda_time_total
             elif any(k in x.key for k in COMM_KERNEL_KEYS):
