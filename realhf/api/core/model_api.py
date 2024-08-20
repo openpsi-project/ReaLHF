@@ -395,6 +395,31 @@ class ModelInterface(abc.ABC):
     ) -> Dict:
         raise NotImplementedError()
 
+    # Mock methods for creating data and profiling an individual MFC.
+    def _mock_generate(self, model: Model, data: SequenceSample):
+        return data
+
+    def _mock_inference(self, model: Model, data: SequenceSample):
+        return data
+
+    def _mock_train_step(self, model: Model, data: SequenceSample):
+        return data
+
+    def mock(
+        self,
+        type_: str,
+        model: Model,
+        data: SequenceSample,
+    ) -> SequenceSample:
+        if type_ == "generate":
+            return self._mock_generate(model, data)
+        elif type_ == "inference":
+            return self._mock_inference(model, data)
+        elif type_ == "train_step":
+            return self._mock_train_step(model, data)
+        else:
+            raise ValueError(f"Unsupported interface type {type_}")
+
 
 ALL_MODEL_CLASSES = {}
 ALL_INTERFACE_CLASSES = {}

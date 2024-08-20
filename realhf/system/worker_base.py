@@ -588,7 +588,9 @@ class Worker:
         self.__set_status(WorkerServerStatus.RUNNING)
 
     def pause(self):
-        self.logger.info("Pausing worker")
+        self.logger.info(
+            f"Pausing worker index {self.__worker_info.worker_index + 1} out of {self.__worker_info.worker_count}"
+        )
         self.__running = False
         self.__set_status(WorkerServerStatus.PAUSED)
 
@@ -598,10 +600,6 @@ class Worker:
     def exit(self):
         self.logger.info("Exiting worker")
         self._exit_hook(WorkerServerStatus.COMPLETED)
-        import torch.distributed as dist
-
-        if dist.is_initialized():
-            dist.destroy_process_group()
         self.__set_status(WorkerServerStatus.COMPLETED)
         self.__exiting = True
 

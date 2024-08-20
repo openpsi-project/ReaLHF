@@ -43,6 +43,7 @@ from realhf.base.monitor import (
     gpu_utilization_monitor,
 )
 from realhf.impl.model.nn.real_llm_api import ReaLModel
+from realhf.impl.model.utils import cuda_graph
 from realhf.system import request_reply_stream, worker_base
 
 # NOTE: Register all implemented datasets and models.
@@ -118,9 +119,6 @@ class ModelWorker(worker_base.Worker):
         )
 
         r = self.config.worker_info
-
-        # log info
-        self.__total_time = 0.01
 
         # recover info
         self.__recover_run = os.environ.get("REAL_RECOVER_RUN", "0") == "1"
@@ -687,6 +685,9 @@ class ModelWorker(worker_base.Worker):
                         f"Collecting system metrics from the profiler. "
                         "This may take for a while..."
                     )
+                parallel_str = f"d{self._dp_size}m{self._mp_size}p{self._pp_size}"
+                if constants.sequence_parallel():
+                    parallel_str += "sp"
                 if _dump_kernel_time:
                     kernel_t = CUDAKernelTime.from_profiler(pfer)
                     _kernel_time_dir = os.path.join(
@@ -694,6 +695,7 @@ class ModelWorker(worker_base.Worker):
                         constants.experiment_name(),
                         constants.trial_name(),
                         "kernelTime",
+                        parallel_str,
                     )
                     os.makedirs(_kernel_time_dir, exist_ok=True)
                     with open(
@@ -710,6 +712,7 @@ class ModelWorker(worker_base.Worker):
                         constants.experiment_name(),
                         constants.trial_name(),
                         "trace",
+                        parallel_str,
                     )
                     os.makedirs(trace_dir, exist_ok=True)
                     pfer.export_chrome_trace(
@@ -737,6 +740,10 @@ class ModelWorker(worker_base.Worker):
         )
 
         data: data_api.SequenceSample = input_queue.get_nowait()
+
+        if self.config.profile_mode:
+            data = self._interface.mock(request.handle_name, self._model, data)
+
         if rpc.input_key_remap:
             data.remap_keys_(rpc.input_key_remap)
 
@@ -878,8 +885,14 @@ class ModelWorker(worker_base.Worker):
         if self.__has_dataset:
             self.prefetch_from_dataset()
 
-        st = time.monotonic()
         self.maybe_receive_requests()
+
+        # Prioritize the reset request.
+        for _ in range(self.__request_queue.qsize()):
+            request, data, handled, res = self.__request_queue.get_nowait()
+            if request.handle_name == "reset":
+                return self.__experiment_complete_exit()
+            self.__request_queue.put_nowait((request, data, handled, res))
 
         # NOTE: We ensure that all model workers have the same set of requests
         # at any time through a TCP-like protocol, i.e., req -> ack -> syn -> resp.
@@ -899,10 +912,42 @@ class ModelWorker(worker_base.Worker):
                 break
 
         r = self.maybe_post_responses()
-
-        t = time.monotonic() - st
-        self.__total_time += t
         return r
+
+    def __experiment_complete_exit(self):
+        self.__stream.close()
+
+        # Remove all models and interfaces.
+        del self.__models, self.__backends, self.__interfaces, self.__unwrapped_models
+
+        # Reset model worker states.
+        self.__dist_env_resolved = False
+
+        before_mem = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle).used
+
+        constants.reset_run()
+        topology.destroy_all_comm_groups()
+
+        gc.collect()
+        cuda_graph.destroy_all()
+        if torch.cuda.is_initialized():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+        # Record memory.
+        after_mem = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle).used
+        blogger.debug(
+            f"GPU memory used upon experiment complete: "
+            f"{before_mem/1024**2:.2f}MB -> {after_mem / 1024**2:.2f}MB"
+        )
+
+        self.__nvml_handle = None
+        try:
+            pynvml.nvmlShutdown()
+        except pynvml.nvml.NVMLError_Uninitialized:
+            pass
+        self.pause()
+        return worker_base.PollResult(sample_count=0, batch_count=0)
 
     def __recover_save(self):
         # store model and dataset states for recover
@@ -959,7 +1004,7 @@ class ModelWorker(worker_base.Worker):
         # All-gather hostname, gpu ID, and stats.
         hostname = socket.gethostname()
         hostname_len = len(hostname)
-        assert hostname_len < 64, "hostname should have more than 64 chars"
+        assert hostname_len < 64, "hostname should not have more than 64 chars"
         # Encode hostnames into long.
         hostname_np = np.fromstring(
             hostname + "x" * (64 - len(hostname)), dtype=np.int64

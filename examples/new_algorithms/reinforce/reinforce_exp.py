@@ -2,6 +2,8 @@ import copy
 import dataclasses
 from typing import *
 
+from omegaconf import OmegaConf
+
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 from examples.new_algorithms.reinforce.reinforce_interface import ReinforceInterface
@@ -77,7 +79,11 @@ class ReinforceConfig(CommonExperimentConfig):
         actor_sample_interface = ModelInterfaceAbstraction(
             "reinforce",
             args=dict(
-                generation_config=self.gen,
+                # NOTE: to_container converts the object to a dict
+                # It is used for unifying the profiling API, which requires to
+                # pass external interface configurations in the launch command.
+                # Customized dataclass objects will not work in that case.
+                generation_config=OmegaConf.to_container(self.gen, resolve=True),
                 discount=self.discount,
                 adv_norm=self.adv_norm,
             ),

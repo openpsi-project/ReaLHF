@@ -4,6 +4,7 @@ import math
 from typing import *
 
 import numpy as np
+from omegaconf import OmegaConf
 
 import realhf.base.logging as logging
 from realhf.api.core.config import (
@@ -261,7 +262,11 @@ class PPOConfig(CommonExperimentConfig):
             "ppo_actor",
             args={
                 **copy.deepcopy(self.ppo_kwargs),
-                "generation_config": self.ppo.gen,
+                # NOTE: to_container converts the object to a dict
+                # It is used for unifying the profiling API, which requires to
+                # pass external interface configurations in the launch command.
+                # Customized dataclass objects will not work in that case.
+                "generation_config": OmegaConf.to_container(self.gen, resolve=True),
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
                 "adv_norm": self.ppo.adv_norm,
             },
