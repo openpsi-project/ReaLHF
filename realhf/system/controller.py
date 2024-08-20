@@ -184,6 +184,10 @@ class Controller:
             )
         )
 
+        # NOTE: Since worker processes are created and killed by the scheduler,
+        # the controller cannot restart a dead worker when error occurs,
+        # and it's impossible to continue the experiment when any of the multiple setups fails.
+        # We can only relaunch the entire experiment in this case.
         for i, setup in enumerate(setups):
 
             s = f" Entering setup {i+1}/{len(setups)}... ".center(80, "#")
@@ -198,7 +202,6 @@ class Controller:
             workers_configs = [
                 (k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES
             ]
-            # FIXME: continue experiments when encountering errors.
             try:
                 for name, cfgs, _ in workers_configs:
                     logger.info(f"Configuring Workers: {name}...")
@@ -237,20 +240,30 @@ class Controller:
             )
             logger.info(colorama.Fore.RED + s + colorama.Style.RESET_ALL)
 
-        logger.info("=" * 80)
         logger.info(
-            (
-                colorama.Fore.YELLOW
-                + colorama.Style.BRIGHT
-                + "\033[1m"
-                + (
-                    f"All {len(setups)} setups are done. "
-                    "You've done an excellent job! Congrats!"
-                )
-                + colorama.Style.RESET_ALL
-            ).center(80, "=")
+            colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + "=" * 80
+            + colorama.Style.RESET_ALL
         )
-        logger.info("=" * 80)
+        logger.info(
+            colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + (
+                f" All {len(setups)} setups are done. "
+                "You've done an excellent job! Congrats! "
+            ).center(80, "=")
+            + colorama.Style.RESET_ALL
+        )
+        logger.info(
+            colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + "=" * 80
+            + colorama.Style.RESET_ALL
+        )
         logger.info(f"Existing all workers...")
         self.__control.group_request("exit")
 

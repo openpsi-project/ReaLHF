@@ -37,7 +37,7 @@ def default_parallel_config(n_gpus: int, handle_name: str) -> List[Dict[str, Any
             "data_parallel_size": dp,
             "model_parallel_size": mp,
             "pipeline_parallel_size": pp,
-            "use_sequence_parallel": (handle_name != "generate"),
+            "use_sequence_parallel": (mp > 1) and (handle_name != "generate"),
         }
         for dp, mp, pp in factors
     ]
@@ -76,7 +76,7 @@ class ProfileConfig(CommonExperimentConfig):
             assert self.allocations_jsonl.endswith(".jsonl")
             assert os.path.exists(self.allocations_jsonl)
             with open(self.allocations_jsonl, "r") as f:
-                self.parallel_configs = [json.loads(l) for l in f.readlines]
+                self.parallel_configs = [json.loads(l) for l in f.readlines()]
         for pcfg in self.parallel_configs:
             assert isinstance(pcfg, dict), type(pcfg)
             assert all(
@@ -89,6 +89,11 @@ class ProfileConfig(CommonExperimentConfig):
                 ]
                 for k in pcfg.keys()
             ), pcfg.keys()
+            assert (self.n_nodes * self.n_gpus_per_node) == (
+                pcfg.get("data_parallel_size", 1)
+                * pcfg.get("model_parallel_size", 1)
+                * pcfg.get("pipeline_parallel_size", 1)
+            )
 
     @property
     def max_prompt_len(self):
@@ -157,7 +162,7 @@ class ProfileConfig(CommonExperimentConfig):
         n_gpus = self.n_nodes * self.n_gpus_per_node
         setups = []
         for pcfg in self.parallel_configs:
-            pcfg["use_sequence_parallel"] = pcfg["use_sequence_parallel"] & (
+            pcfg["use_sequence_parallel"] = pcfg.get("use_sequence_parallel", True) & (
                 self.handle_name != "generate"
             )
             self.allocation = MFCConfig(parallel=ParallelismConfig(**pcfg))

@@ -842,6 +842,7 @@ async def model_save_thread_func(
 
 class MasterWorker(worker_base.Worker):
     os.makedirs(constants.MODEL_SAVE_ROOT, exist_ok=True)
+    global_exp_tik = time.perf_counter()
 
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
@@ -921,7 +922,6 @@ class MasterWorker(worker_base.Worker):
 
         # for benchmark
         self.e2e_time_history = []
-        self.level_time_history = defaultdict(list)
         self.__benchmark_steps = config.exp_ctrl.benchmark_steps
 
         return config.worker_info
@@ -1289,6 +1289,7 @@ class MasterWorker(worker_base.Worker):
                 raise_asyncio_exception(self.__asyncio_ctx)
         logger.info("Execution finished!")
 
+        # Check whether we have entered a new epoch.
         try:
             self.__fetch_master_ctl.get_nowait()
             is_new_epoch = True
@@ -1302,6 +1303,7 @@ class MasterWorker(worker_base.Worker):
         except asyncio.QueueEmpty:
             pass
 
+        # Check whether we should evaluate or save models.
         should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
         should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
 
@@ -1314,6 +1316,7 @@ class MasterWorker(worker_base.Worker):
                 self._epoch_step = 0
                 self.__rpc_ctrl.used_hash_vals_this_epoch = set()
 
+        # Updata counters.
         self._epoch_step += 1
         self._global_step += 1
 
@@ -1332,15 +1335,32 @@ class MasterWorker(worker_base.Worker):
             global_step=self._global_step,
         )
 
-        if is_new_epoch:
-            if self._epoch > self.__total_train_epochs:
-                return self.experiment_complete_exit(f"Training completes! Yeah!!!")
-
-        total_time_consumption = time.perf_counter() - self._train_start_time
-        time_per_step = total_time_consumption / (self._global_step + 1)
+        # Logging.
+        time_since_configure = time.perf_counter() - self._train_start_time
+        time_per_step = time_since_configure / (self._global_step + 1)
         e2e_time = time.perf_counter() - execution_start
         self.e2e_time_history.append(e2e_time)
 
+        self._log_training_stats(e2e_time, time_since_configure)
+
+        # Pause the worker if experiment or system-wise benchmark completes.
+        if (
+            self.__benchmark_steps is not None
+            and self._global_step >= self.__benchmark_steps
+        ) or (is_new_epoch and self._epoch > self.__total_train_epochs):
+            logger.info(
+                f"Finished benchmark {self.__benchmark_steps}. "
+                f"Time consumption of this setup: {time_since_configure:.3f}"
+            )
+            logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
+            return self.experiment_complete_exit()
+
+        # Send clear cache requests to model workers.
+        self._clear_gpu_cache()
+
+        return worker_base.PollResult(sample_count=1, batch_count=1)
+
+    def _log_training_stats(self, e2e_time: float, time_since_configure: float):
         # calculate flops
         #########################################
         if not all(
@@ -1399,7 +1419,6 @@ class MasterWorker(worker_base.Worker):
         self.__rpc_ctrl.data_amount.clear()
         #########################################
 
-        # Logging.
         s = f"Epoch {self._epoch}/{self.config.exp_ctrl.total_train_epochs} "
         if self.__cur_steps_per_epoch is not None:
             s += f"step {self._epoch_step}/{self.__cur_steps_per_epoch} "
@@ -1409,7 +1428,7 @@ class MasterWorker(worker_base.Worker):
         if self.__cur_avg_tokens_per_batch is not None:
             s += f"Average #tokens per batch is {self.__cur_avg_tokens_per_batch:.0f}. "
         s += f"#End to end# execution time: *{e2e_time:.3f}*s. "
-        s += f"Total time consumption: {total_time_consumption:.3f}s. "
+        s += f"Total time consumption: {time_since_configure:.3f}s. "
         if self.__cur_steps_per_epoch is not None and len(self.e2e_time_history) > 2:
             remaining_steps = self.__cur_steps_per_epoch - self._epoch_step
             remaining_epochs = self.__total_train_epochs - self._epoch
@@ -1420,21 +1439,11 @@ class MasterWorker(worker_base.Worker):
         if flops is not None:
             s += f"TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
         logger.info(s)
+        logger.info(
+            f"Time taken so far across all configurations: {time.perf_counter() - self.global_exp_tik:.2f}s"
+        )
 
-        if (
-            self.__benchmark_steps is not None
-            and self._global_step >= self.__benchmark_steps
-        ):
-            logger.info(
-                f"Finished benchmark {self.__benchmark_steps}. Total time consumption {total_time_consumption:.3f}"
-            )
-            logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
-            for i, level_time_history in self.level_time_history.items():
-                logger.info(
-                    f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*"
-                )
-            return self.experiment_complete_exit(f"Benchmark completes! Yeah!!!")
-
+    def _clear_gpu_cache(self):
         if self.__clear_data_cache_reqids is not None:
             [
                 self.__stream.poll(
@@ -1450,13 +1459,13 @@ class MasterWorker(worker_base.Worker):
         )
         self.__rpc_ctrl.ids_to_clear.clear()
 
-        return worker_base.PollResult(sample_count=1, batch_count=1)
-
-    def experiment_complete_exit(self, msg: str):
+    def experiment_complete_exit(self):
         self.__rpc_ctrl.stop.set()
         for task in self.__asyncio_tasks:
             task.cancel()
         self.__asyncio_ctx.future.set_result(None)
+        # NOTE: stopping the loop immediately after cancelling tasks may
+        # raise warnings sometimes, but it doesn't matter.
         self.__asyncio_ctx.loop.stop()
         teardown_run_util_complete(self.__asyncio_ctx)
         logger.info(
@@ -1464,7 +1473,7 @@ class MasterWorker(worker_base.Worker):
             + colorama.Fore.YELLOW
             + colorama.Style.BRIGHT
             + "\033[1m"
-            + msg
+            + "Experiment Completes! Yeah!!!!!!!!"
             + colorama.Style.RESET_ALL
         )
 
