@@ -5,6 +5,8 @@ import json
 import os
 from typing import *
 
+from omegaconf import OmegaConf
+
 from realhf.api.core.config import (
     DatasetAbstraction,
     ModelInterfaceAbstraction,
@@ -49,6 +51,7 @@ class ProfileConfig(CommonExperimentConfig):
     handle_name: str = ""
     interface_kwargs_json: str = ""
     allocations_jsonl: Optional[str] = None
+    n_mbs: Optional[List[int]] = None
     model: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
@@ -94,6 +97,12 @@ class ProfileConfig(CommonExperimentConfig):
                 * pcfg.get("model_parallel_size", 1)
                 * pcfg.get("pipeline_parallel_size", 1)
             )
+        if self.n_mbs is None:
+            self.n_mbs = [1]
+        else:
+            self.n_mbs = OmegaConf.to_container(self.n_mbs)
+            assert isinstance(self.n_mbs, list), type(self.n_mbs)
+            assert all(isinstance(x, int) for x in self.n_mbs)
 
     @property
     def max_prompt_len(self):
@@ -159,13 +168,12 @@ class ProfileConfig(CommonExperimentConfig):
 
     def initial_setup(self) -> List[ExperimentConfig]:
         self.allocation_mode = "manual"
-        n_gpus = self.n_nodes * self.n_gpus_per_node
         setups = []
-        for pcfg in self.parallel_configs:
+        for pcfg, n_mbs in itertools.product(self.parallel_configs, self.n_mbs):
             pcfg["use_sequence_parallel"] = pcfg.get("use_sequence_parallel", True) & (
                 self.handle_name != "generate"
             )
-            self.allocation = MFCConfig(parallel=ParallelismConfig(**pcfg))
+            self.allocation = MFCConfig(parallel=ParallelismConfig(**pcfg), n_mbs=n_mbs)
             setup = copy.deepcopy(super().initial_setup())
             for m in setup.model_worker:
                 m.profile_mode = True

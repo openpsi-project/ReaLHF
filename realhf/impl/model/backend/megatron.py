@@ -734,7 +734,10 @@ class ReaLMegatronEngine:
             self.engine.zero_grad()
             if constants.pipe_parallel_world_size() > 1:
                 if num_micro_batches is not None:
-                    if num_micro_batches < self.pipe_runner.default_train_mbs:
+                    if (
+                        num_micro_batches < self.pipe_runner.default_train_mbs
+                        and constants.parallelism_rank() == 0
+                    ):
                         logger.warning(
                             "When training with pipeline parallel, num micro batches should be "
                             "larger than 2 x num_pipeline_stages to avoid idle time. "
@@ -961,5 +964,10 @@ class MegatronTrainBackend(model_api.ModelBackend):
         model.module = ReaLMegatronEngine(real_model, mg_engine)
         return model
 
+    def destroy(self, model: model_api.Model):
+        assert isinstance(model.module, ReaLMegatronEngine)
+        optimizer = model.module.engine.optim
+        if self.use_zero_optimization and self.overlap_param_gather:
+            optimizer.disable_pre_hook()
 
 model_api.register_backend("megatron", MegatronTrainBackend)

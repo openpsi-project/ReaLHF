@@ -662,6 +662,9 @@ class ModelWorker(worker_base.Worker):
         _enable_stack = os.getenv("REAL_DUMP_TRACE", "0") == "1"
         _dump_kernel_time = os.getenv("REAL_DUMP_KERNEL_TIME", "0") == "1"
         _enable_profiler = _enable_stack or _dump_kernel_time
+        _enable_memory_dump = os.getenv("REAL_DUMP_MEMORY", "0") == "1"
+        if _enable_memory_dump:
+            torch.cuda.memory._record_memory_history()
 
         # pfer ca be a null context if enable_profiler is False
         pfer = get_pytorch_profiler(with_stack=_enable_stack, enabled=_enable_profiler)
@@ -723,6 +726,18 @@ class ModelWorker(worker_base.Worker):
                         f"System metrics collected. Time consumption:"
                         f" {time.perf_counter() - collect_tik:.2f} secs."
                     )
+            if _enable_memory_dump:
+                mem_trace_dir = os.path.join(
+                    constants.LOG_ROOT,
+                    constants.experiment_name(),
+                    constants.trial_name(),
+                    "gpuMemory",
+                    parallel_str,
+                )
+                os.makedirs(mem_trace_dir, exist_ok=True)
+                torch.cuda.memory._dump_snapshot(
+                    os.path.join(mem_trace_dir, f"mw{self.__worker_index}.pkl")
+                )
 
     def __handle_model_function_calls(
         self, request: request_reply_stream.Payload, data: Any
@@ -917,8 +932,21 @@ class ModelWorker(worker_base.Worker):
     def __experiment_complete_exit(self):
         self.__stream.close()
 
-        # Remove all models and interfaces.
-        del self.__models, self.__backends, self.__interfaces, self.__unwrapped_models
+        self.__unwrapped_models.clear()
+
+        # IMPORTANT: The Megatron backend will register backward hooks,
+        # which are closures (aka functions defined locally) that capture
+        # model parameters (aka parameters are stored as function context).
+        # These hooks are circular reference (grad -> param -> grad) and deleting
+        # models directly will not release the memory.
+        # Calling backend.destroy removes all hooks and releases the memory.
+        for model_name, backend in self.__backends.items():
+            backend.destroy(self.__models[model_name])
+
+        self.__models.clear()
+        self.__backends.clear()
+        self.__interfaces.clear()
+        self.__data_storage.clear()
 
         # Reset model worker states.
         self.__dist_env_resolved = False
@@ -927,9 +955,9 @@ class ModelWorker(worker_base.Worker):
 
         constants.reset_run()
         topology.destroy_all_comm_groups()
+        cuda_graph.destroy_all()
 
         gc.collect()
-        cuda_graph.destroy_all()
         if torch.cuda.is_initialized():
             torch.cuda.empty_cache()
         gc.collect()

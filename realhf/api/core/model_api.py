@@ -349,6 +349,9 @@ class ModelBackend(abc.ABC):
         model.ft_spec = spec
         return self._initialize(model, spec)
 
+    def destroy(self, model: Model):
+        pass
+
 
 class NullBackend(ModelBackend):
 
