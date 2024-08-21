@@ -970,4 +970,5 @@ class MegatronTrainBackend(model_api.ModelBackend):
         if self.use_zero_optimization and self.overlap_param_gather:
             optimizer.disable_pre_hook()
 
+
 model_api.register_backend("megatron", MegatronTrainBackend)
