@@ -847,8 +847,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         model: model_api.Model,
         dataset_input: SequenceSample,
     ) -> SequenceSample:
-        prompt_lens = flat2d(dataset_input.seqlens["packed_prompts"])
-        seqlens = [x + self.gconfig.max_new_tokens for x in prompt_lens]
+        seqlens = flat2d(dataset_input.seqlens["packed_prompts"])
         module = model.module
         if not isinstance(module, ReaLModel):
             module = module.module
@@ -873,9 +872,8 @@ class PPOCriticInterface(model_api.ModelInterface):
         model: model_api.Model,
         dataset_input: SequenceSample,
     ) -> Dict:
-        prompt_lens = flat2d(dataset_input.seqlens["packed_prompts"])
-        bs = len(prompt_lens)
-        seqlens = [x + self.gconfig.max_new_tokens for x in prompt_lens]
+        seqlens = flat2d(dataset_input.seqlens["packed_prompts"])
+        bs = len(seqlens)
         module = model.module
         if not isinstance(module, ReaLModel):
             module = module.module
