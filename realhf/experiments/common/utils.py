@@ -82,6 +82,9 @@ def make_train_backend_config(
             raise ValueError("Offload is not supported in Megatron backend.")
         if model_cfg.zero_stage == 3:
             raise ValueError("Zero stage 3 is not supported in Megatron backend.")
+        if model_cfg.zero_stage == 2:
+            logger.warning("Megatron does not ZeRO stage 2. Degenerates to stage 1.")
+            model_cfg.zero_stage = 1
         return ModelBackendAbstraction(
             "megatron",
             args=dict(
@@ -100,9 +103,10 @@ def make_train_backend_config(
                 min_lr_ratio=model_cfg.optimizer.min_lr_ratio,
                 enable_bf16=model_cfg.enable_bf16,
                 enable_fp16=model_cfg.enable_fp16,
+                # See MegatronTrainBackend for detailed explanations about these options.
                 use_zero_optimization=model_cfg.zero_stage > 0,
                 overlap_grad_reduce=model_cfg.zero_stage > 0,
-                overlap_param_gather=model_cfg.zero_stage > 0,
+                overlap_param_gather=False,
             ),
         )
     else:

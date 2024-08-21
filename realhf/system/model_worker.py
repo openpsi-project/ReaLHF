@@ -688,7 +688,7 @@ class ModelWorker(worker_base.Worker):
                         f"Collecting system metrics from the profiler. "
                         "This may take for a while..."
                     )
-                parallel_str = f"d{self._dp_size}m{self._mp_size}p{self._pp_size}"
+                parallel_str = f"mb{rpc.n_mbs}d{self._dp_size}m{self._mp_size}p{self._pp_size}"
                 if constants.sequence_parallel():
                     parallel_str += "sp"
                 if _dump_kernel_time:
@@ -736,7 +736,7 @@ class ModelWorker(worker_base.Worker):
                 )
                 os.makedirs(mem_trace_dir, exist_ok=True)
                 torch.cuda.memory._dump_snapshot(
-                    os.path.join(mem_trace_dir, f"mw{self.__worker_index}.pkl")
+                    os.path.join(mem_trace_dir, f"{rpc.name}_r{dist.get_rank()}.pkl")
                 )
 
     def __handle_model_function_calls(
