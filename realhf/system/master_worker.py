@@ -979,12 +979,23 @@ class MasterWorker(worker_base.Worker):
         # Build some data required for subsequent model function calls.
         self.__all_model_handlers: List[config_pkg.ModelShardID] = []
         self.__dp0_model_handlers: List[config_pkg.ModelShardID] = []
+        self.__trainable_model_handlers: List[config_pkg.ModelShardID] = []
         for model_name, topo in self.config.model_topos.items():
             num_dp = topo.get_dim("data")
             self.__all_model_handlers += [
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in range(topo.world_size())
             ]
+
+            if any(
+                rpc.model_name == model_name
+                and rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
+                for rpc in self.__model_rpcs
+            ):
+                self.__trainable_model_handlers += [
+                    config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
+                    for j in range(topo.world_size())
+                ]
             self.__dp0_model_handlers += [
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in topo.filter_match(data=0)
@@ -1230,7 +1241,7 @@ class MasterWorker(worker_base.Worker):
         save_task = event_loop.create_task(
             model_save_thread_func(
                 stream=self.__stream,
-                handlers=self.__all_model_handlers,
+                handlers=self.__trainable_model_handlers,
                 model_save_root=self.MODEL_SAVE_ROOT,
                 save_queue=self.__rpc_ctrl.save_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
