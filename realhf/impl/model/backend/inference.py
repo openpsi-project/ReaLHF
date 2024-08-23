@@ -98,6 +98,7 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
                 model_output = self.pipe_runner.forward(
                     input_=input_,
                     post_hook=post_hook,
+                    aggregate_fn=aggregate_fn,
                 )
             else:
                 input_lens = torch.tensor(
@@ -115,7 +116,10 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
                 if post_hook:
                     model_output = post_hook(model_output, mb_input)
             outputs.append(model_output)
-        return aggregate_fn(outputs) if num_micro_batches > 1 else outputs[0]
+        if constants.is_last_pipe_stage():
+            return aggregate_fn(outputs) if num_micro_batches > 1 else outputs[0]
+        else:
+            return None
 
     @torch.no_grad()
     def generate(
@@ -136,11 +140,15 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
         sequences, scores, logits_mask = [], [], []
         for mb_input in input_.split(num_micro_batches):
             if constants.pipe_parallel_world_size() > 1:
-                seq, s, lmask = self.pipe_runner.generate(
+                res = self.pipe_runner.generate(
                     input_=input_,
                     tokenizer=tokenizer,
                     gconfig=gconfig,
                 )
+                if res is not None:
+                    seq, s, lmask, *_ = res
+                else:
+                    seq, s, lmask = None, None, None
             else:
                 input_lens = torch.tensor(
                     flat2d(mb_input.seqlens["packed_input_ids"]),
@@ -160,10 +168,18 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
             sequences.append(seq)
             scores.append(s)
             logits_mask.append(lmask)
-        if num_micro_batches == 1:
-            return sequences[0], scores[0], logits_mask[0]
+        if constants.is_last_pipe_stage():
+            if num_micro_batches == 1:
+                return sequences[0], scores[0], logits_mask[0]
+            else:
+                return _gather_minibatch_gen_outputs(
+                    sequences,
+                    scores,
+                    logits_mask,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
         else:
-            return _gather_minibatch_gen_outputs(sequences, scores, logits_mask)
+            return None
 
 
 @dataclasses.dataclass

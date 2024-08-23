@@ -392,6 +392,7 @@ def _gather_minibatch_gen_outputs(
     all_gen_tokens: List[torch.LongTensor],
     all_log_probs: List[torch.FloatTensor],
     all_logits_mask: List[torch.BoolTensor],
+    pad_token_id: int,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Concate over the batch dimension given multiple [bs, seqlen] mini-batch
     tensors.
@@ -417,7 +418,9 @@ def _gather_minibatch_gen_outputs(
 
         if gen_len < max_gen_tokens_length:
             pad_size = max_gen_tokens_length - gen_len
-            gen_token = torch.nn.functional.pad(gen_token, (0, pad_size))
+            gen_token = torch.nn.functional.pad(
+                gen_token, (0, pad_size), value=pad_token_id
+            )
             log_probs = torch.nn.functional.pad(log_probs, (0, pad_size))
             if logits_mask is not None:
                 logits_mask = torch.nn.functional.pad(

@@ -204,7 +204,7 @@ class PPOActorInterface(model_api.ModelInterface):
         if res is None:
             return None
 
-        gen_tokens, logprobs, logits_mask, *_ = res
+        gen_tokens, logprobs, logits_mask = res
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id

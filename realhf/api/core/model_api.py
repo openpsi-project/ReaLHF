@@ -272,7 +272,7 @@ class FinetuneSpec:
 
 
 class PipelinableEngine(abc.ABC):
-    @abc.abstractmethod
+
     def train_batch(
         self,
         input_: SequenceSample,
@@ -300,7 +300,6 @@ class PipelinableEngine(abc.ABC):
             num_micro_batches=num_micro_batches,
         )
 
-    @abc.abstractmethod
     def forward(
         self,
         input_: SequenceSample,
@@ -310,7 +309,6 @@ class PipelinableEngine(abc.ABC):
     ):
         raise NotImplementedError()
 
-    @abc.abstractmethod
     def generate(
         self,
         input_: SequenceSample,

@@ -799,13 +799,10 @@ class PipelineRunner:
         input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
         post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None = None,
+        aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ):
-        """Run one forward step over a batch of tokens and return the logits.
-
-        The method signature does not have "aggregate_fn" because the
-        pipeline model must output a torch.Tensor for each micro-batch.
-        Just use torch.cat.
-        """
+        """Run one forward step over a batch of tokens and return the
+        logits."""
 
         if num_micro_batches is None:
             num_micro_batches = self.default_inf_mbs
@@ -842,7 +839,7 @@ class PipelineRunner:
             for i in range(num_micro_batches):
                 output = tensor_buffer.get("output", i, remove=True)
                 output_list.append(output)
-            agg_output = torch.cat(output_list, dim=0)
+            agg_output = aggregate_fn(output_list)
 
         return agg_output
 
@@ -945,7 +942,8 @@ class PipelineRunner:
             ]
 
         gen_tokens, log_probs, logits_mask = _gather_minibatch_gen_outputs(
-            *list(zip(*generate_output))
+            *list(zip(*generate_output)),
+            pad_token_id=tokenizer.pad_token_id,
         )
 
         return gen_tokens, log_probs, logits_mask, None, None
