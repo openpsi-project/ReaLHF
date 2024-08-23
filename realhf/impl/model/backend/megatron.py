@@ -699,7 +699,7 @@ class PipeTrainInstrSetForMegatron(PipeTrainInstrSet):
         return update_successful, grad_norm, num_zeros_in_grad
 
 
-class ReaLMegatronEngine:
+class ReaLMegatronEngine(model_api.PipelinableEngine):
 
     def __init__(self, module: ReaLModel, megatron_engine: MegatronEngine):
         self.module = module
@@ -806,20 +806,16 @@ class ReaLMegatronEngine:
                 return stat
 
     @torch.no_grad()
-    def eval_batch(
-        self,
-        input_: SequenceSample,
-        loss_fn: Callable,
-        num_micro_batches: Optional[int] = None,
-    ):
-        return self.inf_engine.eval_batch(input_, loss_fn, num_micro_batches)
-
     def forward(
         self,
         input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
+        post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None = None,
+        aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ):
-        return self.inf_engine.forward(input_, num_micro_batches)
+        return self.inf_engine.forward(
+            input_, num_micro_batches, post_hook=post_hook, aggregate_fn=aggregate_fn
+        )
 
     @torch.no_grad()
     def generate(
@@ -879,6 +875,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
     efficient, either. We use Megatron because it is the only backend that we can
     make it functionally correct. The DeepSpeed code is too hard to read and modify.
     """
+
     optimizer_name: str = dataclasses.field(
         metadata={"choices": ["adam", "sgd"]},
         default="adam",

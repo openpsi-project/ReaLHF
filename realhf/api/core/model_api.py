@@ -282,20 +282,31 @@ class PipelinableEngine(abc.ABC):
     ):
         raise NotImplementedError()
 
-    @abc.abstractmethod
+    @torch.no_grad()
     def eval_batch(
         self,
         input_: SequenceSample,
-        loss_fn: Callable,
+        loss_fn: Callable[[torch.Tensor, SequenceSample], Tuple[torch.Tensor, Dict]],
         num_micro_batches: Optional[int] = None,
     ):
-        raise NotImplementedError()
+        def agg(xs: List[Tuple[torch.Tensor, Dict]]):
+            losses, stats = zip(*xs)
+            return sum(losses), {k: sum(s[k] for s in stats) for k in stats[0].keys()}
+
+        return self.forward(
+            input_,
+            post_hook=loss_fn,
+            aggregate_fn=agg,
+            num_micro_batches=num_micro_batches,
+        )
 
     @abc.abstractmethod
     def forward(
         self,
         input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
+        post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None = None,
+        aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ):
         raise NotImplementedError()
 
