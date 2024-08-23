@@ -263,21 +263,33 @@ class PPOActorInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        logits = module.forward(input_=input_, num_micro_batches=n_mbs)
-        if logits is None:
+        # This post_hook will gather log probabilities in mini-batches,
+        # reducing peak memory usage.
+        def calc_logprobs(logits, input_):
+            logits /= self.generation_config.temperature
+            if (
+                "packed_logits_mask" in input_.data
+                and input_.data["packed_logits_mask"] is not None
+            ):
+                apply_logits_mask(logits, input_.data["packed_logits_mask"])
+
+            input_lens = torch.tensor(input_.seqlens["packed_input_ids"]).view(-1)
+            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+
+            logprobs = gather_packed_shifted_log_probs(
+                logits, cu_seqlens, input_.data["packed_input_ids"]
+            )
+            return logprobs
+
+        logprobs = module.forward(
+            input_=input_,
+            num_micro_batches=n_mbs,
+            post_hook=calc_logprobs,
+        )
+
+        if logprobs is None:
             return None
 
-        logits /= self.generation_config.temperature
-        if (
-            "packed_logits_mask" in input_.data
-            and input_.data["packed_logits_mask"] is not None
-        ):
-            apply_logits_mask(logits, input_.data["packed_logits_mask"])
-        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
-        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-        logprobs = gather_packed_shifted_log_probs(
-            logits, cu_seqlens, input_.data["packed_input_ids"]
-        )
         res = SequenceSample.from_default(
             ids=input_.ids,
             seqlens=input_.seqlens["packed_input_ids"],
