@@ -1,2 +1,0 @@
-{"data_parallel_size": 2, "model_parallel_size": 2, "pipeline_parallel_size": 2}
-{"data_parallel_size": 1, "model_parallel_size": 2, "pipeline_parallel_size": 4}

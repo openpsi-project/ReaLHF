@@ -188,6 +188,10 @@ class Controller:
         # the controller cannot restart a dead worker when error occurs,
         # and it's impossible to continue the experiment when any of the multiple setups fails.
         # We can only relaunch the entire experiment in this case.
+        # In particular, while it seems to be possible to continue the experiment if
+        # the OOM error occurs, OOM will cause NCCL communication getting stuck (e.g, send/recv),
+        # which will finally throw out a C++ exception in the watchdog thread after reaching timeout.
+        # We cannot catch this exception, so OOM is irrecoverable.
         for i, setup in enumerate(setups):
 
             s = f" Entering setup {i+1}/{len(setups)}... ".center(80, "#")

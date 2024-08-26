@@ -671,14 +671,6 @@ class ModelWorker(worker_base.Worker):
 
         try:
             yield self
-        except torch.cuda.OutOfMemoryError as e:
-            if self.config.profile_mode:
-                blogger.critical(
-                    f"OOM error occurs during RPC: {rpc.name}, {rpc.model_name}, {rpc.interface_type}, {rpc.interface_impl}. "
-                    f"Continue the experiment anyway because of the profile mode."
-                )
-            else:
-                raise e
         finally:
             # Dump profiler results.
             pfer.__exit__(None, None, None)
@@ -750,10 +742,6 @@ class ModelWorker(worker_base.Worker):
 
         if rpc.input_key_remap:
             data.remap_keys_(rpc.input_key_remap)
-
-        # In case an OOM error occurs in the profiling mode,
-        # return an flag dict as the result.
-        res = dict(oom=True)
 
         with self.__maybe_profile_rpc(rpc):
             if request.handle_name == "inference":

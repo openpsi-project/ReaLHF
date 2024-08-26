@@ -3,7 +3,7 @@ MODEL_FAMILY=llama
 SFT_MODEL_PATH=/lustre/public/pretrained_model_weights/Llama-2-7b-hf
 
 EXP_NAME=profile-example
-TRIAL_NAME=test
+TRIAL_NAME=ppo-gen-n2-p2048g2048b1024
 
 export CLUSTER_SPEC_PATH="/lustre/aigc/llm/cluster/qh.json"
 
@@ -30,9 +30,7 @@ export CLUSTER_SPEC_PATH="/lustre/aigc/llm/cluster/qh.json"
 # all within the same experiment_name and trial_name. Instead of re-launching the whole experiment, workers will
 # be paused and reconfigured to run the next experiment setup.
 
-# Changing `model.init_critic_from_actor` and `model.type.is_critic` is importance for profiling the critic.
-
-REAL_DUMP_TRACE=1 REAL_DUMP_MEMORY=1 \
+REAL_DUMP_TRACE=0 REAL_DUMP_MEMORY=0 \
     python3 -m realhf.apps.quickstart profile \
     mode=local \
     experiment_name=$EXP_NAME \
@@ -41,15 +39,10 @@ REAL_DUMP_TRACE=1 REAL_DUMP_MEMORY=1 \
     exp_ctrl.save_freq_steps=null \
     exp_ctrl.eval_freq_steps=null \
     n_nodes=1 \
-    model.type._class=$MODEL_FAMILY \
-    model.path=$SFT_MODEL_PATH \
-    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
-    dataset.max_prompt_len=4096 \
-    dataset.train_bs_n_seqs=256 \
-    dataset.pad_to_max_length=True \
-    handle_name=train_step \
-    interface_impl=ppo_critic \
-    model.init_critic_from_actor=True \
-    model.type.is_critic=True \
-    'n_mbs=[2]' \
-    interface_kwargs_json=./examples/profiling/interfaces/ppo_critic.json
+    'handle_names=[generate]' \
+    interfaces_jsonl=./examples/profiling/interfaces.jsonl \
+    models_jsonl=./examples/profiling/models.jsonl \
+    datasets_jsonl=./examples/profiling/datasets.jsonl \
+    allocations_jsonl=./examples/profiling/allocations.jsonl \
+    'n_mbs=[1, 2, 4]' \
+    'batch_sizes=[1024]'
