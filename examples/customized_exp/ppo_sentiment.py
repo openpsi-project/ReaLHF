@@ -26,7 +26,7 @@ logger = logging.getLogger("Sentiment PPO example")
 class SentimentScoringInterface(model_api.ModelInterface):
 
     def __post_init__(self):
-        path = "/lustre/fw/pretrained/distilbert-base-uncased-finetuned-sst-2-english/"
+        path = "/path/to/model"
         self.score_model = (
             transformers.AutoModelForSequenceClassification.from_pretrained(path).cuda()
         )
