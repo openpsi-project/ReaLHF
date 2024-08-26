@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Union
 import numpy as np
 import psutil
 import pynvml
-import tabulate
 import torch
 import tqdm
 
@@ -565,6 +564,8 @@ class CUDAKernelTimeStat:  # in us
         )
 
     def __repr__(self):
+        import tabulate
+
         headers = [
             "",
             "Total",

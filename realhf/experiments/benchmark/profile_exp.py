@@ -18,7 +18,10 @@ from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
 from realhf.api.quickstart.device_mesh import MFCConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
+from realhf.base import constants, logging
 from realhf.experiments.common.common import CommonExperimentConfig
+
+logger = logging.getLogger("Profiling Experiment", "system")
 
 
 def decompose_to_three_factors(n: int) -> List[Tuple[int, int, int]]:
@@ -169,15 +172,28 @@ class ProfileConfig(CommonExperimentConfig):
     def initial_setup(self) -> List[ExperimentConfig]:
         self.allocation_mode = "manual"
         setups = []
-        for pcfg, n_mbs in itertools.product(self.parallel_configs, self.n_mbs):
-            pcfg["use_sequence_parallel"] = pcfg.get("use_sequence_parallel", True) & (
-                self.handle_name != "generate"
-            )
-            self.allocation = MFCConfig(parallel=ParallelismConfig(**pcfg), n_mbs=n_mbs)
-            setup = copy.deepcopy(super().initial_setup())
-            for m in setup.model_worker:
-                m.profile_mode = True
-            setups.append(setup)
+        allocation_log_path = os.path.join(
+            constants.LOG_ROOT,
+            self.experiment_name,
+            self.trial_name,
+            "allocations.jsonl",
+        )
+        logger.info(
+            f"Allocaiton configurations of the profiling experiment will be saved to: {allocation_log_path}"
+        )
+        with open(allocation_log_path, "w") as f:
+            for pcfg, n_mbs in itertools.product(self.parallel_configs, self.n_mbs):
+                pcfg["use_sequence_parallel"] = pcfg.get(
+                    "use_sequence_parallel", True
+                ) & (self.handle_name != "generate")
+                self.allocation = MFCConfig(
+                    parallel=ParallelismConfig(**pcfg), n_mbs=n_mbs
+                )
+                f.write(json.dumps(dataclasses.asdict(self.allocation)) + "\n")
+                setup = copy.deepcopy(super().initial_setup())
+                for m in setup.model_worker:
+                    m.profile_mode = True
+                setups.append(setup)
         return setups
 
 

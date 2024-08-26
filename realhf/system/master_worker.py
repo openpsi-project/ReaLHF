@@ -288,6 +288,9 @@ class RPCCorountineControl:
         default_factory=InterfaceDataAmount
     )
 
+    # Interrupt the experiment when OOM occurs during profiling.
+    should_interrupt: bool = False
+
     # recover information
     used_hash_vals_this_epoch: Set[int] = dataclasses.field(default_factory=set)
     is_recover_epoch: bool = False
@@ -655,7 +658,15 @@ async def model_rpc_reply_func(
         # If the returned data is a SequenceSample, it is the data returned by
         # model function calls. The data shoulbe be amended into buffer.
         # Otherwise, it's the train statistics and should be reduced and logged.
-        if isinstance(responses[-1].data, data_api.SequenceSample):
+        if any(isinstance(r.data, dict) and r.data.get("oom") for r in responses):
+            logger.warning(
+                f"The master worker detects that OOM happens during RPC, "
+                "but the model worker returns an empty result in the profiling mode. "
+                "The master worker will interrupt this experiment."
+            )
+            ctrl.should_interrupt = True
+            res = dict(oom=True)
+        elif isinstance(responses[-1].data, data_api.SequenceSample):
             res = data_api.SequenceSample.gather([r.data for r in responses])
         else:
             res = _gather_stat([response.data for response in responses])
@@ -1298,6 +1309,8 @@ class MasterWorker(worker_base.Worker):
                 raise e
             except:
                 raise_asyncio_exception(self.__asyncio_ctx)
+        if self.__rpc_ctrl.should_interrupt:
+            return self.experiment_complete_exit()
         logger.info("Execution finished!")
 
         # Check whether we have entered a new epoch.
