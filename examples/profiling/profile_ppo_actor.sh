@@ -7,9 +7,6 @@ TRIAL_NAME=test
 
 export CLUSTER_SPEC_PATH="/lustre/aigc/llm/cluster/qh.json"
 
-# Setting REAL_DUMP_KERNEL_TIME=1 enables kernel time profiling.
-# Time of compute and communication kernels will be summed up and reported.
-
 # Setting REAL_DUMP_TRACE=1 enables execution trace provided by PyTorch.
 
 # Setting REAL_DUMP_MEMORY=1 enables memory profiling provided by PyTorch.
@@ -33,7 +30,7 @@ export CLUSTER_SPEC_PATH="/lustre/aigc/llm/cluster/qh.json"
 # all within the same experiment_name and trial_name. Instead of re-launching the whole experiment, workers will
 # be paused and reconfigured to run the next experiment setup.
 
-REAL_DUMP_KERNEL_TIME=0 REAL_DUMP_TRACE=0 REAL_DUMP_MEMORY=0 \
+REAL_DUMP_TRACE=0 REAL_DUMP_MEMORY=0 \
     python3 -m realhf.apps.quickstart profile \
     mode=local \
     experiment_name=$EXP_NAME \

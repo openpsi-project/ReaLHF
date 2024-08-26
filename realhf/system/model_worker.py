@@ -659,15 +659,13 @@ class ModelWorker(worker_base.Worker):
     @contextlib.contextmanager
     def __maybe_profile_rpc(self, rpc: dfg.MFCDef):
         # Whether to enable profiling is controlled by the following environment variables.
-        _enable_stack = os.getenv("REAL_DUMP_TRACE", "0") == "1"
-        _dump_kernel_time = os.getenv("REAL_DUMP_KERNEL_TIME", "0") == "1"
-        _enable_profiler = _enable_stack or _dump_kernel_time
+        _enable_profiler = os.getenv("REAL_DUMP_TRACE", "0") == "1"
         _enable_memory_dump = os.getenv("REAL_DUMP_MEMORY", "0") == "1"
         if _enable_memory_dump:
             torch.cuda.memory._record_memory_history()
 
         # pfer ca be a null context if enable_profiler is False
-        pfer = get_pytorch_profiler(with_stack=_enable_stack, enabled=_enable_profiler)
+        pfer = get_pytorch_profiler(with_stack=True, enabled=_enable_profiler)
         pfer.__enter__()
         # The pytorch profiler will call cuda synchronize for us.
         profiler_tik = time.perf_counter()
@@ -693,25 +691,7 @@ class ModelWorker(worker_base.Worker):
                 )
                 if constants.sequence_parallel():
                     parallel_str += "sp"
-                if _dump_kernel_time:
-                    kernel_t = CUDAKernelTime.from_profiler(pfer)
-                    _kernel_time_dir = os.path.join(
-                        constants.LOG_ROOT,
-                        constants.experiment_name(),
-                        constants.trial_name(),
-                        "kernelTime",
-                        parallel_str,
-                    )
-                    os.makedirs(_kernel_time_dir, exist_ok=True)
-                    with open(
-                        os.path.join(
-                            _kernel_time_dir,
-                            f"{rpc.name}_r{dist.get_rank()}.pkl",
-                        ),
-                        "wb",
-                    ) as f:
-                        pickle.dump(kernel_t, f)
-                if _enable_stack:
+                if _enable_profiler:
                     trace_dir = os.path.join(
                         constants.LOG_ROOT,
                         constants.experiment_name(),
