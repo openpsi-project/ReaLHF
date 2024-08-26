@@ -1007,6 +1007,10 @@ class MegatronTrainBackend(model_api.ModelBackend):
     def destroy(self, model: model_api.Model):
         assert isinstance(model.module, ReaLMegatronEngine)
         optimizer = model.module.engine.optim
+        # The Megatron backend will register forward hooks that
+        # create circular references (grad -> param -> grad).
+        # Deleting models directly will not release the memory.
+        # We must disable hooks at first.
         if self.use_zero_optimization and self.overlap_param_gather:
             optimizer.disable_pre_hook()
 

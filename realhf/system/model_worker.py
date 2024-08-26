@@ -915,11 +915,6 @@ class ModelWorker(worker_base.Worker):
 
         self.__unwrapped_models.clear()
 
-        # IMPORTANT: The Megatron backend will register backward hooks,
-        # which are closures (aka functions defined locally) that capture
-        # model parameters (aka parameters are stored as function context).
-        # These hooks are circular reference (grad -> param -> grad) and deleting
-        # models directly will not release the memory.
         # Calling backend.destroy removes all hooks and releases the memory.
         for model_name, backend in self.__backends.items():
             backend.destroy(self.__models[model_name])
