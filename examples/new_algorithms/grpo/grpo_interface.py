@@ -292,12 +292,11 @@ class GRPOInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
-        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-
         # This post_hook will gather log probabilities in mini-batches,
         # reducing peak memory usage.
         def calc_logprobs(logits, input_):
+            input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
+            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
             logits /= self.generation_config.temperature
             if (
                 "packed_logits_mask" in input_.data

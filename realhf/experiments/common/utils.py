@@ -159,8 +159,8 @@ def resolve_rpc_hooks(
                     and device_mesh == other.device_mesh
                 ):
                     continue
-                self_config = model_configs[rpc.model_name]
-                other_config = model_configs[other.rpc.model_name]
+                self_config = model_configs[rpc.model_name.role]
+                other_config = model_configs[other.rpc.model_name.role]
                 if (
                     self_config.backend == "deepspeed"
                     or other_config.backend == "deepspeed"

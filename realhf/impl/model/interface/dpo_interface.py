@@ -110,7 +110,7 @@ class DPOInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        input_lens = torch.tensor(input_.seqlens["packed_input_ids"]).view(-1)
+        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
 
         # This post_hook will gather log probabilities in mini-batches,

@@ -30,6 +30,7 @@ python3 examples/new_algorithms/grpo/grpo_exp.py grpo \
     n_nodes=1 \
     ppo.gen.max_new_tokens=512 \
     ppo.gen.min_new_tokens=512 \
+    ppo.gen.use_cuda_graph=True \
     ppo.gen.top_p=0.9 ppo.gen.top_k=1000 \
     ppo.ppo_n_minibatches=4 \
     ppo.reward_output_scaling=1.0 ppo.adv_norm=False
