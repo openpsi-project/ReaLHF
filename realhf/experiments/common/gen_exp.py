@@ -1,5 +1,7 @@
 import dataclasses
 
+from omegaconf import OmegaConf
+
 from realhf.api.core.config import (
     DatasetAbstraction,
     ModelInterfaceAbstraction,
@@ -51,8 +53,13 @@ class GenerationConfig(CommonExperimentConfig):
 
     @property
     def rpcs(self):
+        # NOTE: to_container converts the object to a dict
+        # It is used for unifying the profiling API, which requires to
+        # pass external interface configurations in the launch command.
+        # Customized dataclass objects will not work in that case.
         interface = ModelInterfaceAbstraction(
-            "generation", args={"generation_config": self.gen}
+            "generation",
+            args={"generation_config": OmegaConf.to_container(self.gen, resolve=True)},
         )
         gen = MFCDef(
             name="gen",

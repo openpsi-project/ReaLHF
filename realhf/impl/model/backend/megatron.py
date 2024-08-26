@@ -1004,5 +1004,11 @@ class MegatronTrainBackend(model_api.ModelBackend):
         model.module = ReaLMegatronEngine(real_model, mg_engine)
         return model
 
+    def destroy(self, model: model_api.Model):
+        assert isinstance(model.module, ReaLMegatronEngine)
+        optimizer = model.module.engine.optim
+        if self.use_zero_optimization and self.overlap_param_gather:
+            optimizer.disable_pre_hook()
+
 
 model_api.register_backend("megatron", MegatronTrainBackend)

@@ -141,6 +141,8 @@ class ModelWorker:
     msid2mwid: Dict[ModelShardID, int] = None
     data_transfer_pairs: List[Tuple[str, str]] = None
     sync_param_pairs: List[Tuple[str, str]] = None
+    # profiling
+    profile_mode: bool = False
     worker_info: Optional[WorkerInformation] = None
 
     def __post_init__(self):
@@ -237,7 +239,6 @@ class ExperimentConfig:
     model_worker: List[ModelWorker] = dataclasses.field(default_factory=list)
     # master_worker will be set automatically
     master_worker: Optional[List[MasterWorker]] = None
-    config: Optional[Any] = None
 
     def __post_init__(self):
         assert self.master_worker is None
@@ -512,67 +513,14 @@ class ExperimentConfig:
 class Experiment:
     """Base class for defining the procedure of an experiment."""
 
-    def scheduling_setup(self, config) -> ExperimentScheduling:
+    def scheduling_setup(self) -> ExperimentScheduling:
         """Returns the Scheduling of all workers."""
         raise NotImplementedError()
 
-    def initial_setup(self, config) -> ExperimentConfig:
+    def initial_setup(self) -> ExperimentConfig | List[ExperimentConfig]:
         """Returns a list of workers to create when a trial of the experiment
         is initialized."""
         raise NotImplementedError()
-
-
-def dump_config_to_yaml(config, file):
-    import yaml
-
-    with open(file, "w") as f:
-        yaml.dump(dataclass_to_dict(config), f)
-
-
-def load_config_from_yaml(file):
-    import yaml
-
-    with open(file, "r") as f:
-        return config_to_dataclass(yaml.safe_load(f))
-
-
-def dataclass_to_dict(dc):
-    if isinstance(dc, (str, int, float)) or dc is None:
-        pass
-    elif isinstance(dc, enum.Enum):
-        dc = dc.value
-    elif isinstance(dc, (list, tuple)):
-        dc = [dataclass_to_dict(d) for d in dc]
-    elif isinstance(dc, dict):
-        dc = {k: dataclass_to_dict(v) for k, v in dc.items()}
-    elif dataclasses.is_dataclass(dc):
-        root_name = dc.__class__.__name__
-        dc = dict(
-            config_class=root_name,
-            config_value={
-                k.name: dataclass_to_dict(getattr(dc, k.name))
-                for k in dataclasses.fields(dc)
-            },
-        )
-    else:
-        raise f"{dc} of type {type(dc)} cannot be parse to dict."
-    return dc
-
-
-def config_to_dataclass(config: Union[List, Dict]):
-    if isinstance(config, (list, tuple)):
-        return [config_to_dataclass(c) for c in config]
-    elif isinstance(config, dict):
-        if "config_class" in config.keys():
-            return getattr(sys.modules[__name__], config["config_class"])(
-                **{k: config_to_dataclass(v) for k, v in config["config_value"].items()}
-            )
-        else:
-            return config
-    elif isinstance(config, (str, int, float)) or config is None:
-        return config
-    else:
-        raise NotImplementedError(config)
 
 
 ALL_EXPERIMENT_CLASSES = {}

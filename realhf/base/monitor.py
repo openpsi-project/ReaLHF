@@ -463,6 +463,9 @@ COMPUTE_KERNEL_KEYS = [
     "backward_kernel",
     "reduce_kernel",
     "multi_tensor_apply",
+    "gae_kernel",
+    "gemvx::kernel",
+    "cublas",
 ]
 
 COMM_KERNEL_KEYS = [
@@ -474,12 +477,17 @@ COMM_KERNEL_KEYS = [
 
 MEM_KERNEL_KEYS = [
     "Memcpy",
+    "cleanup",
     "Memset",
 ]
 
 MISC_KERNEL_KEYS = [
     "at_cuda_detail",
     "CudaCodeGen",
+]
+
+IGNORE_KERNEL_KEYS = [
+    "FusedAdam",  # This is a marker above multi-tensor-apply
 ]
 
 
@@ -518,6 +526,8 @@ class CUDAKernelTime:  # in us
                 mem_time += x.self_cuda_time_total
             elif any(k in x.key for k in MISC_KERNEL_KEYS):
                 misc_time += x.self_cuda_time_total
+            elif any(k in x.key for k in IGNORE_KERNEL_KEYS):
+                continue
             else:
                 unknown_keys.append(x)
         if unknown_keys:

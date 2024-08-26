@@ -54,7 +54,7 @@ def setup_global_comm(
             map(
                 int,
                 name_resolve.get_subtree(
-                    names.trainer_ddp_peer(
+                    names.distributed_peer(
                         expr_name,
                         trial_name,
                         gpu_utils.GLOBAL_PROCESS_GROUP_NAME,
@@ -90,7 +90,7 @@ def setup_global_comm(
     else:
         local_gpu_id = global_rank
 
-    ddp_master_name = names.trainer_ddp_master(
+    ddp_master_name = names.distributed_master(
         expr_name, trial_name, gpu_utils.GLOBAL_PROCESS_GROUP_NAME
     )
 

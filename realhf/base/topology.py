@@ -23,6 +23,16 @@ def new_or_get_group(ranks: List[int], backend=None):
     return GLOBAL_PROCESS_GROUP_REGISTRY[key]
 
 
+def destroy_all_comm_groups():
+    if not dist.is_initialized():
+        return
+    global GLOBAL_PROCESS_GROUP_REGISTRY
+    for group in GLOBAL_PROCESS_GROUP_REGISTRY.values():
+        dist.destroy_process_group(group)
+    GLOBAL_PROCESS_GROUP_REGISTRY = {}
+    dist.destroy_process_group()
+
+
 class ProcessCoord(NamedTuple):
     pipe: int
     data: int
