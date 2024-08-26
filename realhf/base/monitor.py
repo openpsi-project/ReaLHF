@@ -1,17 +1,21 @@
 import contextlib
 import dataclasses
 import enum
+import json
 import os
 import pickle
 import re
 import time
 from collections import defaultdict
 from statistics import mean
-from typing import TYPE_CHECKING, Callable, List, Optional, Union
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import psutil
 import pynvml
+import tabulate
+import torch
+import tqdm
 
 import realhf.base.constants as constants
 import realhf.base.logging as logging
@@ -360,6 +364,10 @@ def calculate_llama_gen_flops(
     return flops
 
 
+#################### CUDA Kernel Time Marking Start ####################
+# Used to create timeline plots.
+
+
 class CUDATimeMarkType(enum.Enum):
     forward = "forward"
     backward = "backward"
@@ -454,9 +462,16 @@ def dump_tmark_db(worker_idx):
     TIME_MARK_DB.clear()
 
 
+#################### CUDA Kernel Time Marking End ####################
+
+#################### CUDA Kernel Time Statistics Start ####################
+# Categorizing CUDA kernels into computation, communication, memory IO, and MISC/IDLE,
+# used to plot the percentage of time spent on each category and show how much we can
+# improve over vanilla parallel strategies.
+
 COMPUTE_KERNEL_KEYS = [
     "elementwise_kernel",
-    "gemm_",
+    "gemm",
     "aten::",
     "at::native::",
     "flash",
@@ -466,6 +481,8 @@ COMPUTE_KERNEL_KEYS = [
     "gae_kernel",
     "gemvx::kernel",
     "cublas",
+    "cudnn",
+    "cutlass",
 ]
 
 COMM_KERNEL_KEYS = [
@@ -486,75 +503,148 @@ MISC_KERNEL_KEYS = [
     "CudaCodeGen",
 ]
 
-IGNORE_KERNEL_KEYS = [
-    "FusedAdam",  # This is a marker above multi-tensor-apply
-]
+
+class CUDAKernelTimeCategory(enum.Enum):
+    COMPUTE = "compute"
+    COMM = "communication"
+    MEM = "memoryIO"
+    IDLE = "idle"
+    MISC = "misc"
+
+    @classmethod
+    def from_name(cls, name):
+        # Order may matter. MEM & COMM keys are easier to find out.
+        if any(k in name for k in MEM_KERNEL_KEYS):
+            return cls.MEM
+        if any(k in name for k in COMM_KERNEL_KEYS):
+            return cls.COMM
+        if any(k in name for k in MISC_KERNEL_KEYS):
+            return cls.MISC
+        if any(k in name for k in COMPUTE_KERNEL_KEYS):
+            return cls.COMPUTE
+        raise NotImplementedError(f"Unknown kernel type. Name is `{name}`")
 
 
 @dataclasses.dataclass
-class CUDAKernelTime:  # in us
+class CUDAKernelTimeStat:  # in us
     compute: int
-    comm: int
-    mem: int
+    communication: int
+    memoryIO: int
     misc: int
-
-    @classmethod
-    def from_profiler(cls, p):
-        import torch
-
-        compute_time = comm_time = mem_time = misc_time = 0
-        unknown_keys = []
-        for x in p.key_averages():
-            if x.device_type != torch.autograd.DeviceType.CUDA:
-                continue
-            if x.self_cuda_time_total <= 0:
-                continue
-            if "waitevent" in x.key.lower():
-                print(x.key)
-            if re.match(r"^nccl:(?!:).*", x.key):
-                # I.e., filter out kernels starting with "nccl:"
-                # but the next character is not ":", e.g., "nccl:recv".
-                # This is the marker probably created by CUDAGraph.
-                # It is overlapped with the actual NCCL kernel.
-                # We don't want to count it twice.
-                continue
-            if any(k in x.key for k in COMPUTE_KERNEL_KEYS):
-                compute_time += x.self_cuda_time_total
-            elif any(k in x.key for k in COMM_KERNEL_KEYS):
-                comm_time += x.self_cuda_time_total
-            elif any(k in x.key for k in MEM_KERNEL_KEYS):
-                mem_time += x.self_cuda_time_total
-            elif any(k in x.key for k in MISC_KERNEL_KEYS):
-                misc_time += x.self_cuda_time_total
-            elif any(k in x.key for k in IGNORE_KERNEL_KEYS):
-                continue
-            else:
-                unknown_keys.append(x)
-        if unknown_keys:
-            raise NotImplementedError(
-                f"Unknown keys: {[(x.key, x.self_cuda_time_total) for x in unknown_keys]}"
-            )
-        return cls(compute=compute_time, comm=comm_time, mem=mem_time, misc=misc_time)
-
-    def __add__(self, other):
-        return CUDAKernelTime(
-            compute=self.compute + other.compute,
-            comm=self.comm + other.comm,
-            mem=self.mem + other.mem,
-            misc=self.misc + other.misc,
-        )
+    idle: int
 
     @property
-    def total_secs(self):
-        return (self.compute + self.comm + self.mem + self.misc) / 1e6
+    def total(self):
+        return self.compute + self.communication + self.memoryIO + self.misc + self.idle
+
+    def percentage(self) -> Dict:
+        return {
+            "compute": self.compute / self.total,
+            "comm": self.communication / self.total,
+            "mem": self.memoryIO / self.total,
+            "misc": self.misc / self.total,
+            "idle": self.idle / self.total,
+        }
+
+    def __add__(self, other):
+        return CUDAKernelTimeStat(
+            compute=self.compute + other.compute,
+            communication=self.communication + other.communication,
+            memoryIO=self.memoryIO + other.memoryIO,
+            misc=self.misc + other.misc,
+            idle=self.idle + other.idle,
+        )
 
     def __truediv__(self, x):
-        return CUDAKernelTime(
+        return CUDAKernelTimeStat(
             compute=self.compute / x,
-            comm=self.comm / x,
-            mem=self.mem / x,
+            communication=self.communication / x,
+            memoryIO=self.memoryIO / x,
             misc=self.misc / x,
+            idle=self.idle / x,
         )
 
     def __repr__(self):
-        return f"CUDAKernelTime(compute={self.compute}us, comm={self.comm}us, mem={self.mem}us, misc={self.misc}us)"
+        headers = [
+            "",
+            "Total",
+            "Computation",
+            "Communication",
+            "Memory IO",
+            "Misc",
+            "Idle",
+        ]
+        line1 = [
+            "Time (s)",
+            self.total / 1e6,
+            self.compute / 1e6,
+            self.communication / 1e6,
+            self.memoryIO / 1e6,
+            self.misc / 1e6,
+            self.idle / 1e6,
+        ]
+        line1 = [f"{x:.2f}" if isinstance(x, float) else x for x in line1]
+        line2 = [
+            "Percentage (%)",
+            "-",
+            *[f"{x:.2%}" for x in list(self.percentage().values())],
+        ]
+        return tabulate.tabulate(
+            [headers, line1, line2],
+            headers="firstrow",
+            tablefmt="fancy_grid",
+            stralign="center",
+        )
+
+
+@dataclasses.dataclass
+class KernelEventEntry:
+    ts: int
+    is_start: bool
+    category: CUDAKernelTimeCategory
+
+
+def kernelStatFromEvents(events: List[KernelEventEntry]):
+    times = {k: 0 for k in CUDAKernelTimeCategory}
+    active = {k: 0 for k in CUDAKernelTimeCategory}
+
+    current_time = events[0].ts
+
+    for i in tqdm.trange(len(events), desc="Processing Kernel Times..."):
+        next_time = events[i].ts
+
+        # Priority: compute > communication > memory > misc > idle
+        if i > 0 and next_time != current_time:
+            duration = next_time - current_time
+            if active[CUDAKernelTimeCategory.COMPUTE] > 0:
+                times[CUDAKernelTimeCategory.COMPUTE] += duration
+            elif active[CUDAKernelTimeCategory.COMM] > 0:
+                times[CUDAKernelTimeCategory.COMM] += duration
+            elif active[CUDAKernelTimeCategory.MEM] > 0:
+                times[CUDAKernelTimeCategory.MEM] += duration
+            elif active[CUDAKernelTimeCategory.MISC] > 0:
+                times[CUDAKernelTimeCategory.MISC] += duration
+            else:
+                times[CUDAKernelTimeCategory.IDLE] += duration
+        active[events[i].category] += 1 if events[i].is_start else -1
+        current_time = next_time
+
+    assert all(v == 0 for v in active.values()), active
+    return CUDAKernelTimeStat(**{k.value: v for k, v in times.items()})
+
+
+def kernelStatFromTrace(trace_path):
+    with open(trace_path, "r") as f:
+        data = json.load(f)
+    kernel_events = []
+    for ev in tqdm.tqdm(data["traceEvents"], desc="Loading JSON events"):
+        if "cat" not in ev:
+            continue
+        if ev["cat"] != "kernel":
+            continue
+        assert ev["dur"] > 0, ev
+        cat = CUDAKernelTimeCategory.from_name(ev["name"])
+        kernel_events.append(KernelEventEntry(ev["ts"], True, cat))
+        kernel_events.append(KernelEventEntry(ev["ts"] + ev["dur"], False, cat))
+    kernel_events.sort(key=lambda x: x.ts)
+    return kernelStatFromEvents(kernel_events)
