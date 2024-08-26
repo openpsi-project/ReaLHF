@@ -69,6 +69,19 @@ def dataclass_from_dict(klass, d):
 
 @dataclasses.dataclass
 class ProfileConfig(CommonExperimentConfig):
+    """The experiment configuration for profiling layers and interfaces.
+    
+    The `initial_setup` method in this experiment will return a list of
+    experiment configurations, which will be run sequentially.
+    All configurations share the same experiment name, trial name,
+    and the scheduling configuration. They can have different models,
+    datasets, or parallel strategies, as long as they always occupy
+    a fixed number of GPUs.
+
+    It's important to note that, if any error occurs during the execution,
+    the experiment will terminate immediately. In particular, the OOM error
+    should not appear because the profiling setup usually uses a small model.
+    """
     interfaces_jsonl: str = ""
     allocations_jsonl: Optional[str] = None
     handle_names: Optional[List[str]] = None
