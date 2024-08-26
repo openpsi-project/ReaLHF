@@ -688,7 +688,9 @@ class ModelWorker(worker_base.Worker):
                         f"Collecting system metrics from the profiler. "
                         "This may take for a while..."
                     )
-                parallel_str = f"mb{rpc.n_mbs}d{self._dp_size}m{self._mp_size}p{self._pp_size}"
+                parallel_str = (
+                    f"mb{rpc.n_mbs}d{self._dp_size}m{self._mp_size}p{self._pp_size}"
+                )
                 if constants.sequence_parallel():
                     parallel_str += "sp"
                 if _dump_kernel_time:
