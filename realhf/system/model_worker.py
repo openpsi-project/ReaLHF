@@ -691,17 +691,23 @@ class ModelWorker(worker_base.Worker):
                 )
                 if constants.sequence_parallel():
                     parallel_str += "sp"
-                if _enable_profiler:
-                    trace_dir = os.path.join(
+
+                def _get_subdir(name):
+                    subdir = os.path.join(
                         constants.LOG_ROOT,
                         constants.experiment_name(),
                         constants.trial_name(),
-                        "trace",
+                        name,
                         parallel_str,
                     )
-                    os.makedirs(trace_dir, exist_ok=True)
+                    os.makedirs(subdir, exist_ok=True)
+                    return subdir
+
+                if _enable_profiler:
                     pfer.export_chrome_trace(
-                        os.path.join(trace_dir, f"{rpc.name}_r{dist.get_rank()}.json")
+                        os.path.join(
+                            _get_subdir("trace"), f"{rpc.name}_r{dist.get_rank()}.json"
+                        )
                     )
                 if self._dp_rank == 0 and self._is_dp_head:
                     blogger.info(
@@ -709,16 +715,10 @@ class ModelWorker(worker_base.Worker):
                         f" {time.perf_counter() - collect_tik:.2f} secs."
                     )
             if _enable_memory_dump:
-                mem_trace_dir = os.path.join(
-                    constants.LOG_ROOT,
-                    constants.experiment_name(),
-                    constants.trial_name(),
-                    "gpuMemory",
-                    parallel_str,
-                )
-                os.makedirs(mem_trace_dir, exist_ok=True)
                 torch.cuda.memory._dump_snapshot(
-                    os.path.join(mem_trace_dir, f"{rpc.name}_r{dist.get_rank()}.pkl")
+                    os.path.join(
+                        _get_subdir("gpuMemory"), f"{rpc.name}_r{dist.get_rank()}.pkl"
+                    )
                 )
 
     def __handle_model_function_calls(
