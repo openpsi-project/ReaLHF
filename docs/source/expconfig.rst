@@ -82,3 +82,25 @@ recursively with command line arguments.
 ****************
 
 .. autoclass:: realhf.MFCDef
+
+*****************************
+ System-Level Configurations
+*****************************
+
+.. note::
+
+   These configurations are not supposed to be modified by users. They
+   are used to help understand the code architecture of ReaL.
+
+.. autoclass:: realhf.ModelName
+
+.. autoclass:: realhf.ModelVersion
+
+.. autoclass:: realhf.Model
+
+.. autoclass:: realhf.PipelinableEngine
+   :members:
+
+.. autoclass:: realhf.ModelInterface
+
+.. autoclass:: realhf.ModelBackend

@@ -259,6 +259,18 @@ class ReaLModelConfig:
 
 @dataclasses.dataclass
 class ModelVersion:
+    """A version counter.
+    
+    :param epoch: The current epoch.
+    :type epoch: int
+    :param epoch_step: The current step in the current epoch.
+        A "step" means a traversal of the DFG, which may contain
+        multiple model update steps depending on the interface
+        (e.g., PPO mini-batched update).
+    :type epoch_step: int
+    :param global_step: The number of steps since the start of the experiment.
+    :type global_step: int
+    """
     epoch: int = 0
     epoch_step: int = 0
     global_step: int = 0
@@ -266,12 +278,31 @@ class ModelVersion:
 
 @dataclasses.dataclass
 class FinetuneSpec:
+    """The specification for the finetuning task.
+    
+    :param total_train_epochs: The total number of epochs for training.
+    :type total_train_epochs: int
+    :param total_train_steps: The total number of steps for training.
+    :type total_train_steps: int
+    :param steps_per_epoch: The number of steps per epoch.
+    :type steps_per_epoch: int
+    """
     total_train_epochs: int
     total_train_steps: int
     steps_per_epoch: int
 
 
 class PipelinableEngine(abc.ABC):
+    """The signature of modules after backend initialization.
+
+    Modules with this signature will be passed to :class:`ModelInterface`
+    for model function call execution.
+
+    See ``realhf/impl/model/backend/inference.py``,
+    ``realhf/impl/model/backend/deepspeed.py``,
+    and ``realhf/impl/model/backend/megatron.py``
+    for concrete implementations.
+    """
     @abc.abstractmethod
     def train_batch(
         self,
@@ -314,6 +345,27 @@ class PipelinableEngine(abc.ABC):
 
 @dataclasses.dataclass
 class Model:
+    """The collection of a neural network, a tokenizer, and some metadata with
+    a unique name.
+
+    :param name: The unique name of the model.
+    :type name: ModelName
+    :param module: The neural network module. Its parameters may be
+        sharded by tensor or pipeline parallel.
+    :type module: PipelinableEngine | torch.nn.Module
+    :param tokenizer: The tokenizer for the model.
+    :type tokenizer: transformers.PreTrainedTokenizerFast
+    :param device: The device to run the model.
+    :type device: Union[str, torch.device]
+    :param dtype: The data type of the model. If None, the data type
+        will default to torch.float16.
+    :type dtype: Optional[torch.dtype]
+    :param version: The version of the model.
+    :type version: ModelVersion
+    :param ft_spec: The finetuning specification for the model.
+        Generally not used.
+    :type ft_spec: FinetuneSpec
+    """
     name: ModelName
     module: PipelinableEngine | torch.nn.Module
     tokenizer: transformers.PreTrainedTokenizerFast
@@ -340,6 +392,22 @@ class Model:
 
 
 class ModelBackend(abc.ABC):
+    """A backend that wraps :class:`Model` to provide additional
+    functionalities like running pipelined model function call and ZeRO
+    optimizer.
+
+    Current implementations include inference, DeepSpeed, and Megatron.
+    The inference backend only provides inference and generate APIs,
+    while DeepSpeed and Megatron backends additionally support training.
+
+    The backend mainly provides two functionalities:
+    1. Pipelined generation, inference, and training, implemented in ReaL;
+    2. ZeRO optimizer, implemented in DeepSpeed and Megatron.
+
+    After initialization, the ``module`` attribute in :class:`Model`
+    will have the same signature as :class:`PipelinableEngine`.
+    See ``realhf/impl/model/backend`` for concrete implementations.
+    """
 
     @abc.abstractmethod
     def _initialize(self, model: Model, spec: FinetuneSpec) -> Model:
@@ -367,7 +435,24 @@ def tokenizer_only_model(
 
 
 class ModelInterface(abc.ABC):
-    """Interface for model training, evaluation, inference and generation."""
+    """Interface for model training, evaluation, inference and generation.
+
+    The interface is designed to follow the dependency injection rule.
+    We pass the model to the interface and call the interface methods, such
+    that model APIs and algorithms are fully decoupled. For example,
+    REINFORCE and PPO can have different behaviors during training.
+    We can write separate interfaces for these two algorithms while using
+    the same model that provides a basic forward-backward-update functionality
+    (it is actually the :class:`PipelinableEngine`).
+
+    During runtime, the master worker will request model workers to execute
+    a specific interface type (e.g., generate) on a specific model. The model
+    worker will find the corresponding model, pass it into the requested interface,
+    run the computation, and finally return the result.
+
+    The users can easily write new interfaces to support customized usage.
+    Check :doc:`customization` for more details.
+    """
 
     def save(self, model: Model, save_dir: str):
         pass

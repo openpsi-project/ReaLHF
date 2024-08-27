@@ -57,7 +57,9 @@ class ModelName:
     :type role: str
     :param replica_id: The replica id of the model. Different replicas
         of the same role have the same set of parameters with different
-        memory locations.
+        memory locations. For example, if actor generation and training
+        in PPO have different parallel strategies, they will have the
+        same role but different replica ids.
     :type replica_id: int
     """
 

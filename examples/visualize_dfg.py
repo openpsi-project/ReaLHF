@@ -66,7 +66,8 @@ def _get_ppo_rpcs() -> List[MFCDef]:
 
 
 def _get_reinforce_rpcs():
-    """A REINFORCE algorithm that uses the rewards of greedy generations as the baseline."""
+    """A REINFORCE algorithm that uses the rewards of greedy generations as the
+    baseline."""
     actor_gen = MFCDef(
         n_seqs=1,
         name="greedyGen",
