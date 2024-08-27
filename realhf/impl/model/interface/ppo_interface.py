@@ -267,7 +267,7 @@ class PPOActorInterface(model_api.ModelInterface):
         # This post_hook will gather log probabilities in mini-batches,
         # reducing peak memory usage.
         def calc_logprobs(logits, input_):
-            logits /= self.generation_config.temperature
+            logits /= self.gconfig.temperature
             if (
                 "packed_logits_mask" in input_.data
                 and input_.data["packed_logits_mask"] is not None
