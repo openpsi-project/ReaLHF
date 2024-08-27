@@ -1344,6 +1344,12 @@ class MasterWorker(worker_base.Worker):
 
         if is_new_epoch:
             if self._epoch > self.__total_train_epochs:
+                if should_eval or should_save:
+                    logger.info(
+                        f"Waiting for all save/eval requests at the last step"
+                        f" for {self.config.exp_ctrl.save_eval_timeout} secs..."
+                    )
+                    time.sleep(self.config.exp_ctrl.save_eval_timeout)
                 self.experiment_complete_exit(f"Training completes! Yeah!!!")
 
         total_time_consumption = time.perf_counter() - self._train_start_time
