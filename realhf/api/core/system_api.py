@@ -186,6 +186,11 @@ class ExperimentSaveEvalControl:
     :param benchmark_steps: Terminate the training after this number of steps.
         Used by system benchmark only. Please leave it to None for normal training.
     :type benchmark_steps: Optional[int]
+    :param save_eval_timeout: Timeout in seconds for saving and evaluation.
+        Will be used for the last step of the experiment. The master worker will sleep
+        for `save_eval_timeout` seconds to wait all save or evaluations to finish.
+        Defaults to 120 seconds.
+    :type save_eval_timeout: int
     """
 
     total_train_epochs: int = 1
@@ -199,6 +204,8 @@ class ExperimentSaveEvalControl:
     eval_freq_secs: Optional[int] = None
     # benchmark
     benchmark_steps: Optional[int] = None
+    # Graceful exit
+    save_eval_timeout: int = 120
 
 
 @dataclasses.dataclass
