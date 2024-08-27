@@ -234,6 +234,7 @@ model interface.
 The interface class has the following signature:
 
 .. autoclass:: realhf.ModelInterface
+   :no-index:
    :members:
    :undoc-members:
 

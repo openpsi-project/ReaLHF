@@ -98,9 +98,16 @@ recursively with command line arguments.
 
 .. autoclass:: realhf.Model
 
+.. autoclass:: realhf.ModelBackend
+   :members:
+   :undoc-members: _initialize
+
 .. autoclass:: realhf.PipelinableEngine
    :members:
+   :undoc-members:
 
 .. autoclass:: realhf.ModelInterface
+   :members:
+   :undoc-members:
 
-.. autoclass:: realhf.ModelBackend
+

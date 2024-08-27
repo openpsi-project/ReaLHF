@@ -1,6 +1,5 @@
-from typing import *
-
 import argparse
+from typing import *
 
 from realhf.api.core.config import ModelInterfaceAbstraction, ModelName
 from realhf.api.core.dfg import MFCDef, ModelInterfaceType, build_graph

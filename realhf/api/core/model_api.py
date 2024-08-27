@@ -260,15 +260,16 @@ class ReaLModelConfig:
 @dataclasses.dataclass
 class ModelVersion:
     """A version counter.
-    
+
     :param epoch: The current epoch.
     :type epoch: int
-    :param epoch_step: The current step in the current epoch.
-        A "step" means a traversal of the DFG, which may contain
-        multiple model update steps depending on the interface
-        (e.g., PPO mini-batched update).
+    :param epoch_step: The current step in the current epoch. A "step"
+        means a traversal of the DFG, which may contain multiple model
+        update steps depending on the interface (e.g., PPO mini-batched
+        update).
     :type epoch_step: int
-    :param global_step: The number of steps since the start of the experiment.
+    :param global_step: The number of steps since the start of the
+        experiment.
     :type global_step: int
     """
     epoch: int = 0
@@ -279,7 +280,7 @@ class ModelVersion:
 @dataclasses.dataclass
 class FinetuneSpec:
     """The specification for the finetuning task.
-    
+
     :param total_train_epochs: The total number of epochs for training.
     :type total_train_epochs: int
     :param total_train_steps: The total number of steps for training.
@@ -307,10 +308,33 @@ class PipelinableEngine(abc.ABC):
     def train_batch(
         self,
         input_: SequenceSample,
-        loss_fn: Callable,
+        loss_fn: Callable[[torch.Tensor, SequenceSample], Tuple[torch.Tensor, Dict]],
         version_steps: int,
         num_micro_batches: Optional[int] = None,
-    ):
+    ) -> Tuple[torch.Tensor, Dict] | None:
+        """Update the model with a batch of data and a loss function.
+
+        :param input_: The input data. It should at least contain a key ``packed_input_ids``,
+            which is the concatenated token sequences. It should also contain all other
+            entries to compute the loss.
+        :type input_: SequenceSample
+        :param loss_fn: The loss function. It takes the output of forward and the
+            input data, and returns the loss and a dictionary of statistics.
+        :type loss_fn: Callable[[torch.Tensor, SequenceSample], Tuple[torch.Tensor, Dict]]
+        :param version_steps: The global step counter of this experiment.
+            Used by the backend to determine the learning rate schedule.
+        :type version_steps: int
+        :param num_micro_batches: The number of micro-batches to split the batch into.
+            Gradients will be accumulated across micro-batches and only one update will
+            happen. For pipelined training, micro-batches are fed into the engine together.
+            The pipeline engine will automatically schedule the forward and backward during
+            execution. For non-pipelined training, we iteratively execute forward and backward
+            over mini-batches to accumulate the gradients. If None, the batch will not be split.
+        :type num_micro_batches: Optional[int]
+        :return: The aggregated scalar loss and a dictionary of statistics on the last pipeline
+            stage. None otherwise.
+        :rtype: Tuple[torch.Tensor, Dict]
+        """
         raise NotImplementedError()
 
     @torch.no_grad()
@@ -319,7 +343,28 @@ class PipelinableEngine(abc.ABC):
         input_: SequenceSample,
         loss_fn: Callable[[torch.Tensor, SequenceSample], Tuple[torch.Tensor, Dict]],
         num_micro_batches: Optional[int] = None,
-    ):
+    ) -> Tuple[torch.Tensor, Dict] | None:
+        """Run forward and the loss function to evaluate the model.
+
+        It is simply a wrapper over :meth:`forward` with a customized ``post_hook`` and ``aggregate_fn``.
+
+        :param input_: The input data. It should at least contain a key ``packed_input_ids``,
+            which is the concatenated token sequences. It should also contain all other
+            entries to compute the loss.
+        :type input_: SequenceSample
+        :param loss_fn: The loss function. It takes the output of forward and the
+            input data, and returns the loss and a dictionary of statistics.
+        :type loss_fn: Callable[[torch.Tensor, SequenceSample], Tuple[torch.Tensor, Dict]]
+        :param num_micro_batches: The number of micro-batches to split the batch into.
+            **It should not be used although we remain the argument for compatibility**,
+            because we can directly set different batch sizes in the dataloader,
+            and the batch size during evaluation does not matter algorithmic performance,
+            unlike training.
+        :type num_micro_batches: Optional[int]
+        :return: The aggregated scalar loss and a dictionary of statistics on the last pipeline
+            stage. None otherwise.
+        :rtype: Tuple[torch.Tensor, Dict]
+        """
         def agg(xs: List[Tuple[torch.Tensor, Dict]]):
             losses, stats = zip(*xs)
             return sum(losses), {k: sum(s[k] for s in stats) for k in stats[0].keys()}
@@ -337,7 +382,35 @@ class PipelinableEngine(abc.ABC):
         num_micro_batches: Optional[int] = None,
         post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None = None,
         aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
-    ):
+    ) -> Any | None:
+        """Run forward or inference on the model. Note that it is gradient-
+        free.
+
+        To train the model, please use :meth:`train_batch` instead.
+
+        :param input_: The input data. It should at least contain a key ``packed_input_ids``,
+            which is the concatenated token sequences.
+        :type input_: SequenceSample
+        :param num_micro_batches: The number of micro-batches to split the batch into.
+            Regardless pipelining, the mini-batches will be fed into the module one-by-one.
+            Only through this way can we reduce GPU memory usage of hidden states.
+            If None, the batch will not be split.
+        :type num_micro_batches: Optional[int]
+        :param post_hook: A function to run over the output after the forward pass.
+            It takes the output tensor and the input data, and returns an arbitrary result.
+            With post_hook, we can post-process the output in mini-batches,
+            thus reducing the memory usage for operations like gathering log-probabilities.
+            If None, this function just returns the output tensor.
+        :type post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None
+        :param aggregate_fn: A function to aggregate the results of the post_hook.
+        :type aggregate_fn: Callable[[List[Any]], Any]
+        :return: The aggregated result of the post_hook at the last pipeline stage. None otherwise.
+            The output before post_hook is a concatenated tensor over the batch-sequence dimension, just like
+            ``packed_input_ids``. For example, if we have 3 sequences with length [2, 3, 4],
+            and the vocabulary size is 1000, ``packed_input_ids`` should have shape [9]
+            and the logits should have shape [9, 1000].
+        :rtype: Any | None
+        """
         raise NotImplementedError()
 
     def generate(
@@ -348,7 +421,31 @@ class PipelinableEngine(abc.ABC):
             default_factory=GenerationHyperparameters
         ),
         num_micro_batches: Optional[int] = None,
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor | None] | None:
+        """Run generate on the model.
+
+        :param input_: The input data. It should at least contain a key ``packed_input_ids``,
+            which is the concatenated prompts.
+        :type input_: SequenceSample
+        :param tokenizer: The tokenizer for the model.
+        :type tokenizer: transformers.PreTrainedTokenizerFast
+        :param gconfig: The generation hyperparameters.
+        :type gconfig: GenerationHyperparameters
+        :param num_micro_batches: The number of micro-batches to split the batch into.
+            Regardless pipelining, the mini-batches will be fed into the module one-by-one.
+            Only through this way can we reduce GPU memory usage of hidden states and KV-caches.
+            If None, the batch will not be split.
+        :type num_micro_batches: Optional[int]
+        :return: For the last pipeline stage, return the generated tokens, the log probabilities, and optionally the logits mask.
+            See :class:`GenerationHyperparameters` for more details about the logits mask.
+            None for other stages.
+            The outputs are stacked tensors over the batch dimension. For example,
+            if we have 3 prompts with length [2, 3, 4], the maximum generated length is 5,
+            and the vocabulary size is 1000, prompts or ``packed_input_ids`` should have shape [9],
+            generated tokens and log probabilities should have shape [3, 5],
+            and the logits should have shape [3, 5, 1000].
+        :rtype: Tuple[torch.Tensor, torch.Tensor, torch.Tensor | None] | None
+        """
         raise NotImplementedError()
 
 
@@ -405,12 +502,14 @@ class ModelBackend(abc.ABC):
     functionalities like running pipelined model function call and ZeRO
     optimizer.
 
-    Current implementations include inference, DeepSpeed, and Megatron.
+    Current backend implementations include inference, DeepSpeed, and Megatron.
     The inference backend only provides inference and generate APIs,
     while DeepSpeed and Megatron backends additionally support training.
 
     The backend mainly provides two functionalities:
+
     1. Pipelined generation, inference, and training, implemented in ReaL;
+
     2. ZeRO optimizer, implemented in DeepSpeed and Megatron.
 
     After initialization, the ``module`` attribute in :class:`Model`
@@ -423,10 +522,13 @@ class ModelBackend(abc.ABC):
         raise NotImplementedError()
 
     def initialize(self, model: Model, spec: FinetuneSpec) -> Model:
+        """Initialize the model with the backend to support pipelining and
+        distributed optimization."""
         model.ft_spec = spec
         return self._initialize(model, spec)
 
     def destroy(self, model: Model):
+        """Destroy the backend to release GPU memory."""
         pass
 
 
@@ -455,7 +557,7 @@ class ModelInterface(abc.ABC):
     REINFORCE and PPO can have different behaviors during training.
     We can write separate interfaces for these two algorithms while using
     the same model that provides a basic forward-backward-update functionality
-    (it is actually the :class:`PipelinableEngine`).
+    (i.e., :class:`PipelinableEngine`).
 
     During runtime, the master worker will request model workers to execute
     a specific interface type (e.g., generate) on a specific model. The model
