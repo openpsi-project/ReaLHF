@@ -69,12 +69,13 @@ nodes.**
    on one host, e.g., (1, 1), (1, 2), (1, 4), (1, 8), (2, 8), ..., (N,
    8) in a cluster of (N, 8).
 
-The graph building is done in ``realhf/api/core/system_api.py``,
-during the post-init of experiment configurations.
-The concrete definition of MFCs in different experiments can be found in files under ``realhf/experiments/common/``.
-All experiment configurations define a ``rpcs`` property, which will be first processed by 
-the ``initial_setup`` method in ``realhf/experiments/common/common.py``, then passed to the ``ExperimentConfig`` object
-to build the graph.
+The graph building is done in ``realhf/api/core/system_api.py``, during
+the post-init of experiment configurations. The concrete definition of
+MFCs in different experiments can be found in files under
+``realhf/experiments/common/``. All experiment configurations define a
+``rpcs`` property, which will be first processed by the
+``initial_setup`` method in ``realhf/experiments/common/common.py``,
+then passed to the ``ExperimentConfig`` object to build the graph.
 
 ************************
  Runtime Infrastrcuture
@@ -105,11 +106,10 @@ dependency.
 
 This section introduces how ReaL launches experiments through local
 subprocess, Ray, or SLURM. Conceptually, the launcher provides a similar
-functionality to ``torchrun``, but we did't use ``torchrun`` because ReaL's
-code is inherited from the previous SRL project. The scheduler in SRL can
-run heterogeneous CPU and GPU tasks, while it's hard to do so with
-``torchrun``.
-
+functionality to ``torchrun``, but we did't use ``torchrun`` because
+ReaL's code is inherited from the previous SRL project. The scheduler in
+SRL can run heterogeneous CPU and GPU tasks, while it's hard to do so
+with ``torchrun``.
 
 .. figure:: images/experiment_workflow.svg
    :alt: exp_workflow
@@ -123,33 +123,37 @@ several configurable fields, which makes the user to conveniently change
 the hyperparameters of the experiment, such as the parallelism strategy,
 the learning rate, and the batch size.
 
-Then, ReaL will translate the Hydra configuration
-into a worker-based configuration.
-It includes the configurations dataset, model,
-interface, and backends to run on each model worker.
-Please check ``realhf/api/core/config.py`` for concrete examples.
-The core code of translation is written in the ``_get_model_worker_configs`` method in ``realhf/experiments/common/common.py``.
-This configuration level retains the maximum flexibility. For example,
-if we need to run some CPU-heavy tasks as the reward function, we can implement a customized
+Then, ReaL will translate the Hydra configuration into a worker-based
+configuration. It includes the configurations dataset, model, interface,
+and backends to run on each model worker. Please check
+``realhf/api/core/config.py`` for concrete examples. The core code of
+translation is written in the ``_get_model_worker_configs`` method in
+``realhf/experiments/common/common.py``. This configuration level
+retains the maximum flexibility. For example, if we need to run some
+CPU-heavy tasks as the reward function, we can implement a customized
 worker to run the task on CPUs.
 
-The worker configuration is registered as an "experiment" with an unique name in
-``realhf/api/quickstart/entrypoint.py``. Next, it will be launched by ``realhf.apps.main``.
-The launcher finds the experiment to run by its name, load the worker configurations, and
-submit them to the scheduler (either SLURM or local subprocesses).
-The schduler will run a worker controller to manager the lifetime of other workers.
-Workers contiuously check whether there's new message from the controller, and changes its internal state
-(e.g., running, pausing, or stopping) accordingly.
-After the controller finds that all model workers and the master worker are ready, it will
-send a signal to all workers to start the experiment.
-When the schduler finds that some worker is no longer alive, e.g., after the experiment is done or when an unexpected error occurs,
-it will shutdown the controller and all workers, and exit ``realhf.apps.main``.
+The worker configuration is registered as an "experiment" with an unique
+name in ``realhf/api/quickstart/entrypoint.py``. Next, it will be
+launched by ``realhf.apps.main``. The launcher finds the experiment to
+run by its name, load the worker configurations, and submit them to the
+scheduler (either SLURM or local subprocesses). The schduler will run a
+worker controller to manager the lifetime of other workers. Workers
+contiuously check whether there's new message from the controller, and
+changes its internal state (e.g., running, pausing, or stopping)
+accordingly. After the controller finds that all model workers and the
+master worker are ready, it will send a signal to all workers to start
+the experiment. When the schduler finds that some worker is no longer
+alive, e.g., after the experiment is done or when an unexpected error
+occurs, it will shutdown the controller and all workers, and exit
+``realhf.apps.main``.
 
-******************************************
-Model, Model Interface, and Model Backend
-******************************************
+*******************************************
+ Model, Model Interface, and Model Backend
+*******************************************
 
-In this section, we introduce the concept of Model, Model Interface, and Model Backend,
-and describe how the model worker handles requests from the master worker.
+In this section, we introduce the concept of Model, Model Interface, and
+Model Backend, and describe how the model worker handles requests from
+the master worker.
 
-A 
+A
