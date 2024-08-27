@@ -109,5 +109,3 @@ recursively with command line arguments.
 .. autoclass:: realhf.ModelInterface
    :members:
    :undoc-members:
-
-

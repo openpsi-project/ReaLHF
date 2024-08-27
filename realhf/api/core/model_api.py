@@ -272,6 +272,7 @@ class ModelVersion:
         experiment.
     :type global_step: int
     """
+
     epoch: int = 0
     epoch_step: int = 0
     global_step: int = 0
@@ -288,6 +289,7 @@ class FinetuneSpec:
     :param steps_per_epoch: The number of steps per epoch.
     :type steps_per_epoch: int
     """
+
     total_train_epochs: int
     total_train_steps: int
     steps_per_epoch: int
@@ -365,6 +367,7 @@ class PipelinableEngine(abc.ABC):
             stage. None otherwise.
         :rtype: Tuple[torch.Tensor, Dict]
         """
+
         def agg(xs: List[Tuple[torch.Tensor, Dict]]):
             losses, stats = zip(*xs)
             return sum(losses), {k: sum(s[k] for s in stats) for k in stats[0].keys()}
@@ -472,6 +475,7 @@ class Model:
         Generally not used.
     :type ft_spec: FinetuneSpec
     """
+
     name: ModelName
     module: PipelinableEngine | torch.nn.Module
     tokenizer: transformers.PreTrainedTokenizerFast
