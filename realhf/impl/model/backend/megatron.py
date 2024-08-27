@@ -699,7 +699,7 @@ class PipeTrainInstrSetForMegatron(PipeTrainInstrSet):
         return update_successful, grad_norm, num_zeros_in_grad
 
 
-class ReaLMegatronEngine:
+class ReaLMegatronEngine(model_api.PipelinableEngine):
 
     def __init__(self, module: ReaLModel, megatron_engine: MegatronEngine):
         self.module = module
@@ -734,7 +734,10 @@ class ReaLMegatronEngine:
             self.engine.zero_grad()
             if constants.pipe_parallel_world_size() > 1:
                 if num_micro_batches is not None:
-                    if num_micro_batches < self.pipe_runner.default_train_mbs:
+                    if (
+                        num_micro_batches < self.pipe_runner.default_train_mbs
+                        and constants.parallelism_rank() == 0
+                    ):
                         logger.warning(
                             "When training with pipeline parallel, num micro batches should be "
                             "larger than 2 x num_pipeline_stages to avoid idle time. "
@@ -803,20 +806,16 @@ class ReaLMegatronEngine:
                 return stat
 
     @torch.no_grad()
-    def eval_batch(
-        self,
-        input_: SequenceSample,
-        loss_fn: Callable,
-        num_micro_batches: Optional[int] = None,
-    ):
-        return self.inf_engine.eval_batch(input_, loss_fn, num_micro_batches)
-
     def forward(
         self,
         input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
+        post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None = None,
+        aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ):
-        return self.inf_engine.forward(input_, num_micro_batches)
+        return self.inf_engine.forward(
+            input_, num_micro_batches, post_hook=post_hook, aggregate_fn=aggregate_fn
+        )
 
     @torch.no_grad()
     def generate(
@@ -833,6 +832,50 @@ class ReaLMegatronEngine:
 
 @dataclasses.dataclass
 class MegatronTrainBackend(model_api.ModelBackend):
+    """When using the DistributedOptimizer of Megatron, parameters and
+    gradients will not be splitted across DP ranks, but optimizer states will
+    be. In other words, Megatron only supports ZeRO-1.
+
+    Megatron DDP will split the whole flattend parameter into buckets.
+    Buckets do not respect parameter boundaries and are dispatched to different DP ranks.
+    The optimizer on a specific DP rank will only manage its own bucket,
+    but parameters and gradients are held by all ranks and will not be further splitted.
+    (That's why only optimizer states are partitioned.) During backward, bucket gradients
+    will be scatter-reduced (controlled by the `use_distributed_optimizer` option
+    in Megatron DDP, otherwise all-reduce will be issued), and parameters will then
+    be updated locally. At this point, the parameters are not synced across DP ranks.
+    The DistributedOptimizer will then call all-gather on parameters.
+
+    Since Megatron allocates static tensors for scatter-reducing parameter gradients,
+    it does not decrease memory usage just as DeepSpeed ZeRO-2. To be more specific,
+    with dynamic allocation, we can allocate gradient memory layer-by-layer. When the
+    backward finishes at layer N, we can scatter-reduce gradients and release the memory
+    after scattering. As a result, given DP size K, layer number L, and parameter size P
+    for each layer, dynamic allocation requires P * (1 + L/K) memory for gradients,
+    but Megatron requires P * L. Memory is not freed after scattering in Megatron.
+
+    'use_distributed_optimizer' enables bucketing and scatter-reduce gradients.
+    When setting to False, optimizer states will not be partitioned.
+
+    'overlap_grad_reduce' enables issuing all-reduce/scatter-reduce on the fly
+    during bacwkard once the gradient is ready, which should usually be enabled.
+
+    'overlap_param_gather' overlaps param all-gather with the next forward pass.
+    It creates a forward hook that waits for the previous parameter all-gather
+    after the optimizer step. While this sounds good, it can be problematic with
+    parameter reallocation, because the reallocated parameters do not have the hook.
+    Can be enabled for SFT, but should be disabled for PPO.
+
+    As a final note, Megatron is in an awkward place for PPO with param-realloc.
+    First, it does not minimize the memory usage of gradients (i.e., ZeRO-2).
+    Second, for functional correctness, we can't enable `overlap_param_gather`,
+    and a parameter update will be scatter-reduce grad + all-gather param, instead
+    of an all-reduce (running all-reduce requires setting `use_distributed_optimizer`
+    to False, but that will not partition optimizer states!), so it is not that
+    efficient, either. We use Megatron because it is the only backend that we can
+    make it functionally correct. The DeepSpeed code is too hard to read and modify.
+    """
+
     optimizer_name: str = dataclasses.field(
         metadata={"choices": ["adam", "sgd"]},
         default="adam",
@@ -849,7 +892,7 @@ class MegatronTrainBackend(model_api.ModelBackend):
     enable_bf16: bool = False
     use_zero_optimization: bool = True
     overlap_grad_reduce: bool = True
-    overlap_param_gather: bool = True
+    overlap_param_gather: bool = False
     accumulate_allreduce_grads_in_fp32: bool = False
     initial_loss_scale: float = 4096.0
     gradient_clipping: float = 1.0
@@ -960,6 +1003,16 @@ class MegatronTrainBackend(model_api.ModelBackend):
         mg_engine = MegatronEngine(module, optimizer, lr_scheduler)
         model.module = ReaLMegatronEngine(real_model, mg_engine)
         return model
+
+    def destroy(self, model: model_api.Model):
+        assert isinstance(model.module, ReaLMegatronEngine)
+        optimizer = model.module.engine.optim
+        # The Megatron backend will register forward hooks that
+        # create circular references (grad -> param -> grad).
+        # Deleting models directly will not release the memory.
+        # We must disable hooks at first.
+        if self.use_zero_optimization and self.overlap_param_gather:
+            optimizer.disable_pre_hook()
 
 
 model_api.register_backend("megatron", MegatronTrainBackend)

@@ -18,7 +18,7 @@ from realhf.impl.model.nn.real_llm_generate import _gather_minibatch_gen_outputs
 logger = logging.getLogger("PipelinableInferenceEngine")
 
 
-class PipelinableInferenceEngine:
+class PipelinableInferenceEngine(model_api.PipelinableEngine):
 
     def __init__(self, module: ReaLModel):
         self.module = module
@@ -79,63 +79,28 @@ class PipelinableInferenceEngine:
         return self
 
     @torch.no_grad()
-    def eval_batch(
-        self,
-        input_: SequenceSample,
-        loss_fn: Callable,
-        num_micro_batches: Optional[int] = None,
-    ):
-        if constants.pipe_parallel_world_size() > 1:
-            if num_micro_batches is not None:
-                num_micro_batches = max(
-                    num_micro_batches, self.pipe_runner.default_inf_mbs
-                )
-            return self.pipe_runner.eval_batch(
-                input_=input_,
-                loss_fn=loss_fn,
-                num_micro_batches=num_micro_batches,
-            )
-        else:
-            if num_micro_batches is None:
-                num_micro_batches = 1
-            stat = collections.defaultdict(int)
-            for mb_input in input_.split(num_micro_batches):
-                input_lens = torch.tensor(
-                    flat2d(mb_input.seqlens["packed_input_ids"]),
-                    dtype=torch.int32,
-                    device="cuda",
-                )
-                max_seqlen = int(max(input_lens))
-                cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-                model_output = self.module(
-                    packed_input_ids=mb_input.data["packed_input_ids"],
-                    cu_seqlens=cu_seqlens,
-                    max_seqlen=max_seqlen,
-                ).logits
-                _, _stat = loss_fn(model_output, mb_input)
-                for k, v in _stat.items():
-                    stat[k] += v
-            return stat
-
     def forward(
         self,
         input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
+        post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None = None,
+        aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ):
-        if constants.pipe_parallel_world_size() > 1:
-            if num_micro_batches is not None:
-                num_micro_batches = max(
-                    num_micro_batches, self.pipe_runner.default_inf_mbs
+        # NOTE: Whether to interleave mini-batches in the pipeline results in
+        # similar inference time, but it may introduce a larger memory footprint,
+        # so we split mini-batches in the outer loop and call forward multiple times.
+
+        if num_micro_batches is None:
+            num_micro_batches = 1
+        outputs = []
+        for mb_input in input_.split(num_micro_batches):
+            if constants.pipe_parallel_world_size() > 1:
+                model_output = self.pipe_runner.forward(
+                    input_=input_,
+                    post_hook=post_hook,
+                    aggregate_fn=aggregate_fn,
                 )
-            return self.pipe_runner.forward(
-                input_=input_,
-                num_micro_batches=num_micro_batches,
-            )
-        else:
-            if num_micro_batches is None:
-                num_micro_batches = 1
-            outputs = []
-            for mb_input in input_.split(num_micro_batches):
+            else:
                 input_lens = torch.tensor(
                     flat2d(mb_input.seqlens["packed_input_ids"]),
                     dtype=torch.int32,
@@ -148,8 +113,13 @@ class PipelinableInferenceEngine:
                     cu_seqlens=cu_seqlens,
                     max_seqlen=max_seqlen,
                 ).logits
-                outputs.append(model_output)
-            return torch.cat(outputs, dim=0) if num_micro_batches > 1 else outputs[0]
+                if post_hook:
+                    model_output = post_hook(model_output, mb_input)
+            outputs.append(model_output)
+        if constants.is_last_pipe_stage():
+            return aggregate_fn(outputs) if num_micro_batches > 1 else outputs[0]
+        else:
+            return None
 
     @torch.no_grad()
     def generate(
@@ -161,22 +131,25 @@ class PipelinableInferenceEngine:
         ),
         num_micro_batches: Optional[int] = None,
     ):
-        if constants.pipe_parallel_world_size() > 1:
-            if num_micro_batches is not None:
-                num_micro_batches = max(
-                    num_micro_batches, self.pipe_runner.default_inf_mbs
+        # NOTE: Interleave mini-batches in the pipeline results will not decrease
+        # the memory usage, because we need to hold all KV-caches for different
+        # mini-batches, so we split mini-batches in the outer loop.
+
+        if num_micro_batches is None:
+            num_micro_batches = 1
+        sequences, scores, logits_mask = [], [], []
+        for mb_input in input_.split(num_micro_batches):
+            if constants.pipe_parallel_world_size() > 1:
+                res = self.pipe_runner.generate(
+                    input_=input_,
+                    tokenizer=tokenizer,
+                    gconfig=gconfig,
                 )
-            return self.pipe_runner.generate(
-                input_=input_,
-                num_micro_batches=num_micro_batches,
-                tokenizer=tokenizer,
-                gconfig=gconfig,
-            )
-        else:
-            if num_micro_batches is None:
-                num_micro_batches = 1
-            sequences, scores, logits_mask = [], [], []
-            for mb_input in input_.split(num_micro_batches):
+                if res is not None:
+                    seq, s, lmask, *_ = res
+                else:
+                    seq, s, lmask = None, None, None
+            else:
                 input_lens = torch.tensor(
                     flat2d(mb_input.seqlens["packed_input_ids"]),
                     dtype=torch.int32,
@@ -191,13 +164,22 @@ class PipelinableInferenceEngine:
                     max_seqlen=max_seqlen,
                     gconfig=gconfig,
                 )
-                sequences.append(res.sequences)
-                scores.append(res.scores)
-                logits_mask.append(res.logits_mask)
+                seq, s, lmask = res.sequences, res.scores, res.logits_mask
+            sequences.append(seq)
+            scores.append(s)
+            logits_mask.append(lmask)
+        if constants.is_last_pipe_stage():
             if num_micro_batches == 1:
                 return sequences[0], scores[0], logits_mask[0]
             else:
-                return _gather_minibatch_gen_outputs(sequences, scores, logits_mask)
+                return _gather_minibatch_gen_outputs(
+                    sequences,
+                    scores,
+                    logits_mask,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
+        else:
+            return None
 
 
 @dataclasses.dataclass

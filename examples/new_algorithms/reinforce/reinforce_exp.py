@@ -2,6 +2,8 @@ import copy
 import dataclasses
 from typing import *
 
+from omegaconf import OmegaConf
+
 import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 from examples.new_algorithms.reinforce.reinforce_interface import ReinforceInterface
@@ -50,19 +52,6 @@ class ReinforceConfig(CommonExperimentConfig):
     discount: float = 0.99
     adv_norm: bool = True
 
-    def __post_init__(self):
-
-        if self.gen.use_cuda_graph and (
-            self.actor_train.parallel != self.greedy_gen.parallel
-            or self.actor_train.parallel != self.sample_gen.parallel
-        ):
-            raise ValueError(
-                "CUDA graph cannot be used with parameter reallocation "
-                "because CUDA graph requires pinned parameter memory. "
-                "Either set use_cuda_graph=False or set identical parallel "
-                "strategies for training and generation."
-            )
-
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
         # role to config
@@ -77,7 +66,11 @@ class ReinforceConfig(CommonExperimentConfig):
         actor_sample_interface = ModelInterfaceAbstraction(
             "reinforce",
             args=dict(
-                generation_config=self.gen,
+                # NOTE: to_container converts the object to a dict
+                # It is used for unifying the profiling API, which requires to
+                # pass external interface configurations in the launch command.
+                # Customized dataclass objects will not work in that case.
+                generation_config=OmegaConf.to_container(self.gen, resolve=True),
                 discount=self.discount,
                 adv_norm=self.adv_norm,
             ),

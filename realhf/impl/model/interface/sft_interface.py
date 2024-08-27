@@ -138,23 +138,23 @@ class SFTInterface(model_api.ModelInterface):
         for step, x in enumerate(tqdm.tqdm(eval_dataloader)):
             x: SequenceSample
 
-            stat = module.eval_batch(
+            res = module.eval_batch(
                 input_=x.cuda(),
                 loss_fn=compute_packed_sft_loss,
                 num_micro_batches=constants.pipe_parallel_world_size(),
             )
 
-            if stat:
+            if res is not None:
+                _, stat = res
                 losses += stat["loss"]
                 n_tokens += stat["n_tokens"]
                 n_seqs += stat["n_seqs"]
                 ppl += stat["ppl"]
 
-        res = dict()
         global_stats = constants.log_global_stats_tracker(
             return_dict=True, clear_stats_after_logging=True
         )
-        if stat:
+        if res is not None:
             return dict(
                 loss=float(losses / n_tokens),
                 ppl=float(ppl / n_seqs),
@@ -162,7 +162,7 @@ class SFTInterface(model_api.ModelInterface):
                 n_seqs=int(n_seqs),
                 **global_stats,
             )
-        return res
+        return dict()
 
 
 model_api.register_interface("sft", SFTInterface)

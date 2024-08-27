@@ -42,7 +42,7 @@ def _split_and_prefill_pipe_input(
     tensor_buffer: TensorBuffer,
     num_micro_batches: int,
     store_kv_cache: bool,
-    loss_fn: Optional[Callable] = None,
+    store_input_cache: bool = False,
 ):
     """Prepare input for pipelined generate, train, or inference.
 
@@ -140,7 +140,7 @@ def _split_and_prefill_pipe_input(
         )
         tensor_buffer.put("pipe_transfer_infos", mbid, others_cache)
 
-    if loss_fn is not None:
+    if store_input_cache:
         for mbid, x1 in enumerate(splitted):
             tensor_buffer.put("input_cache", mbid, x1)
 
@@ -274,7 +274,7 @@ def _zero_grads(inputs):
 
 class PipeInferenceInstrSet:
 
-    def _exec_forward_pass(
+    def _fwd_impl(
         module: ReaLModel,
         tensor_buffer: TensorBuffer,
         stage_id: int,
@@ -303,9 +303,33 @@ class PipeInferenceInstrSet:
             "batch_output_x", micro_batch_id, x
         )  # Used by send_activation
 
+    def _exec_forward_pass(
+        module: ReaLModel,
+        tensor_buffer: TensorBuffer,
+        stage_id: int,
+        micro_batch_id: int,
+        step_id: int,
+    ):
+        PipeInferenceInstrSet._fwd_impl(
+            module, tensor_buffer, stage_id, micro_batch_id, step_id
+        )
+
+        x = tensor_buffer.get("batch_output_x", micro_batch_id, remove=False)
         if constants.is_last_pipe_stage():
             logits = x.pp_output
-            tensor_buffer.put("logits", micro_batch_id, logits)
+            post_hook = tensor_buffer.get(
+                "post_hook", micro_batch_id, raise_error=False
+            )
+            if constants.sequence_parallel():
+                pad_size = tensor_buffer.get("pad_size", micro_batch_id, remove=True)
+                logits = logits[:-pad_size] if pad_size > 0 else logits
+            if not post_hook:
+                tensor_buffer.put("output", micro_batch_id, logits)
+            else:
+                tensor_buffer.remove("batch_output_x", micro_batch_id)
+                input_ = tensor_buffer.get("input_cache", micro_batch_id)
+                output = post_hook(logits, input_)
+                tensor_buffer.put("output", micro_batch_id, output)
 
     def _exec_send_activations(
         module: ReaLModel,
@@ -632,7 +656,7 @@ class PipeTrainForwardCommInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
-        PipeInferenceInstrSet._exec_forward_pass(
+        PipeInferenceInstrSet._fwd_impl(
             module, tensor_buffer, stage_id, micro_batch_id, step_id
         )
 
@@ -769,10 +793,13 @@ class PipelineRunner:
     def train(self, *args, **kwargs):
         return self.module.train(*args, **kwargs)
 
+    @torch.no_grad()
     def forward(
         self,
         input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
+        post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None = None,
+        aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ):
         """Run one forward step over a batch of tokens and return the
         logits."""
@@ -781,6 +808,9 @@ class PipelineRunner:
             num_micro_batches = self.default_inf_mbs
 
         tensor_buffer = TensorBuffer()
+        if post_hook is not None:
+            for i in range(num_micro_batches):
+                tensor_buffer.put("post_hook", i, post_hook)
 
         _split_and_prefill_pipe_input(
             module=self.module,
@@ -788,6 +818,7 @@ class PipelineRunner:
             num_micro_batches=num_micro_batches,
             input_=input_,
             store_kv_cache=False,
+            store_input_cache=post_hook is not None,
         )
 
         sched = schedule.InferenceSchedule(
@@ -802,18 +833,15 @@ class PipelineRunner:
             pipe_schedule=sched,
         )
 
-        logits = None
+        agg_output = None
         if constants.is_last_pipe_stage():
-            logits_list = []
+            output_list = []
             for i in range(num_micro_batches):
-                logits = tensor_buffer.get("logits", i, remove=True)
-                if constants.sequence_parallel():
-                    pad_size = tensor_buffer.get("pad_size", i, remove=True)
-                    logits = logits[:-pad_size] if pad_size > 0 else logits
-                logits_list.append(logits)
-            logits = torch.cat(logits_list, dim=0)
+                output = tensor_buffer.get("output", i, remove=True)
+                output_list.append(output)
+            agg_output = aggregate_fn(output_list)
 
-        return logits
+        return agg_output
 
     @torch.no_grad()
     def generate(
@@ -914,7 +942,8 @@ class PipelineRunner:
             ]
 
         gen_tokens, log_probs, logits_mask = _gather_minibatch_gen_outputs(
-            *list(zip(*generate_output))
+            *list(zip(*generate_output)),
+            pad_token_id=tokenizer.pad_token_id,
         )
 
         return gen_tokens, log_probs, logits_mask, None, None
@@ -948,7 +977,7 @@ class PipelineRunner:
             num_micro_batches=num_micro_batches,
             input_=input_,
             store_kv_cache=False,
-            loss_fn=loss_fn,
+            store_input_cache=True,
         )
 
         sched = schedule.TrainSchedule(
@@ -972,50 +1001,4 @@ class PipelineRunner:
             for key in stats[0].keys():
                 agg_stats[key] = torch.stack([stat[key] for stat in stats]).sum()
 
-        return agg_stats
-
-    @torch.no_grad()
-    def eval_batch(
-        self,
-        input_: SequenceSample,
-        loss_fn: Callable,
-        num_micro_batches: Optional[int] = None,
-    ):
-        if num_micro_batches is None:
-            num_micro_batches = self.default_train_mbs
-
-        tensor_buffer = TensorBuffer()
-        for i in range(num_micro_batches):
-            tensor_buffer.put("num_micro_batches", i, num_micro_batches)
-            tensor_buffer.put("loss_fn", i, loss_fn)
-
-        _split_and_prefill_pipe_input(
-            module=self.module,
-            tensor_buffer=tensor_buffer,
-            num_micro_batches=num_micro_batches,
-            input_=input_,
-            store_kv_cache=False,
-            loss_fn=loss_fn,
-        )
-
-        sched = schedule.InferenceSchedule(
-            micro_batches=num_micro_batches,
-            stages=constants.pipe_parallel_world_size(),
-            stage_id=constants.pipe_parallel_rank(),
-        )
-        _exec_pipe_schedule(
-            module=self.module,
-            tensor_buffer=tensor_buffer,
-            instr_map=PipeTrainForwardCommInstrSet.INSTRUCTION_MAP,
-            pipe_schedule=sched,
-        )
-
-        agg_stats = None
-        if constants.is_last_pipe_stage():
-            stats = []
-            for mbid in range(num_micro_batches):
-                stats.append(tensor_buffer.get("stats", mbid))
-            agg_stats = dict()
-            for key in stats[0].keys():
-                agg_stats[key] = torch.stack([stat[key] for stat in stats]).sum()
         return agg_stats

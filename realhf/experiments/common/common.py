@@ -472,7 +472,9 @@ class CommonExperimentConfig(Experiment):
         rpc_allocs = self._get_rpc_allocations()
 
         resolve_replica_ids(rpc_allocs)
-        resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
+        resolve_rpc_hooks(
+            rpc_allocs, self.models
+        )  # inplace modify MFCDefs in rpc allocations
 
         pprint.pprint(rpc_allocs)
 

@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Optional
 
 import colorama
 import torch
@@ -15,6 +16,7 @@ from realhf.api.core.system_api import ExperimentConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.apps.quickstart import main
 from realhf.base import logging
+from realhf.base.datapack import flat2d
 from realhf.experiments.common.ppo_exp import PPOConfig
 
 logger = logging.getLogger("Sentiment PPO example")
@@ -34,11 +36,14 @@ class SentimentScoringInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs: Optional[int] = None,
     ) -> SequenceSample:
         device = model.device
         packed_input_ids: torch.Tensor = input_.data["packed_input_ids"]
-        seqlens_cpu = torch.cat(input_.seqlens["packed_input_ids"])
+        seqlens_cpu = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         max_seqlen = int(max(seqlens_cpu))
         bs = input_.bs
 

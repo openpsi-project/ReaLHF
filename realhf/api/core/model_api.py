@@ -303,7 +303,7 @@ class PipelinableEngine(abc.ABC):
     and ``realhf/impl/model/backend/megatron.py``
     for concrete implementations.
     """
-    @abc.abstractmethod
+
     def train_batch(
         self,
         input_: SequenceSample,
@@ -313,24 +313,33 @@ class PipelinableEngine(abc.ABC):
     ):
         raise NotImplementedError()
 
-    @abc.abstractmethod
+    @torch.no_grad()
     def eval_batch(
         self,
         input_: SequenceSample,
-        loss_fn: Callable,
+        loss_fn: Callable[[torch.Tensor, SequenceSample], Tuple[torch.Tensor, Dict]],
         num_micro_batches: Optional[int] = None,
     ):
-        raise NotImplementedError()
+        def agg(xs: List[Tuple[torch.Tensor, Dict]]):
+            losses, stats = zip(*xs)
+            return sum(losses), {k: sum(s[k] for s in stats) for k in stats[0].keys()}
 
-    @abc.abstractmethod
+        return self.forward(
+            input_,
+            post_hook=loss_fn,
+            aggregate_fn=agg,
+            num_micro_batches=num_micro_batches,
+        )
+
     def forward(
         self,
         input_: SequenceSample,
         num_micro_batches: Optional[int] = None,
+        post_hook: Callable[[torch.Tensor, SequenceSample], Any] | None = None,
+        aggregate_fn: Callable[[List[Any]], Any] = torch.cat,
     ):
         raise NotImplementedError()
 
-    @abc.abstractmethod
     def generate(
         self,
         input_: SequenceSample,
@@ -417,6 +426,9 @@ class ModelBackend(abc.ABC):
         model.ft_spec = spec
         return self._initialize(model, spec)
 
+    def destroy(self, model: Model):
+        pass
+
 
 class NullBackend(ModelBackend):
 
@@ -479,6 +491,31 @@ class ModelInterface(abc.ABC):
         self, model: Model, data: SequenceSample, n_mbs: Optional[int] = None
     ) -> Dict:
         raise NotImplementedError()
+
+    # Mock methods for creating data and profiling an individual MFC.
+    def _mock_generate(self, model: Model, data: SequenceSample):
+        return data
+
+    def _mock_inference(self, model: Model, data: SequenceSample):
+        return data
+
+    def _mock_train_step(self, model: Model, data: SequenceSample):
+        return data
+
+    def mock(
+        self,
+        type_: str,
+        model: Model,
+        data: SequenceSample,
+    ) -> SequenceSample:
+        if type_ == "generate":
+            return self._mock_generate(model, data)
+        elif type_ == "inference":
+            return self._mock_inference(model, data)
+        elif type_ == "train_step":
+            return self._mock_train_step(model, data)
+        else:
+            raise ValueError(f"Unsupported interface type {type_}")
 
 
 ALL_MODEL_CLASSES = {}

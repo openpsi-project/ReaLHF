@@ -55,12 +55,10 @@ def set_cuda_device(device):
 
 
 def reveal_ddp_identity(expr_name, trial_name, worker_index):
-    master_group_name = names.trainer_ddp_peer(
+    master_group_name = names.distributed_peer(
         expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME
     )
     name_resolve.add_subentry(master_group_name, str(worker_index), keepalive_ttl=30)
-    # local_peer_name = names.trainer_ddp_local_peer(expr_name, trial_name, socket.gethostname(), peer_name)
-    # name_resolve.add_subentry(local_peer_name, peer_index, keepalive_ttl=30)
 
 
 def isolate_cuda_device(
@@ -93,7 +91,7 @@ def isolate_cuda_device(
 
     name_resolve_identifier = f"__type_{worker_type}"
     name_resolve.add_subentry(
-        names.trainer_ddp_local_peer(
+        names.distributed_local_peer(
             experiment_name,
             trial_name,
             socket.gethostname(),
@@ -103,7 +101,7 @@ def isolate_cuda_device(
         keepalive_ttl=60,
     )
     name_resolve.add_subentry(
-        names.trainer_ddp_peer(experiment_name, trial_name, name_resolve_identifier),
+        names.distributed_peer(experiment_name, trial_name, name_resolve_identifier),
         rank,
         keepalive_ttl=30,
     )
@@ -113,7 +111,7 @@ def isolate_cuda_device(
     while (
         len(
             name_resolve.get_subtree(
-                names.trainer_ddp_peer(
+                names.distributed_peer(
                     experiment_name, trial_name, name_resolve_identifier
                 )
             )
@@ -122,7 +120,7 @@ def isolate_cuda_device(
     ):
         time.sleep(0.1)
     # logger.info(f"Rank {rank} discovers all peers, resolving local rank...")
-    local_peer_name = names.trainer_ddp_local_peer(
+    local_peer_name = names.distributed_local_peer(
         experiment_name,
         trial_name,
         socket.gethostname(),

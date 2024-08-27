@@ -110,9 +110,8 @@ def _ppo_actor_loss_from_model_outputs(
 class PPOActorInterface(model_api.ModelInterface):
     n_minibatches: int = 4
 
-    generation_config: model_api.GenerationHyperparameters = dataclasses.field(
-        default_factory=model_api.GenerationHyperparameters
-    )
+    # Use dict here to allow argument passing through commandline.
+    generation_config: Dict = dataclasses.field(default_factory=dict)
 
     kl_ctl: float = 0.1
 
@@ -165,6 +164,8 @@ class PPOActorInterface(model_api.ModelInterface):
                 raise ValueError(f"Unknown value_norm_type {self.value_norm_type}")
         self.kl_ctl = None
 
+        self.gconfig = model_api.GenerationHyperparameters(**self.generation_config)
+
     def save(self, model: model_api.Model, save_dir: str):
         if not self.enable_save:
             return
@@ -198,13 +199,13 @@ class PPOActorInterface(model_api.ModelInterface):
         res = module.generate(
             input_=x,
             tokenizer=model.tokenizer,
-            gconfig=self.generation_config,
+            gconfig=self.gconfig,
             num_micro_batches=n_mbs,
         )
         if res is None:
             return None
 
-        gen_tokens, logprobs, logits_mask, *_ = res
+        gen_tokens, logprobs, logits_mask = res
 
         pad_token_id = model.tokenizer.pad_token_id
         eos_token_id = model.tokenizer.eos_token_id
@@ -244,7 +245,7 @@ class PPOActorInterface(model_api.ModelInterface):
                 packed_logprobs=packed_logprobs,
                 packed_logits_mask=(
                     packed_logits_mask.bool()
-                    if not self.generation_config.force_no_logits_mask
+                    if not self.gconfig.force_no_logits_mask
                     and packed_logits_mask is not None
                     else None
                 ),
@@ -263,21 +264,33 @@ class PPOActorInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        logits = module.forward(input_=input_, num_micro_batches=n_mbs)
-        if logits is None:
+        # This post_hook will gather log probabilities in mini-batches,
+        # reducing peak memory usage.
+        def calc_logprobs(logits, input_):
+            logits /= self.gconfig.temperature
+            if (
+                "packed_logits_mask" in input_.data
+                and input_.data["packed_logits_mask"] is not None
+            ):
+                apply_logits_mask(logits, input_.data["packed_logits_mask"])
+
+            input_lens = torch.tensor(input_.seqlens["packed_input_ids"]).view(-1)
+            cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
+
+            logprobs = gather_packed_shifted_log_probs(
+                logits, cu_seqlens, input_.data["packed_input_ids"]
+            )
+            return logprobs
+
+        logprobs = module.forward(
+            input_=input_,
+            num_micro_batches=n_mbs,
+            post_hook=calc_logprobs,
+        )
+
+        if logprobs is None:
             return None
 
-        logits /= self.generation_config.temperature
-        if (
-            "packed_logits_mask" in input_.data
-            and input_.data["packed_logits_mask"] is not None
-        ):
-            apply_logits_mask(logits, input_.data["packed_logits_mask"])
-        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
-        cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-        logprobs = gather_packed_shifted_log_probs(
-            logits, cu_seqlens, input_.data["packed_input_ids"]
-        )
         res = SequenceSample.from_default(
             ids=input_.ids,
             seqlens=input_.seqlens["packed_input_ids"],
@@ -465,6 +478,86 @@ class PPOActorInterface(model_api.ModelInterface):
             train_stats = dict(**train_stats, **global_stats)
 
         return dict(train_stats)
+
+    # Mock methods for profiling only.
+    def _mock_inference(
+        self,
+        model: model_api.Model,
+        dataset_input: SequenceSample,
+    ) -> SequenceSample:
+        prompt_lens = flat2d(dataset_input.seqlens["packed_prompts"])
+        seqlens = [x + self.gconfig.max_new_tokens for x in prompt_lens]
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        mconfig = module.config
+        packed_input_ids = torch.randint(
+            0,
+            mconfig.vocab_size,
+            (sum(seqlens),),
+            dtype=torch.long,
+            device=model.device,
+        )
+
+        return SequenceSample.from_default(
+            seqlens=seqlens,
+            ids=dataset_input.ids,
+            data=dict(packed_input_ids=packed_input_ids),
+        )
+
+    # Mock methods for profiling only.
+    def _mock_train_step(
+        self,
+        model: model_api.Model,
+        dataset_input: SequenceSample,
+    ) -> Dict:
+        prompt_lens = flat2d(dataset_input.seqlens["packed_prompts"])
+        bs = len(prompt_lens)
+        seqlens = [x + self.gconfig.max_new_tokens for x in prompt_lens]
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        mconfig = module.config
+        mdtype = module.dtype
+        short1_seqlens = [x - 1 for x in seqlens]
+
+        packed_logprobs = torch.randn(
+            (sum(short1_seqlens),), dtype=mdtype, device=model.device
+        )
+        packed_ref_logprobs = torch.randn_like(packed_logprobs)
+        prompt_mask = torch.zeros(
+            (sum(seqlens),), dtype=torch.bool, device=model.device
+        )
+        packed_input_ids = torch.randint(
+            0,
+            mconfig.vocab_size,
+            (sum(seqlens),),
+            dtype=torch.long,
+            device=model.device,
+        )
+        rewards = torch.randn(bs, dtype=mdtype, device=model.device)
+        seq_no_eos_mask = torch.randint(
+            0, 2, (bs,), dtype=torch.bool, device=model.device
+        )
+        values = torch.randn(
+            (sum(seqlens),),
+            dtype=mdtype,
+            device=model.device,
+        )
+
+        return SequenceSample.from_default(
+            seqlens=seqlens,
+            ids=dataset_input.ids,
+            data=dict(
+                packed_logprobs=packed_logprobs,
+                packed_ref_logprobs=packed_ref_logprobs,
+                prompt_mask=prompt_mask,
+                packed_input_ids=packed_input_ids,
+                rewards=rewards,
+                seq_no_eos_mask=seq_no_eos_mask,
+                values=values,
+            ),
+        )
 
 
 def _ppo_critic_loss_from_model_outputs(
@@ -759,6 +852,84 @@ class PPOCriticInterface(model_api.ModelInterface):
             )
 
         return dict(train_stats)
+
+    # Mock methods for profiling only.
+    def _mock_inference(
+        self,
+        model: model_api.Model,
+        dataset_input: SequenceSample,
+    ) -> SequenceSample:
+        seqlens = flat2d(dataset_input.seqlens["packed_prompts"])
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        mconfig = module.config
+        packed_input_ids = torch.randint(
+            0,
+            mconfig.vocab_size,
+            (sum(seqlens),),
+            dtype=torch.long,
+            device=model.device,
+        )
+
+        return SequenceSample.from_default(
+            seqlens=seqlens,
+            ids=dataset_input.ids,
+            data=dict(packed_input_ids=packed_input_ids),
+        )
+
+    # Mock methods for profiling only.
+    def _mock_train_step(
+        self,
+        model: model_api.Model,
+        dataset_input: SequenceSample,
+    ) -> Dict:
+        seqlens = flat2d(dataset_input.seqlens["packed_prompts"])
+        bs = len(seqlens)
+        module = model.module
+        if not isinstance(module, ReaLModel):
+            module = module.module
+        mconfig = module.config
+        mdtype = module.dtype
+        short1_seqlens = [x - 1 for x in seqlens]
+
+        packed_logprobs = torch.randn(
+            (sum(short1_seqlens),), dtype=mdtype, device=model.device
+        )
+        packed_ref_logprobs = torch.randn_like(packed_logprobs)
+        prompt_mask = torch.zeros(
+            (sum(seqlens),), dtype=torch.bool, device=model.device
+        )
+        packed_input_ids = torch.randint(
+            0,
+            mconfig.vocab_size,
+            (sum(seqlens),),
+            dtype=torch.long,
+            device=model.device,
+        )
+        rewards = torch.randn(bs, dtype=mdtype, device=model.device)
+        seq_no_eos_mask = torch.randint(
+            0, 2, (bs,), dtype=torch.bool, device=model.device
+        )
+        values = torch.randn(
+            (sum(seqlens),),
+            dtype=mdtype,
+            device=model.device,
+        )
+
+        return SequenceSample.from_default(
+            seqlens=seqlens,
+            ids=dataset_input.ids,
+            data=dict(
+                packed_logprobs=packed_logprobs,
+                packed_ref_logprobs=packed_ref_logprobs,
+                prompt_mask=prompt_mask,
+                packed_input_ids=packed_input_ids,
+                rewards=rewards,
+                seq_no_eos_mask=seq_no_eos_mask,
+                values=values,
+            ),
+        )
 
 
 model_api.register_interface("ppo_actor", PPOActorInterface)

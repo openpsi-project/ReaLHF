@@ -28,13 +28,20 @@ import realhf.system.request_reply_stream as request_reply_stream
 import realhf.system.worker_base as worker_base
 from realhf.api.core.config import ModelName
 from realhf.api.core.model_api import ReaLModelConfig
-from realhf.base import datapack, logging, timeutil, topology
+from realhf.base import (
+    constants,
+    datapack,
+    logging,
+    name_resolve,
+    names,
+    timeutil,
+    topology,
+)
 from realhf.base.asyncio_utils import (
     raise_asyncio_exception,
     setup_run_until_complete,
     teardown_run_util_complete,
 )
-from realhf.base.constants import MODEL_SAVE_ROOT
 from realhf.base.monitor import (
     caculuate_llama_forward_flops,
     calculate_llama_gen_flops,
@@ -44,25 +51,6 @@ from realhf.system.buffer import AsyncIOSequenceBuffer
 
 logger = logging.getLogger("master worker", "system")
 blogger = logging.getLogger("benchmark")
-
-
-class ExperimentComplete(Exception):
-
-    def __init__(self, message):
-        disclaimer = (
-            colorama.Fore.GREEN
-            + "\033[1m"
-            + "<This is not an error. It is just a way to stop the experiment.> "
-        )
-        super().__init__(
-            disclaimer
-            + colorama.Style.RESET_ALL
-            + colorama.Fore.YELLOW
-            + colorama.Style.BRIGHT
-            + "\033[1m"
-            + message
-            + colorama.Style.RESET_ALL
-        )
 
 
 def request_all(
@@ -126,7 +114,7 @@ async def _awaitable_response(
             continue
 
 
-async def gather_all_replies(
+async def async_gather_replies(
     stream: request_reply_stream.NameResolvingRequestClient,
     request_ids: List[str],
     verbose: bool = True,
@@ -143,23 +131,38 @@ async def gather_all_replies(
     )
     if verbose:
         blogger.debug(
-            f"master worker #gather_all_replies# *end* time ${time.time_ns()}$"
+            f"master worker #async_gather_replies# *end* time ${time.time_ns()}$"
         )
     return responses
 
 
-async def group_rpc_blocked(
+async def async_group_rpc(
     stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[Union[config_pkg.ModelShardID, str]],
     handle_type: str,
     datas: List,
     verbose: bool = True,
 ) -> List:
-    payloads = await gather_all_replies(
+    payloads = await async_gather_replies(
         stream,
         request_all(stream, handlers, handle_type, datas, verbose=verbose),
     )
     return [p.data for p in payloads]
+
+
+def group_rpc_blocked(
+    stream: request_reply_stream.NameResolvingRequestClient,
+    handlers: List[Union[config_pkg.ModelShardID, str]],
+    handle_type: str,
+    datas: List,
+    verbose: bool = True,
+) -> List:
+    request_ids = request_all(stream, handlers, handle_type, datas, verbose=verbose)
+    res = []
+    for req_id in request_ids:
+        r = stream.poll(pattern=create_exact_match_pattern([req_id]), block=True)
+        res.append(r)
+    return res
 
 
 def _request_parameter_sync(
@@ -551,7 +554,7 @@ async def model_rpc_request_func(
             assert sample.bs % dp_size == 0
             min_n_seqs_per_dp = sample.bs // dp_size
         else:
-            min_n_seqs_per_dp = 1
+            min_n_seqs_per_dp = rpc.n_mbs if rpc.n_mbs is not None else 1
         split_spec = sample.get_split_spec(dp_size, min_size=min_n_seqs_per_dp)
         partitions = split_spec.partitions
         target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
@@ -705,7 +708,7 @@ async def load_data_func(
         while not is_final_batch:
             # Send request to model workers to get the specification of data.
             # Data itself is not transferred to the master worker.
-            data_batches: List[data_api.DataBatchMeta] = await group_rpc_blocked(
+            data_batches: List[data_api.DataBatchMeta] = await async_group_rpc(
                 stream,
                 handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
                 handle_type="fetch",
@@ -807,7 +810,7 @@ async def model_eval_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
-        eval_stats = await group_rpc_blocked(
+        eval_stats = await async_group_rpc(
             stream, handlers, "evaluate", [None for _ in handlers]
         )
         eval_stats = _gather_stat(list(filter(lambda x: bool(x), eval_stats)))
@@ -833,12 +836,13 @@ async def model_save_thread_func(
             )
             for s in handlers
         ]
-        await group_rpc_blocked(stream, handlers, "save", model_save_dirs)
+        await async_group_rpc(stream, handlers, "save", model_save_dirs)
         logger.info(f"Save models at epoch {epoch} step {epoch_step}.")
 
 
 class MasterWorker(worker_base.Worker):
-    os.makedirs(MODEL_SAVE_ROOT, exist_ok=True)
+    os.makedirs(constants.MODEL_SAVE_ROOT, exist_ok=True)
+    global_exp_tik = time.perf_counter()
 
     def _configure(self, config: config_pkg.MasterWorker):
         self.config = config
@@ -883,7 +887,7 @@ class MasterWorker(worker_base.Worker):
         )
 
         self.MODEL_SAVE_ROOT = os.path.join(
-            MODEL_SAVE_ROOT,
+            constants.MODEL_SAVE_ROOT,
             config.worker_info.experiment_name,
             config.worker_info.trial_name,
         )
@@ -918,7 +922,6 @@ class MasterWorker(worker_base.Worker):
 
         # for benchmark
         self.e2e_time_history = []
-        self.level_time_history = defaultdict(list)
         self.__benchmark_steps = config.exp_ctrl.benchmark_steps
 
         return config.worker_info
@@ -979,12 +982,23 @@ class MasterWorker(worker_base.Worker):
         # Build some data required for subsequent model function calls.
         self.__all_model_handlers: List[config_pkg.ModelShardID] = []
         self.__dp0_model_handlers: List[config_pkg.ModelShardID] = []
+        self.__trainable_model_handlers: List[config_pkg.ModelShardID] = []
         for model_name, topo in self.config.model_topos.items():
             num_dp = topo.get_dim("data")
             self.__all_model_handlers += [
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in range(topo.world_size())
             ]
+
+            if any(
+                rpc.model_name == model_name
+                and rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
+                for rpc in self.__model_rpcs
+            ):
+                self.__trainable_model_handlers += [
+                    config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
+                    for j in range(topo.world_size())
+                ]
             self.__dp0_model_handlers += [
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in topo.filter_match(data=0)
@@ -1118,15 +1132,12 @@ class MasterWorker(worker_base.Worker):
                     to_model_config=self.__model_configs[model_name],
                 )
 
-            _task = event_loop.create_task(
-                group_rpc_blocked(
-                    self.__stream,
-                    handlers=_handlers,
-                    handle_type="initialize",
-                    datas=model_ft_specs,
-                )
+            group_rpc_blocked(
+                self.__stream,
+                handlers=_handlers,
+                handle_type="initialize",
+                datas=model_ft_specs,
             )
-            event_loop.run_until_complete(asyncio.gather(_task))[0]
 
             # Reallocate parameters back.
             if model_name.role in _initialized_roles and model_name in _param_recevers:
@@ -1230,7 +1241,7 @@ class MasterWorker(worker_base.Worker):
         save_task = event_loop.create_task(
             model_save_thread_func(
                 stream=self.__stream,
-                handlers=self.__all_model_handlers,
+                handlers=self.__trainable_model_handlers,
                 model_save_root=self.MODEL_SAVE_ROOT,
                 save_queue=self.__rpc_ctrl.save_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
@@ -1240,6 +1251,7 @@ class MasterWorker(worker_base.Worker):
 
         # Set up a run context of EventLoop.run_util_complete, baiscally copy-paste from cpython.
         # With this context, we can call the non-block EventLoop._run_once (similar to worker._poll).
+        self.__asyncio_tasks: List[asyncio.Task] = coroutine_tasks
         self.__asyncio_ctx = setup_run_until_complete(
             event_loop, asyncio.gather(*coroutine_tasks)
         )
@@ -1288,6 +1300,7 @@ class MasterWorker(worker_base.Worker):
                 raise_asyncio_exception(self.__asyncio_ctx)
         logger.info("Execution finished!")
 
+        # Check whether we have entered a new epoch.
         try:
             self.__fetch_master_ctl.get_nowait()
             is_new_epoch = True
@@ -1301,6 +1314,7 @@ class MasterWorker(worker_base.Worker):
         except asyncio.QueueEmpty:
             pass
 
+        # Check whether we should evaluate or save models.
         should_eval = self.__eval_ctl.check(epochs=int(is_new_epoch), steps=1)
         should_save = self.__save_ctl.check(epochs=int(is_new_epoch), steps=1)
 
@@ -1313,6 +1327,7 @@ class MasterWorker(worker_base.Worker):
                 self._epoch_step = 0
                 self.__rpc_ctrl.used_hash_vals_this_epoch = set()
 
+        # Updata counters.
         self._epoch_step += 1
         self._global_step += 1
 
@@ -1331,15 +1346,39 @@ class MasterWorker(worker_base.Worker):
             global_step=self._global_step,
         )
 
-        if is_new_epoch:
-            if self._epoch > self.__total_train_epochs:
-                self.experiment_complete_exit(f"Training completes! Yeah!!!")
-
-        total_time_consumption = time.perf_counter() - self._train_start_time
-        time_per_step = total_time_consumption / (self._global_step + 1)
+        # Logging.
+        time_since_configure = time.perf_counter() - self._train_start_time
+        time_per_step = time_since_configure / (self._global_step + 1)
         e2e_time = time.perf_counter() - execution_start
         self.e2e_time_history.append(e2e_time)
 
+        self._log_training_stats(e2e_time, time_since_configure)
+
+        # Pause the worker if experiment or system-wise benchmark completes.
+        if (
+            self.__benchmark_steps is not None
+            and self._global_step >= self.__benchmark_steps
+        ) or (is_new_epoch and self._epoch > self.__total_train_epochs):
+            if should_eval or should_save:
+                logger.info(
+                    f"Waiting for all save/eval requests at the last step"
+                    f" for {self.config.exp_ctrl.save_eval_timeout} secs..."
+                )
+                time.sleep(self.config.exp_ctrl.save_eval_timeout)
+            if self.__benchmark_steps is not None:
+                logger.info(
+                    f"Finished benchmark {self.__benchmark_steps}. "
+                    f"Time consumption of this setup: {time_since_configure:.3f}"
+                )
+                logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
+            return self.experiment_complete_exit()
+
+        # Send clear cache requests to model workers.
+        self._clear_gpu_cache()
+
+        return worker_base.PollResult(sample_count=1, batch_count=1)
+
+    def _log_training_stats(self, e2e_time: float, time_since_configure: float):
         # calculate flops
         #########################################
         if not all(
@@ -1398,7 +1437,6 @@ class MasterWorker(worker_base.Worker):
         self.__rpc_ctrl.data_amount.clear()
         #########################################
 
-        # Logging.
         s = f"Epoch {self._epoch}/{self.config.exp_ctrl.total_train_epochs} "
         if self.__cur_steps_per_epoch is not None:
             s += f"step {self._epoch_step}/{self.__cur_steps_per_epoch} "
@@ -1408,7 +1446,7 @@ class MasterWorker(worker_base.Worker):
         if self.__cur_avg_tokens_per_batch is not None:
             s += f"Average #tokens per batch is {self.__cur_avg_tokens_per_batch:.0f}. "
         s += f"#End to end# execution time: *{e2e_time:.3f}*s. "
-        s += f"Total time consumption: {total_time_consumption:.3f}s. "
+        s += f"Total time consumption: {time_since_configure:.3f}s. "
         if self.__cur_steps_per_epoch is not None and len(self.e2e_time_history) > 2:
             remaining_steps = self.__cur_steps_per_epoch - self._epoch_step
             remaining_epochs = self.__total_train_epochs - self._epoch
@@ -1419,21 +1457,11 @@ class MasterWorker(worker_base.Worker):
         if flops is not None:
             s += f"TFLOP/s per GPU: {tflops_per_gpu:.2f}, total TFLOP/s: {tflops:.2f}."
         logger.info(s)
+        logger.info(
+            f"Time taken so far across all configurations: {time.perf_counter() - self.global_exp_tik:.2f}s"
+        )
 
-        if (
-            self.__benchmark_steps is not None
-            and self._global_step >= self.__benchmark_steps
-        ):
-            logger.info(
-                f"Finished benchmark {self.__benchmark_steps}. Total time consumption {total_time_consumption:.3f}"
-            )
-            logger.info(f"avg #e2e# time *{np.mean(self.e2e_time_history):.3f}*")
-            for i, level_time_history in self.level_time_history.items():
-                logger.info(
-                    f"avg #level{i+1}# time *{np.mean(level_time_history):.3f}*"
-                )
-            self.experiment_complete_exit(f"Benchmark completes! Yeah!!!")
-
+    def _clear_gpu_cache(self):
         if self.__clear_data_cache_reqids is not None:
             [
                 self.__stream.poll(
@@ -1449,24 +1477,47 @@ class MasterWorker(worker_base.Worker):
         )
         self.__rpc_ctrl.ids_to_clear.clear()
 
-        return worker_base.PollResult(sample_count=1, batch_count=1)
-
-    def experiment_complete_exit(self, msg: str):
+    def experiment_complete_exit(self):
         self.__rpc_ctrl.stop.set()
+        for task in self.__asyncio_tasks:
+            task.cancel()
+        self.__asyncio_ctx.future.set_result(None)
+        # NOTE: stopping the loop immediately after cancelling tasks may
+        # raise warnings sometimes, but it doesn't matter.
         self.__asyncio_ctx.loop.stop()
-        try:
-            teardown_run_util_complete(self.__asyncio_ctx)
-        except RuntimeError as e:
-            logger.info(
-                colorama.Style.RESET_ALL
-                + colorama.Fore.YELLOW
-                + colorama.Style.BRIGHT
-                + "\033[1m"
-                + msg
-                + colorama.Style.RESET_ALL
+        teardown_run_util_complete(self.__asyncio_ctx)
+        logger.info(
+            colorama.Style.RESET_ALL
+            + colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + "Experiment Completes! Yeah!!!!!!!!"
+            + colorama.Style.RESET_ALL
+        )
+
+        # Send requests to pause model workers.
+        # Model workers will not respond to this message.
+        request_all(
+            self.__stream,
+            handlers=self.__all_model_handlers,
+            handle_type="reset",
+            datas=[None for _ in self.__all_model_handlers],
+        )
+        self.__stream.close()
+        constants.reset_run()
+        # Reset names used for distributed training.
+        # The next round of training will set up a new distributed environment.
+        name_resolve.clear_subtree(
+            names.distributed_root(constants.experiment_name(), constants.trial_name())
+        )
+        name_resolve.clear_subtree(
+            names.request_reply_stream_root(
+                constants.experiment_name(), constants.trial_name()
             )
-            self.exit()
-            # raise ExperimentComplete(msg) from e
+        )
+        self.__initialized = False
+        self.pause()
+        return worker_base.PollResult(0, 0)
 
     def __recover_save(self):
         # save step info for recover
