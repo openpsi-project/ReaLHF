@@ -13,6 +13,7 @@ import realhf.base.constants as constants
 import realhf.base.logging as logging
 import realhf.impl.model.utils.ppo_functional as ppo_functional
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_generate import concat_prompt_to_generation_output
 from realhf.impl.model.utils.functional import (
@@ -38,7 +39,8 @@ def _ppo_actor_loss_from_model_outputs(
     packed_input_ids = input_.data["packed_input_ids"]
     cu_seqlens = (
         torch.nn.functional.pad(
-            torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
+            torch.tensor(flat2d(input_.seqlens["packed_input_ids"])).cumsum(0),
+            (1, 0),
         )
         .int()
         .cuda()
@@ -130,7 +132,6 @@ class PPOActorInterface(model_api.ModelInterface):
     adaptive_kl_horizon: Optional[float] = 10000
 
     enable_save: bool = True
-    force_no_logits_mask: bool = False
 
     value_norm: bool = False
     value_norm_type: str = dataclasses.field(
@@ -177,7 +178,10 @@ class PPOActorInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def generate(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
 
@@ -195,6 +199,7 @@ class PPOActorInterface(model_api.ModelInterface):
             input_=x,
             tokenizer=model.tokenizer,
             gconfig=self.generation_config,
+            num_micro_batches=n_mbs,
         )
         if res is None:
             return None
@@ -220,17 +225,16 @@ class PPOActorInterface(model_api.ModelInterface):
             prompt_mask,
         ) = concat_prompt_to_generation_output(
             packed_prompts=input_.data["packed_prompts"],
-            prompt_lengths=torch.cat(input_.seqlens["packed_prompts"]).to(model.device),
+            prompt_lengths=torch.tensor(flat2d(input_.seqlens["packed_prompts"])).to(
+                model.device
+            ),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
             logits_mask=logits_mask,
             gen_lengths=gen_lengths,
         )
 
-        seqlens = [
-            torch.tensor([s], dtype=torch.int32)
-            for s in seq_lengths.cpu().numpy().tolist()
-        ]
+        seqlens = [[s] for s in seq_lengths.cpu().numpy().tolist()]
         res = SequenceSample.from_default(
             ids=input_.ids,
             seqlens=seqlens,
@@ -240,7 +244,8 @@ class PPOActorInterface(model_api.ModelInterface):
                 packed_logprobs=packed_logprobs,
                 packed_logits_mask=(
                     packed_logits_mask.bool()
-                    if not self.force_no_logits_mask and packed_logits_mask is not None
+                    if not self.generation_config.force_no_logits_mask
+                    and packed_logits_mask is not None
                     else None
                 ),
                 prompt_mask=prompt_mask,
@@ -250,12 +255,15 @@ class PPOActorInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
 
-        logits = module.forward(input_=input_)
+        logits = module.forward(input_=input_, num_micro_batches=n_mbs)
         if logits is None:
             return None
 
@@ -265,7 +273,7 @@ class PPOActorInterface(model_api.ModelInterface):
             and input_.data["packed_logits_mask"] is not None
         ):
             apply_logits_mask(logits, input_.data["packed_logits_mask"])
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         logprobs = gather_packed_shifted_log_probs(
             logits, cu_seqlens, input_.data["packed_input_ids"]
@@ -277,7 +285,9 @@ class PPOActorInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
         module.eval()
@@ -285,7 +295,9 @@ class PPOActorInterface(model_api.ModelInterface):
         old_logp: torch.FloatTensor = input_.data["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = input_.data["packed_ref_logprobs"].float()
         prompt_mask = input_.data["prompt_mask"]
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+        input_lens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         reward_score = input_.data["rewards"].float()
         values = input_.data["values"].float()
@@ -382,6 +394,7 @@ class PPOActorInterface(model_api.ModelInterface):
         _kl_rewards = (kl_rewards * loss_mask).sum()
         prompt_len = prompt_mask.count_nonzero().float()
         seq_len = input_lens.float().sum()
+
         dist.all_reduce(_n_seqs, group=constants.data_parallel_group())
         dist.all_reduce(task_reward, group=constants.data_parallel_group())
         dist.all_reduce(_advantages, group=constants.data_parallel_group())
@@ -389,6 +402,7 @@ class PPOActorInterface(model_api.ModelInterface):
         dist.all_reduce(seq_len, group=constants.data_parallel_group())
         dist.all_reduce(_n_tokens, group=constants.data_parallel_group())
         dist.all_reduce(_kl_rewards, group=constants.data_parallel_group())
+
         global_stats = dict(
             task_reward=float(task_reward / _n_seqs),
             kl_reward=float(_kl_rewards / _n_tokens),
@@ -419,6 +433,7 @@ class PPOActorInterface(model_api.ModelInterface):
             stats = module.train_batch(
                 input_=data,
                 version_steps=model.version.global_step,
+                num_micro_batches=n_mbs,
                 loss_fn=functools.partial(
                     _ppo_actor_loss_from_model_outputs,
                     kl_adapter=self.kl_adapter,
@@ -434,6 +449,12 @@ class PPOActorInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
 
+        # FIXME: It only logs the MoE aux loss of the final PPO mini-batch.
+        global_stats.update(
+            constants.log_global_stats_tracker(
+                return_dict=True, clear_stats_after_logging=True
+            )
+        )
         if train_stats:
             train_stats = dict(
                 ppo_approx_kl=float(train_stats["ppo_approx_kl"] / _n_tokens),
@@ -456,7 +477,8 @@ def _ppo_critic_loss_from_model_outputs(
 
     cu_seqlens = (
         torch.nn.functional.pad(
-            torch.cat(input_.seqlens["packed_input_ids"]).cumsum(0), (1, 0)
+            torch.tensor(flat2d(input_.seqlens["packed_input_ids"])).cumsum(0),
+            (1, 0),
         )
         .int()
         .cuda()
@@ -477,8 +499,8 @@ def _ppo_critic_loss_from_model_outputs(
             for i in range(cu_seqlens.shape[0] - 1)
         ]
     )
-    new_values = new_values[leave_one_indices].squeeze(-1).float()
-    values = values[leave_one_indices].squeeze(-1).float()
+    new_values = new_values[leave_one_indices].view(-1).float()
+    values = values[leave_one_indices].view(-1).float()
 
     loss, loss_stat = ppo_functional.critic_loss_fn(
         value=new_values,
@@ -574,15 +596,18 @@ class PPOCriticInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
 
-        scores = module.forward(input_=input_)
+        scores = module.forward(input_=input_, num_micro_batches=n_mbs)
         if scores is None:
             return None
-        scores = scores.squeeze(-1)
+        scores = scores.view(-1)
         res = SequenceSample.from_default(
             ids=input_.ids,
             data=dict(values=scores),
@@ -590,7 +615,9 @@ class PPOCriticInterface(model_api.ModelInterface):
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.
@@ -599,7 +626,9 @@ class PPOCriticInterface(model_api.ModelInterface):
         old_logp: torch.FloatTensor = input_.data["packed_logprobs"].float()
         ref_logp: torch.FloatTensor = input_.data["packed_ref_logprobs"].float()
         prompt_mask = input_.data["prompt_mask"]
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+        input_lens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         reward_score = input_.data["rewards"].float()
         values = input_.data["values"].float()
@@ -688,7 +717,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         n_tokens = loss_mask.count_nonzero()
         dist.all_reduce(returns, group=constants.data_parallel_group())
         dist.all_reduce(n_tokens, group=constants.data_parallel_group())
-        global_stats = dict(returns=float(returns), n_tokens=int(n_tokens))
+        global_stats = dict(returns=float(returns / n_tokens), n_tokens=int(n_tokens))
 
         # Run mini-batched PPO training!
         train_stats = collections.defaultdict(lambda: 0)
@@ -703,6 +732,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                     kl_adapter=self.kl_adapter,
                     rms=None if not self.value_norm else self.rms,
                 ),
+                num_micro_batches=n_mbs,
             )
 
             if stats:
@@ -712,6 +742,12 @@ class PPOCriticInterface(model_api.ModelInterface):
         cur_epoch = model.version.epoch
         model.inc_version()
 
+        # FIXME: It only logs the MoE aux loss of the final PPO mini-batch.
+        global_stats.update(
+            constants.log_global_stats_tracker(
+                return_dict=True, clear_stats_after_logging=True
+            )
+        )
         if train_stats:
             train_stats = dict(
                 value_loss=float(train_stats["value_loss"] / n_tokens),
@@ -719,8 +755,7 @@ class PPOCriticInterface(model_api.ModelInterface):
                 denormalized_values=float(
                     train_stats["denormalized_values"] / n_tokens
                 ),
-                returns=global_stats["returns"] / int(n_tokens),
-                n_tokens=int(n_tokens),
+                **global_stats,
             )
 
         return dict(train_stats)

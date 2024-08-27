@@ -18,12 +18,12 @@ def _reduce(input_):
         return input_
 
     # All-reduce.
-    if custom_all_reduce.is_initialized():
-        out = custom_all_reduce.get_handle().custom_all_reduce(input_)
-        if out is not None:
-            return out
-        # else:
-        #     print("inside _reduce custom all reduce return None")
+    # NOTE: custom_all_reduce may randomly get stuck.
+    # Since pytorch all-reduce works fine with CUDAGraph, abandon custom_all_reduce.
+    # if custom_all_reduce.is_initialized():
+    #     out = custom_all_reduce.get_handle().custom_all_reduce(input_)
+    #     if out is not None:
+    #         return out
     torch.distributed.all_reduce(input_, group=constants.model_parallel_group())
     return input_
 
@@ -129,6 +129,8 @@ def _reduce_scatter_along_first_dim(input_):
 
     dim_size[0] = dim_size[0] // world_size
 
+    # NOTE: We don't use in-place reduce-scatter because we don't want to
+    # corrupt the activations which will be used during the backward pass.
     output = torch.empty(
         dim_size, dtype=input_.dtype, device=torch.cuda.current_device()
     )

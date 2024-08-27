@@ -171,7 +171,6 @@ class SlurmSchedulerClient(SchedulerClient):
             logger.info(f"Canceling job {launch_info.slurm_name}")
             launch_info.cancel(signal)
         time.sleep(0.2)
-        # print("before stop wait", self.__pending_jobs)
         self.wait(
             check_status=(),
             remove_status=(

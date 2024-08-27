@@ -13,6 +13,7 @@ import realhf.api.core.model_api as model_api
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 
 logger = logging.getLogger("Packed Reward Modeling Interface", "benchmark")
@@ -35,7 +36,7 @@ def _paired_rw_loss_from_model_outputs(
         device=scores.device,
     )
 
-    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
 
     assert scores.shape[0] == input_lens.sum(), (scores.shape, input_lens.sum())
     scores = scores[input_lens.cumsum(0) - 1].view(-1, 2).float()
@@ -111,19 +112,21 @@ class PairedRewardInterface(model_api.ModelInterface):
     train_total_correct_predictions: int = 0
 
     @torch.no_grad()
-    def inference(self, model: model_api.Model, data: SequenceSample) -> SequenceSample:
+    def inference(
+        self, model: model_api.Model, data: SequenceSample, n_mbs=None
+    ) -> SequenceSample:
 
         module = model.module
 
         module.eval()
 
-        r = module.forward(input_=data)
+        r = module.forward(input_=data, num_micro_batches=n_mbs)
         if r is None:
             return
         scores = r.float()
 
-        input_lens = torch.cat(data.seqlens["packed_input_ids"])
-        scores = scores.squeeze(-1)[input_lens.cumsum(0) - 1].float()  # [bs]
+        input_lens = torch.tensor(flat2d(data.seqlens["packed_input_ids"]))
+        scores = scores.view(-1)[input_lens.cumsum(0) - 1].float()  # [bs]
         scores = (scores - self.output_bias) * self.output_scaling
 
         ###################### logging ######################
@@ -145,8 +148,7 @@ class PairedRewardInterface(model_api.ModelInterface):
             ids=data.ids,
             seqlens=dict(
                 rewards=[
-                    torch.tensor([1 for _ in range(len(x))], dtype=torch.int32)
-                    for x in data.seqlens["packed_input_ids"]
+                    [1 for _ in range(len(x))] for x in data.seqlens["packed_input_ids"]
                 ]
             ),
             data=dict(rewards=scores),
@@ -154,7 +156,7 @@ class PairedRewardInterface(model_api.ModelInterface):
         return res
 
     def train_step(
-        self, model: model_api.Model, data: SequenceSample
+        self, model: model_api.Model, data: SequenceSample, n_mbs=None
     ) -> SequenceSample:
         module = model.module
         module.train()
@@ -163,9 +165,13 @@ class PairedRewardInterface(model_api.ModelInterface):
             input_=data,
             loss_fn=_paired_rw_loss_from_model_outputs,
             version_steps=model.version.global_step,
+            num_micro_batches=n_mbs,
         )
 
         res = {}
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stats:
             if constants.pipe_parallel_world_size() > 1:
                 stats["max_pos_score"] /= constants.pipe_parallel_world_size() * 2
@@ -185,6 +191,7 @@ class PairedRewardInterface(model_api.ModelInterface):
                 correct_predictions=int(stats["correct_predictions"]),
                 max_pos_score=float(stats["max_pos_score"]),
                 min_neg_score=float(stats["min_neg_score"]),
+                **global_stats,
             )
 
         cur_epoch = model.version.epoch
@@ -236,6 +243,9 @@ class PairedRewardInterface(model_api.ModelInterface):
                 max_pos_score = max(max_pos_score, stats["max_pos_score"].item())
                 min_neg_score = min(min_neg_score, stats["min_neg_score"].item())
 
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if total_predictions > 0:
             return dict(
                 loss=float(losses / total_predictions),
@@ -246,6 +256,7 @@ class PairedRewardInterface(model_api.ModelInterface):
                 total_predictions=int(total_predictions),
                 max_pos_score=float(max_pos_score),
                 min_neg_score=float(min_neg_score),
+                **global_stats,
             )
         return dict()
 

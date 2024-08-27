@@ -15,11 +15,7 @@ from realhf.api.core.config import (
 from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import register_interface
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
-from realhf.api.quickstart.device_mesh import (
-    AllocationConfig,
-    DeviceMesh,
-    RPCAllocation,
-)
+from realhf.api.quickstart.device_mesh import DeviceMesh, MFCConfig, RPCAllocation
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.experiments.common.common import CommonExperimentConfig
@@ -30,6 +26,8 @@ logger = logging.getLogger("GRPO exp", "colored")
 
 @dataclasses.dataclass
 class GRPOConfig(CommonExperimentConfig):
+    """The GRPO algorithm proposed in https://arxiv.org/abs/2402.03300."""
+
     actor: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
@@ -37,10 +35,10 @@ class GRPOConfig(CommonExperimentConfig):
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
     # for manual allocation only
-    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    actor_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_train: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    actor_gen: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    rew_inf: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    ref_inf: MFCConfig = dataclasses.field(default_factory=MFCConfig)
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
@@ -88,7 +86,6 @@ class GRPOConfig(CommonExperimentConfig):
                 **copy.deepcopy(self.ppo_kwargs),
                 "generation_config": self.ppo.gen,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                "force_no_logits_mask": self.ppo.force_no_logits_mask,
                 "adv_norm": self.ppo.adv_norm,
                 "group_size": self.group_size,
             },
@@ -109,6 +106,7 @@ class GRPOConfig(CommonExperimentConfig):
         rollout = MFCDef(
             name=f"actor_gen",
             model_name="actor",
+            n_mbs=self.actor_gen.n_mbs,
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -128,6 +126,7 @@ class GRPOConfig(CommonExperimentConfig):
         inf_reward = MFCDef(
             name=f"rew_inf",
             model_name="reward",
+            n_mbs=self.rew_inf.n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
@@ -138,13 +137,14 @@ class GRPOConfig(CommonExperimentConfig):
         )
 
         inf_ref_inputs = [f"packed_input_ids"]
-        if not self.ppo.force_no_logits_mask:
+        if not self.ppo.gen.force_no_logits_mask:
             inf_ref_inputs.append(
                 f"packed_logits_mask",
             )
         inf_ref_logits = MFCDef(
             name=f"ref_inf",
             model_name="ref",
+            n_mbs=self.ref_inf.n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
             model_path=self.ref.path,
@@ -166,11 +166,12 @@ class GRPOConfig(CommonExperimentConfig):
             f"prompt_mask",
             f"packed_logits_mask",
         ]
-        if self.ppo.force_no_logits_mask:
+        if self.ppo.gen.force_no_logits_mask:
             train_actor_inputs.remove(f"packed_logits_mask")
         train_actor = MFCDef(
             name="actor_train",
             model_name="actor",
+            n_mbs=self.actor_train.n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -199,6 +200,7 @@ class GRPOConfig(CommonExperimentConfig):
                 args=dict(
                     dataset_path=self.dataset.path,
                     max_length=self.dataset.max_prompt_len,
+                    pad_to_max_length=self.dataset.pad_to_max_length,
                 ),
             )
         ]

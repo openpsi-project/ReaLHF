@@ -46,9 +46,26 @@ class GenerationHyperparameters:
     :param temperature: The temperature of the sampling process.
     :type temperature: float
     :param use_cuda_graph: Whether to use CUDA graph to reduce kernel
-        launch overhead during generation. Recommended for pure
-        generation.
+        launch overhead during generation.
     :type use_cuda_graph: bool
+    :param force_cudagraph_recapture: Capture CUDAGraph everytime when
+        calling `generate` even if the graph has been captured before.
+        This will introduce minor overhead but released the kvcache
+        when not running generation.
+    :type force_cudagraph_recapture: bool
+    :param force_no_logits_mask: Whether to omit logits mask.
+        The logits mask will be produced when using top-k or top-p sampling,
+        where it is used to mark tokens that are filtered out.
+        This mask will be used by the reference model and the actor model
+        during training in order to align inferred logits with that during
+        generation and produce accurate KLs.
+        Logits mask with top-k/top-p sampling will largely improve the
+        stability of PPO training because it narrows the action space.
+        However, this benefit does not come for free.
+        The logits mask will occupy a large amount of additional GPU memory.
+        If this option is set to True, logits mask will be forcely omitted to
+        save GPU memory, but the learning performance may also drop.
+    :type force_no_logits_mask: bool
     """
 
     max_new_tokens: int = 256
@@ -58,6 +75,8 @@ class GenerationHyperparameters:
     top_k: int = 200
     temperature: float = 1.0
     use_cuda_graph: bool = False
+    force_cudagraph_recapture: bool = True
+    force_no_logits_mask: bool = False
 
     def __post_init__(self):
         if self.temperature == 0.0:
@@ -67,6 +86,52 @@ class GenerationHyperparameters:
             raise ValueError("top_p must be in (0.0, 1.0]")
         if self.top_k <= 0:
             raise ValueError("top_k must be a positive integer.")
+
+
+@dataclasses.dataclass
+class ReaLMoEConfig:
+    """Configuration related to MoE models.
+
+    :param num_experts: Number of experts in the mixture of experts.
+    :type num_experts: int
+    :param top_k: The number of experts to route per-token, can be also
+        interpreted as the `top-k` routing parameter.
+    :type top_k: int
+    :param routing_type: The load balancing type for the MoE router. Can
+        be "aux_loss", "sinkhorn", or "none".
+    :type routing_type: str
+    :param aux_loss_coeff: The coefficient for the auxiliary loss. Only
+        effective when routing_type="aux_loss".
+    :type aux_loss_coeff: float
+    :param capacity_factor: The capacity factor of each expert. An
+        expert will drop tokens if the number of tokens exceeds
+        capacity_factor * (num_tokens / num_experts). Drop nothing when
+        capacity_factor is None.
+    :type capacity_factor: float
+    :param pad_to_capacity: Whether to pad the input to the capacity of
+        the expert.
+    :type pad_to_capacity: bool
+    :param token_drop_policy: The token drop policy for the MoE. Can be
+        either "prob" or "position". If "prob", the tokens with the
+        lowest probabilities will be dropped. If "position", tokens at
+        the end of each batch will be dropped.
+    :type token_drop_policy: str
+    :param z_loss_coeff: The coefficient for the z-loss.
+    :type z_loss_coeff: float
+    :param input_jitter_eps: The input jitter noise for the router.
+    :type input_jitter_eps: float
+    """
+
+    num_experts: int = 8
+    top_k: int = 2
+    routing_type: str = "aux_loss"
+    aux_loss_coeff: float = 1e-3
+    capacity_factor: float = None
+    pad_to_capacity: bool = False
+    token_drop_policy: str = "probs"
+    z_loss_coeff: float = 0.0
+    input_jitter_eps: float = 0.0
+    use_grouped_gemm: bool = False
 
 
 @dataclasses.dataclass
@@ -109,9 +174,9 @@ class ReaLModelConfig:
     :type use_attention_bias: bool
     :param use_attn_proj_bias: Whether to use bias for the attention projection layer.
     :type use_attn_proj_bias: bool
-    :param layer_norm_type: Type of layer normalization, can by None, "rms", or "gemma".
+    :param layer_norm_type: Type of layer normalization, can be None, "rms", or "gemma".
     :type layer_norm_type: Optional[str]
-    :param mlp_type: Type of the MLP. Either None or "llama".
+    :param mlp_type: Type of the MLP. Can be None, "llama", or "moe".
     :type mlp_type: Optional[str]
     :param apply_rotary: Whether to apply rotary embedding.
     :type apply_rotary: bool
@@ -138,12 +203,10 @@ class ReaLModelConfig:
     :param sliding_window: Sliding window size for the attention.
         Currently a placeholder and not supported.
     :type sliding_window: Optional[int]
+    :param moe: Configuration for MoE models, only effective when mlp_type="moe".
+    :type moe: Optional[ReaLMoEConfig]
     :param is_critic: Whether the model is a critic model.
     :type is_critic: bool
-    :param gradient_accumulation_fusion: Whether to fuse
-        gradient accumulation in Megatron.
-        Currently not supported.
-    :type gradient_accumulation_fusion: bool
     """
 
     ### Architectural configurations. ###
@@ -181,11 +244,11 @@ class ReaLModelConfig:
     # Tied embedding
     tied_embedding: bool = False
     sliding_window: Optional[int] = None
+    # MoE Config
+    moe: Optional[ReaLMoEConfig] = None
+
     # Whether it is a critic/reward model that outputs scores.
     is_critic: bool = False
-
-    ### Running configurations. ###
-    gradient_accumulation_fusion: bool = False
 
     def __post_init__(self):
         if self.is_critic and self.tied_embedding:
@@ -310,17 +373,26 @@ class ModelInterface(abc.ABC):
         pass
 
     def evaluate(
-        self, model: Model, eval_dataloader: torch.utils.data.DataLoader
+        self,
+        model: Model,
+        eval_dataloader: torch.utils.data.DataLoader,
     ) -> Dict:
+        # NOTE: No n_mbs here because the batch size can be configured in the dataloader.
         return {}
 
-    def inference(self, model: Model, data: SequenceSample) -> SequenceSample:
+    def inference(
+        self, model: Model, data: SequenceSample, n_mbs: Optional[int] = None
+    ) -> SequenceSample:
         raise NotImplementedError()
 
-    def generate(self, model: Model, data: SequenceSample) -> SequenceSample:
+    def generate(
+        self, model: Model, data: SequenceSample, n_mbs: Optional[int] = None
+    ) -> SequenceSample:
         raise NotImplementedError()
 
-    def train_step(self, model: Model, data: SequenceSample) -> Dict:
+    def train_step(
+        self, model: Model, data: SequenceSample, n_mbs: Optional[int] = None
+    ) -> Dict:
         raise NotImplementedError()
 
 

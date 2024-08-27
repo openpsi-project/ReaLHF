@@ -11,6 +11,7 @@ import realhf.base.logging as logging
 import realhf.impl.model.utils.dpo_functional as dpo_functional
 from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
 
@@ -22,7 +23,7 @@ def _dpo_loss_from_model_outputs(
     input_: SequenceSample,
     beta: float,
 ):
-    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
     cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
     packed_input_ids = input_.data["packed_input_ids"]
     prompt_lens = input_.data["prompt_lens"]
@@ -101,16 +102,19 @@ class DPOInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def inference(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         module = model.module
         module.eval()
 
-        logits = module.forward(input_=input_)
+        logits = module.forward(input_=input_, num_micro_batches=n_mbs)
         if logits is None:
             return None
 
-        input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+        input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
         prompt_lens = input_.data["prompt_lens"]
 
@@ -151,15 +155,14 @@ class DPOInterface(model_api.ModelInterface):
             ids=input_.ids,
             data=dict(seqlogp=seqlogp),
             seqlens=dict(
-                seqlogp=[
-                    torch.tensor([len(slens)], dtype=torch.int32)
-                    for slens in input_.seqlens["packed_input_ids"]
-                ]
+                seqlogp=[[len(slens)] for slens in input_.seqlens["packed_input_ids"]]
             ),
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         module = model.module
 
         # Determining whether to disable dropout is a bit tricky.
@@ -170,11 +173,15 @@ class DPOInterface(model_api.ModelInterface):
             input_=input_,
             version_steps=model.version.global_step,
             loss_fn=functools.partial(_dpo_loss_from_model_outputs, beta=self.beta),
+            num_micro_batches=n_mbs,
         )
 
         model.inc_version()
 
         res = {}
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stats:
             res = dict(
                 loss=float(stats["loss"]) / int(stats["n_seqs"]),
@@ -182,6 +189,7 @@ class DPOInterface(model_api.ModelInterface):
                 neg_score=float(stats["neg_score"]) / int(stats["n_seqs"]),
                 kl=float(stats["kl"]) / int(stats["n_seqs"]),
                 n_seqs=int(stats["n_seqs"]),
+                **global_stats,
             )
         return res
 

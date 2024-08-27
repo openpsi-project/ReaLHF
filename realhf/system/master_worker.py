@@ -198,6 +198,7 @@ def _request_parameter_sync(
         "from_topo": from_topo,
         "to_topo": to_topo,
         "to_model_config": to_model_config,
+        "eta": 1.0,
     }
     payloads = [
         request_reply_stream.Payload(
@@ -304,7 +305,7 @@ def _attach_payloads_with_hooks(
 
     main_mwids = set([msid2mwid[h] for h in main_handlers])
     for hook in getattr(rpc, f"_{hook_type}_hooks"):
-        if isinstance(hook, dfg.SyncParamHook):
+        if isinstance(hook, dfg.ParamReallocHook):
             assert (hook.source is None) != (hook.target is None), hook
             if hook.source is None:
                 src_topo = model_topos[rpc.model_name]
@@ -327,6 +328,7 @@ def _attach_payloads_with_hooks(
                 "from_topo": src_topo,
                 "to_topo": dst_topo,
                 "to_model_config": dst_config,
+                "eta": hook.eta,
             }
             for h in main_handlers:
                 getattr(payloads[h], f"{hook_type}_hooks").append("param_realloc")
@@ -519,10 +521,10 @@ async def model_rpc_request_func(
         # If such keys do not exist, we will use the key with the longest
         # sequence length in this model function call.
         acc_seqlens = {
-            k: sum(x.sum() for x in slens) for k, slens in sample.seqlens.items()
+            k: sum(sum(x) for x in slens) for k, slens in sample.seqlens.items()
         }
         seqlen_key = max(sample.seqlens, key=acc_seqlens.get)
-        flops_seqlens = [x.sum() for x in sample.seqlens[seqlen_key]]
+        flops_seqlens = [sum(x) for x in sample.seqlens[seqlen_key]]
         if rpc.interface_type == dfg.ModelInterfaceType.GENERATE:
             ctrl.data_amount.gen_configs.append(model_configs[rpc.model_name])
             ctrl.data_amount.gen_bs.append(sample.bs)
@@ -714,6 +716,8 @@ async def load_data_func(
 
             # Unpack batched sequences into individual sequences.
             for x in data_batches:
+                if x.meta_sample is None:
+                    continue
                 for xx in x.meta_sample.unpack():
                     all_data.append(xx)
                     if xx.ids[0] in received_ids:
@@ -726,6 +730,8 @@ async def load_data_func(
             # RPCs corountines will use this information to
             # determine the src and dst of data transfer.
             for dp_rank, db_meta in enumerate(data_batches):
+                if db_meta.meta_sample is None:
+                    continue
                 for s in db_meta.meta_sample.unpack():
                     for k in s.keys:
                         data_owner[(s.ids[0], k)] = (src_rpc_model_name, dp_rank)
@@ -737,7 +743,7 @@ async def load_data_func(
         # Since different keys may have different sequence lengths, we cannot
         # count tokens accurately. Here we just assume that the key with the
         # longest sequence length is the number of tokens.
-        seqlens = [max(v[0].sum() for v in x.seqlens.values()) for x in all_data]
+        seqlens = [max(sum(v[0]) for v in x.seqlens.values()) for x in all_data]
         avg_tokens_per_batch = sum(seqlens) / steps_per_epoch
         logger.info(
             f"Training epoch {cur_epoch + 1} approximately has {steps_per_epoch} steps. "

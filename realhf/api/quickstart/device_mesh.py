@@ -108,7 +108,6 @@ class DeviceMesh:
         unique_rows = np.unique(rows)
         for row in unique_rows:
             this_cols = cols[rows == row]
-            # print(row, this_cols)
             assert (
                 self.n_gpus_per_node % min_n_gpus == 0
                 or min_n_gpus % self.n_gpus_per_node == 0
@@ -116,7 +115,6 @@ class DeviceMesh:
             n_gpus = min_n_gpus
             while n_gpus < min(self.n_gpus_per_node, np.sum(self.mapping)):
                 for start in range(np.min(this_cols), self.n_gpus_per_node, n_gpus):
-                    # print(row, start, start+n_gpus)
                     sub_mapping = np.zeros(
                         (self.n_nodes, self.n_gpus_per_node), dtype=np.int32
                     )
@@ -175,12 +173,14 @@ class DeviceMesh:
         return True
 
 
-def make_device_mesh_from_name(global_mesh_name: str, name: str):
+def make_device_mesh_from_name(
+    global_mesh_name: str, name: str, n_gpus_per_node: int = 8
+):
     """
     DeviceMesh name format: <prefix><node_indices>[:<gpu_ids>]
         slurm_nodelist is the name of slurm nodes the mesh is on, should follow slurm convention,
         for example "NODE[40-43]" or "NODE[01,11,13-14]" with prefix NODE,
-        if n_nodes=1, gpu_ids are the gpu id list delimited by comma if n_gpus < 8,
+        if n_nodes=1, gpu_ids are the gpu id list delimited by comma if n_gpus < n_gpus_per_node,
         for example "0,1,2,3" or "0,1". An example of full device mesh name
         in this situation is "NODE40:0,1,2,3"
 
@@ -189,12 +189,12 @@ def make_device_mesh_from_name(global_mesh_name: str, name: str):
     prefix = cluster_spec.node_name_prefix
     node_list = parse_nodelist(global_mesh_name, prefix)
     n_nodes = len(node_list)
-    n_gpus_per_node = 8
 
     gpu_ids = None
     if ":" in name:
         node_names, gpu_ids = name.split(":")
         gpu_ids = list(map(int, gpu_ids.split(",")))
+        assert all(gpu_id < n_gpus_per_node for gpu_id in gpu_ids)
     else:
         node_names = name
     node_names = parse_nodelist(node_names, prefix)
@@ -220,11 +220,11 @@ def device_mesh_name_from_mapping(global_mesh_name: str, mapping: np.ndarray):
     prefix = cluster_spec.node_name_prefix
     node_list = parse_nodelist(global_mesh_name, prefix)
     n_nodes = len(node_list)
-    n_gpus_per_node = 8
-    assert mapping.shape == (n_nodes, n_gpus_per_node)
+    n_gpus_per_node = mapping.shape[1]
+    assert mapping.shape[0] == n_nodes
     node_indices, gpu_ids = np.where(mapping == 1)
 
-    if np.sum(mapping) < 8:
+    if np.sum(mapping) < n_gpus_per_node:
         node_name = node_list[node_indices[0]]
         gpu_ids = list(map(str, gpu_ids))
         return f"{node_name}:{','.join(gpu_ids)}"
@@ -290,10 +290,14 @@ class RPCAllocation:
 
 
 @dataclasses.dataclass
-class AllocationConfig:
-    """Allocation configuration for one RPC, used for manual allocation.
+class MFCConfig:
+    """Configuration for one MFC.
 
-    :param parallel: Parallelism strategy configuration.
+    :param n_mbs: Number of micro batches when executing this MFC. See
+        MFCDef for details.
+    :type n_mbs: Optional[int]
+    :param parallel: Parallelism strategy configuration. Only used for
+        manual allocation.
     :type parallel: ParallelismConfig
     :param device_mesh: String representation for device mesh. If it is
         composed of multiple nodes, it should be in the form of slurm
@@ -301,9 +305,11 @@ class AllocationConfig:
         on a single node, we restrict it occupies 1, 2, 4, or 8
         contiguous GPUs in the node. In this case, the string
         representation is similar to the MPI hostfile, e.g.,
-        "node01:0,1,2,3" for the first 4 GPUs on node01.
+        "node01:0,1,2,3" for the first 4 GPUs on node01. Only used for
+        manual allocation.
     :type device_mesh: str
     """
 
+    n_mbs: Optional[int] = None
     parallel: ParallelismConfig = dataclasses.field(default_factory=ParallelismConfig)
     device_mesh: Optional[str] = None

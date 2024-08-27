@@ -13,11 +13,7 @@ from realhf.api.core.config import (
 from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
-from realhf.api.quickstart.device_mesh import (
-    AllocationConfig,
-    DeviceMesh,
-    RPCAllocation,
-)
+from realhf.api.quickstart.device_mesh import DeviceMesh, MFCConfig, RPCAllocation
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.experiments.common.common import CommonExperimentConfig
@@ -27,7 +23,7 @@ logger = logging.getLogger("REINFORCE exp", "colored")
 
 @dataclasses.dataclass
 class ReinforceConfig(CommonExperimentConfig):
-    """Reinforce experiment configuration."""
+    """The REINFORCE or ReMax (https://arxiv.org/abs/2310.10505) algorithm."""
 
     actor: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
@@ -35,15 +31,11 @@ class ReinforceConfig(CommonExperimentConfig):
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
     # for manual allocation only
-    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    greedy_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    sample_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    greedy_rew_inf: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
-    sample_rew_inf: AllocationConfig = dataclasses.field(
-        default_factory=AllocationConfig
-    )
+    actor_train: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    greedy_gen: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    sample_gen: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    greedy_rew_inf: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    sample_rew_inf: MFCConfig = dataclasses.field(default_factory=MFCConfig)
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
@@ -105,6 +97,7 @@ class ReinforceConfig(CommonExperimentConfig):
         sample_gen = MFCDef(
             name="sample_gen",
             model_name="actor",
+            n_mbs=self.sample_gen.n_mbs,
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -122,6 +115,7 @@ class ReinforceConfig(CommonExperimentConfig):
         greedy_gen = MFCDef(
             name="greedy_gen",
             model_name="actor",
+            n_mbs=self.greedy_gen.n_mbs,
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -139,6 +133,7 @@ class ReinforceConfig(CommonExperimentConfig):
         sample_rw = MFCDef(
             name="sample_rw",
             model_name="reward",
+            n_mbs=self.sample_rew_inf.n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
@@ -152,6 +147,7 @@ class ReinforceConfig(CommonExperimentConfig):
             model_name="reward",
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
+            n_mbs=self.greedy_rew_inf.n_mbs,
             model_type=self.rew.type,
             model_path=self.rew.path,
             input_keys=["greedy_packed_input_ids"],
@@ -164,6 +160,7 @@ class ReinforceConfig(CommonExperimentConfig):
         actor_train = MFCDef(
             name="actor_train",
             model_name="actor",
+            n_mbs=self.actor_train.n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -204,6 +201,7 @@ class ReinforceConfig(CommonExperimentConfig):
                 args=dict(
                     dataset_path=self.dataset.path,
                     max_length=self.dataset.max_prompt_len,
+                    pad_to_max_length=self.dataset.pad_to_max_length,
                 ),
             )
         ]

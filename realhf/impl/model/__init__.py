@@ -28,7 +28,7 @@ if torch.cuda.is_available():
     torch._C._jit_override_can_fuse_on_cpu(False)
     torch._C._jit_override_can_fuse_on_gpu(False)
     torch._C._jit_set_texpr_fuser_enabled(False)
-    torch._C._jit_set_nvfuser_enabled(True)
+    # torch._C._jit_set_nvfuser_enabled(True)  # disable the deprecated warning
     torch._C._debug_set_autodiff_subgraph_inlining(False)
 
 # Add HuggingFace hooks to ReaLModel.

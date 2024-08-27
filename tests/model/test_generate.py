@@ -156,7 +156,7 @@ def tokenizer(model_path: str):
     return model_api.load_hf_tokenizer(model_path)
 
 
-def make_random_inference_model(model_class, model_path):
+def make_generate_model(model_class, model_path):
     with constants.model_scope(testing.MODEL_NAME):
         from realhf.impl.model.backend.inference import PipelinableInferenceEngine
         from realhf.impl.model.nn.real_llm_api import ReaLModel, add_helper_functions
@@ -210,7 +210,7 @@ def real_model_generate(
         sequence_parallel=parallel.use_sequence_parallel,
         max_prompt_len=test_params.prompt_len + test_params.gen_len,
     )
-    model = make_random_inference_model(model_class, model_path)
+    model = make_generate_model(model_class, model_path)
     with constants.model_scope(testing.MODEL_NAME):
         data_batches = testing.make_random_packed_batches(
             test_params.n_batches,
@@ -223,6 +223,7 @@ def real_model_generate(
             constants.pipe_parallel_rank() == constants.pipe_parallel_world_size() - 1
             and constants.model_parallel_rank() == 0
         )
+
         results = []
         for i, data_batch in enumerate(data_batches):
             data_batch = data_batch.cuda()

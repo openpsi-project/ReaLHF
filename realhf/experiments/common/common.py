@@ -28,17 +28,20 @@ from realhf.api.core.system_api import (
     TasksGroup,
 )
 from realhf.api.quickstart.device_mesh import (
-    AllocationConfig,
     DeviceMesh,
+    MFCConfig,
     RPCAllocation,
     make_device_mesh_from_name,
 )
-from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
+from realhf.api.quickstart.model import (
+    ModelTrainEvalConfig,
+    ParallelismConfig,
+    get_real_model_config,
+)
 from realhf.experiments.common.check import check_is_realhf_native_model_interface
 from realhf.experiments.common.utils import (
     get_topo,
     make_inf_backend_config,
-    make_model_config,
     make_train_backend_config,
     resolve_replica_ids,
     resolve_rpc_hooks,
@@ -184,11 +187,13 @@ class CommonExperimentConfig(Experiment):
 
         Note that model function call names are different from model
         names. Should be implemented in all subclasses.
+
+        NOTE: in implementation of ReaL, term RPC also refers to MFC.
         """
         raise NotImplementedError(f"rpcs is not implemented in {self.__class__}")
 
     @property
-    def allocations(self) -> Dict[str, AllocationConfig]:
+    def allocations(self) -> Dict[str, MFCConfig]:
         """The allocation configuration for each model function call.
 
         A dictionary mapping MFC names to its allocation configuration.
@@ -303,7 +308,7 @@ class CommonExperimentConfig(Experiment):
             ),
         )
 
-    def initial_setup(self) -> ExperimentConfig:
+    def _get_rpc_allocations(self) -> List[RPCAllocation]:
         if self.allocation_mode == "manual" and self.nodelist is None:
             logger.warning(
                 "Warning: Nodelist is not set in manual allocation mode, "
@@ -313,11 +318,9 @@ class CommonExperimentConfig(Experiment):
                 f"and n_gpus_per_node {self.n_gpus_per_node}."
             )
 
-        self.__check_legal_experiment()
+        self.__check_legal_allocation_options()
 
         rpcs = self.rpcs
-        model_worker = []
-
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"
             # assumes gradient checkpointing for all training RPCs if one is enabled
@@ -378,12 +381,13 @@ class CommonExperimentConfig(Experiment):
             rpc_allocs: List[RPCAllocation] = self._heuristic_rpc_allocation()
         else:
             raise NotImplementedError()
+        return rpc_allocs
 
+    def _get_model_worker_configs(
+        self, rpc_allocs: List[RPCAllocation]
+    ) -> List[ModelWorker]:
+        model_worker = []
         shard_counter = defaultdict(lambda: 0)
-        resolve_replica_ids(rpc_allocs)
-        resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
-
-        pprint.pprint(rpc_allocs)
 
         model_name_to_rpc_allocs: Dict[ModelName, List[RPCAllocation]] = defaultdict(
             list
@@ -400,7 +404,6 @@ class CommonExperimentConfig(Experiment):
                 cuda_cache_clear_freq=10,
                 tokenizer_name_or_path=self.tokenizer_name_or_path,
             )
-            # print(f"Setting up ModelWorker ({i},{j})")
 
             for (
                 model_name,
@@ -409,7 +412,14 @@ class CommonExperimentConfig(Experiment):
                 rpcs = [rpc_alloc.rpc for rpc_alloc in model_rpc_allocs]
                 rpc_alloc = model_rpc_allocs[0]
                 model_cfg = self.models[model_name.role]
-                model = make_model_config(model_cfg)
+                model = get_real_model_config(
+                    model_path=model_cfg.path,
+                    hf_model_family=model_cfg.type._class,
+                    is_critic=model_cfg.type.is_critic,
+                    init_critic_from_actor=model_cfg.init_critic_from_actor,
+                    dtype="bf16" if model_cfg.enable_bf16 else "fp16",
+                    lora=model_cfg.lora,
+                )
                 mapping = rpc_alloc.device_mesh.mapping
                 gradient_checkpointing = model_cfg.gradient_checkpointing and any(
                     rpc.interface_type == ModelInterfaceType.TRAIN_STEP for rpc in rpcs
@@ -426,6 +436,7 @@ class CommonExperimentConfig(Experiment):
                         )
                         else None
                     ),
+                    gradient_accumulation_fusion=model_cfg.backend == "megatron",
                 )
 
                 if any(
@@ -435,13 +446,8 @@ class CommonExperimentConfig(Experiment):
                 else:
                     backend = make_inf_backend_config(model_cfg, rpc_alloc.parallel)
 
-                # print(f"model name {model_name}, device mesh name {rpc_alloc.device_mesh.name},"
-                #       f"mapping {mapping}")
                 if mapping[i, j]:
                     shard_idx = shard_counter[model_name]
-                    # print(f"Setting up Shard {shard_idx}, "
-                    #       f"(dp, pp, mp) = ({topo.get_coord(shard_idx).data}, "
-                    #       f"{topo.get_coord(shard_idx).pipe}, {topo.get_coord(shard_idx).model})")
                     mw.shards.append(
                         StandaloneModelShardAbstraction(
                             id=ModelShardID(
@@ -459,6 +465,18 @@ class CommonExperimentConfig(Experiment):
                     )
                     shard_counter[model_name] += 1
             model_worker.append(mw)
+        return model_worker
+
+    def initial_setup(self) -> ExperimentConfig:
+
+        rpc_allocs = self._get_rpc_allocations()
+
+        resolve_replica_ids(rpc_allocs)
+        resolve_rpc_hooks(rpc_allocs)  # inplace modify MFCDefs in rpc allocations
+
+        pprint.pprint(rpc_allocs)
+
+        model_worker = self._get_model_worker_configs(rpc_allocs)
 
         return ExperimentConfig(
             exp_ctrl=self.exp_ctrl,
@@ -466,7 +484,7 @@ class CommonExperimentConfig(Experiment):
             model_worker=model_worker,
         )
 
-    def __check_legal_experiment(self):
+    def __check_legal_allocation_options(self):
         if self.n_nodes > 1 and self.mode == "local":
             raise ValueError(
                 "Cannot run multi-node experiment in local mode, "

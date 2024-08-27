@@ -8,6 +8,7 @@ import tqdm
 import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.utils.functional import (
     build_shift_one_indices,
@@ -20,7 +21,7 @@ def compute_packed_sft_loss(
     input_: SequenceSample,
 ) -> torch.Tensor:
     packed_input_ids: torch.Tensor = input_.data["packed_input_ids"]
-    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
     cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
     prompt_mask = input_.data["prompt_mask"]
 
@@ -85,7 +86,7 @@ def compute_packed_sft_loss(
 
 class SFTInterface(model_api.ModelInterface):
 
-    def train_step(self, model: model_api.Model, x: SequenceSample) -> Dict:
+    def train_step(self, model: model_api.Model, x: SequenceSample, n_mbs=None) -> Dict:
         module = model.module
 
         module.train()
@@ -93,19 +94,23 @@ class SFTInterface(model_api.ModelInterface):
         stat = module.train_batch(
             input_=x,
             loss_fn=compute_packed_sft_loss,
-            num_micro_batches=constants.pipe_parallel_world_size() * 2,
+            num_micro_batches=n_mbs,
             version_steps=model.version.global_step,
         )
 
         model.inc_version()
 
         res = dict()
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stat:
             res = dict(
                 loss=float(stat["loss"]) / int(stat["n_tokens"]),
                 ppl=float(stat["ppl"]) / int(stat["n_seqs"]),
                 n_tokens=int(stat["n_tokens"]),
                 n_seqs=int(stat["n_seqs"]),
+                **global_stats,
             )
         return res
 
@@ -146,12 +151,16 @@ class SFTInterface(model_api.ModelInterface):
                 ppl += stat["ppl"]
 
         res = dict()
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stat:
             return dict(
                 loss=float(losses / n_tokens),
                 ppl=float(ppl / n_seqs),
                 n_tokens=int(n_tokens),
                 n_seqs=int(n_seqs),
+                **global_stats,
             )
         return res
 

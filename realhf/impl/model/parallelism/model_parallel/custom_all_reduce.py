@@ -1,6 +1,5 @@
 # Copied from the vLLM project: https://github.com/vllm-project/vllm
-import dataclasses
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from typing import Any, List, Optional
 
 import torch
@@ -40,62 +39,6 @@ logger = logging.getLogger(__name__)
 
 _CA_HANDLE = None
 _SUPPORTED_WORLD_SIZES = [2, 4, 6, 8]
-
-
-@dataclasses.dataclass
-class GraphCaptureContext:
-    stream: torch.cuda.Stream
-
-
-@contextmanager
-def graph_capture():
-    """`graph_capture` is a context manager which should surround the code that
-    is capturing the CUDA graph.
-
-    Its main purpose is to ensure that the
-    some operations will be run after the graph is captured, before the graph
-    is replayed. It returns a `GraphCaptureContext` object which contains the
-    necessary data for the graph capture. Currently, it only contains the
-    stream that the graph capture is running on. This stream is set to the
-    current CUDA stream when the context manager is entered and reset to the
-    default stream when the context manager is exited. This is to ensure that
-    the graph capture is running on a separate stream from the default stream,
-    in order to explicitly distinguish the kernels to capture
-    from other kernels possibly launched on background in the default stream.
-    """
-    stream = torch.cuda.Stream()
-    graph_capture_context = GraphCaptureContext(stream)
-    maybe_ca_context = nullcontext() if _CA_HANDLE is None else _CA_HANDLE.capture()
-    with torch.cuda.stream(stream), maybe_ca_context:
-        yield graph_capture_context
-
-
-@dataclasses.dataclass
-class GraphCaptureContext:
-    stream: torch.cuda.Stream
-
-
-@contextmanager
-def graph_capture():
-    """`graph_capture` is a context manager which should surround the code that
-    is capturing the CUDA graph.
-
-    Its main purpose is to ensure that the
-    some operations will be run after the graph is captured, before the graph
-    is replayed. It returns a `GraphCaptureContext` object which contains the
-    necessary data for the graph capture. Currently, it only contains the
-    stream that the graph capture is running on. This stream is set to the
-    current CUDA stream when the context manager is entered and reset to the
-    default stream when the context manager is exited. This is to ensure that
-    the graph capture is running on a separate stream from the default stream,
-    in order to explicitly distinguish the kernels to capture
-    from other kernels possibly launched on background in the default stream.
-    """
-    stream = torch.cuda.Stream()
-    graph_capture_context = GraphCaptureContext(stream)
-    maybe_ca_context = nullcontext() if _CA_HANDLE is None else _CA_HANDLE.capture()
-    with torch.cuda.stream(stream), maybe_ca_context:
-        yield graph_capture_context
 
 
 def init_custom_ar() -> None:
@@ -290,7 +233,6 @@ class CustomAllreduce:
         for i in range(len(all_data)):
             handles.append(all_data[i][0][0])  # type: ignore
             offsets.append(all_data[i][0][1])  # type: ignore
-        # print(handles, offsets)
         return handles, offsets
 
     def register_buffer(self, inp: torch.Tensor):
@@ -300,7 +242,7 @@ class CustomAllreduce:
     def register_graph_buffers(self):
         handle, offset = custom_ar.get_graph_buffer_ipc_meta(self._ptr)
         handles, offsets = self._gather_ipc_meta((bytes(handle), offset))
-        logger.info("Registering %d cuda graph addresses", len(offset))
+        logger.debug("Registering %d cuda graph addresses", len(offset))
         custom_ar.register_graph_buffers(self._ptr, handles, offsets)
 
     def should_custom_ar(self, inp: torch.Tensor):

@@ -4,11 +4,11 @@ import numpy as np
 import torch
 
 from realhf.api.core import model_api
-from realhf.base import constants, logging
+from realhf.base import constants, datapack, logging
+from realhf.impl.model.nn.real_llm_base import ReaLModelParamKeys
 
 logger = logging.getLogger("ReaL parallel")
 
-# FIXME: gradients of layer norm layers (replicated for tensor parallel) may be incorrect
 # keys used to identify modules
 EMBEDDING_KEYS = [".wte", ".wpe"]  # dim=0 no bias
 COLUMN_LINEAR_KEYS = [
@@ -16,12 +16,12 @@ COLUMN_LINEAR_KEYS = [
     ".attn.c_attn.k_attn",
     ".attn.c_attn.v_attn",
     ".mlp.c_fc",
-    ".mlp.gate_proj",
-    ".mlp.up_proj",
+    ".gate_proj",
+    ".up_proj",
 ]  # dim=0 + partition bias
 ROW_LINEAR_KEYS = [
     ".attn.c_proj",
-    ".mlp.down_proj",
+    ".down_proj",
     ".mlp.c_proj",
 ]  # dim=1 + no partition bias
 
@@ -42,7 +42,8 @@ def tensor_slice_partition_fn(
     mp_world_size: int,
     dim: Optional[int],
 ) -> Union[List[torch.Tensor], torch.Tensor]:
-    """Partition a pytorch tensor for model parallelism."""
+    """Partition a tensor by slicing along a dimension for tensor-model
+    parallelism."""
     if dim is None:
         splits = [tensor for _ in range(mp_world_size)]
     else:
@@ -63,8 +64,11 @@ def intervals_partition_fn(
     """Get the intervals of a MP-partitioned tensor in the flatten view.
 
     For example, if a tensor of shape (2, 4) is partitioned along the
-    second dimension into 2 parts, then the intervals are [(0, 2), (2,
-    4)].
+    second dimension into 2 parts, then the intervals of the first part
+    are [(0, 2), (2, 4)].
+
+    Used by parameter reallocation. Return a numpy array of shape [N,
+    2], where N is the number of intervals.
     """
     assert mp_rank is not None
     param_size = int(np.prod(shape))
@@ -105,7 +109,7 @@ def shape_partition_fn(
     mp_world_size: int,
     dim: Optional[int],
 ):
-    """Get the partitioned shape of a tensor for model parallelism."""
+    """Get the partitioned shape of a tensor for tensor-model parallelism."""
     if dim is None:
         splits = [shape for _ in range(mp_world_size)]
     else:
@@ -133,8 +137,12 @@ def mp_partition_key(
         Union[List[torch.Tensor], torch.Tensor],
     ] = tensor_slice_partition_fn,
 ) -> torch.Tensor:
-    """Partition a parameter of ReaLModel with name `key` by the method
-    `partition_fn`."""
+    """Run the partition functor on the tensor or shape based on the key.
+
+    The key determines the partitioning strategy, e.g., whether to
+    perform partition and along which dimension.
+    """
+
     if any([ek in key for ek in EMBEDDING_KEYS]):
         assert "weight" in key
         return partition_fn(tensor_or_shape, mp_rank, mp_size, dim=0)
@@ -172,6 +180,7 @@ def mp_partition_real_model_state_dict(
     mp_size: int,
     mp_rank: Optional[int] = None,
 ) -> Union[Dict, List[Dict]]:
+    """A helper function to partition a state dict using `mp_partition_key`."""
     if mp_size == 1:
         if mp_rank is None:
             return [state_dict]
@@ -192,10 +201,7 @@ def mp_partition_real_model_state_dict(
 
 
 def get_real_model_param_shape(
-    k: str,
-    config: model_api.ReaLModelConfig,
-    mp_size: int,
-    sequence_parallel: bool,
+    k: str, config: model_api.ReaLModelConfig, mp_size: int
 ) -> Tuple:
     if "wte.weight" in k:
         assert config.vocab_size % mp_size == 0
@@ -216,16 +222,13 @@ def get_real_model_param_shape(
     elif ".ln." in k or ".ln_f." in k:
         return (config.hidden_dim,)
     elif k == f"{config.n_layers + 1}.weight":  # output head
-        if config.is_critic and sequence_parallel:
+        if config.is_critic:
             return (1, config.hidden_dim)
-        elif not config.is_critic and mp_size > 1:
+        elif mp_size > 1:
             assert config.vocab_size % mp_size == 0
             return (config.vocab_size // mp_size, config.hidden_dim)
         else:
-            return (
-                config.vocab_size if not config.is_critic else 1,
-                config.hidden_dim,
-            )
+            return (config.vocab_size, config.hidden_dim)
     elif any([ck in k for ck in COLUMN_LINEAR_KEYS]):
         if "k_attn" in k or "v_attn" in k:
             if "weight" in k:
@@ -266,6 +269,9 @@ def get_real_model_param_shape(
             return (config.hidden_dim,)
         else:
             raise NotImplementedError(f"unkown shape of key {k}.")
+    elif ".mlp.router" in k:
+        # mp does not partition router weights
+        return (config.moe.num_experts, config.hidden_dim)
     else:
         raise NotImplementedError(f"unkown shape of key {k}.")
 
@@ -302,35 +308,62 @@ def mp_merge_real_model_state_dict(
     return new_state_dict
 
 
+class ReaLModelParamCount:
+    """Paramter count, used for partitioning pipeline stages."""
+
+    @staticmethod
+    def _derive_count_from_keys(
+        keys: List[str], config: model_api.ReaLModelConfig, mp_size: int
+    ) -> int:
+        count = 0
+        for k in keys:
+            count += np.prod(get_real_model_param_shape(k, config, mp_size))
+        return int(count)
+
+    @staticmethod
+    def embed(config: model_api.ReaLModelConfig, mp_size: int) -> int:
+        return ReaLModelParamCount._derive_count_from_keys(
+            ReaLModelParamKeys.embed(config), config, mp_size
+        )
+
+    @staticmethod
+    def tblock(config: model_api.ReaLModelConfig, idx: int, mp_size: int) -> int:
+        return ReaLModelParamCount._derive_count_from_keys(
+            ReaLModelParamKeys.tblock(config, idx), config, mp_size
+        )
+
+    @staticmethod
+    def head(config: model_api.ReaLModelConfig, mp_size: int) -> int:
+        return ReaLModelParamCount._derive_count_from_keys(
+            ReaLModelParamKeys.head(config), config, mp_size
+        )
+
+
 def partition_pipeline_layers(
     config: model_api.ReaLModelConfig,
     num_stages: int,
-    embed_param_counter: Callable[[model_api.ReaLModelConfig], int],
-    transformer_block_param_counter: Callable[[model_api.ReaLModelConfig, int], int],
-    head_param_counter: Callable[[model_api.ReaLModelConfig], int],
-    method: str = "parameters_balanced",
+    method: str = "parameters",
 ) -> Dict[int, Tuple[int, int]]:
-    # TODO: partition according to occupied GPU memory, e.g., logits occupy larger memory
-    from deepspeed.runtime import utils as ds_utils
-
-    from realhf.base.datapack import partition_balanced as true_partition_balanced
-
-    # Each stage gets a simple uniform number of layers.
+    # Ignoring mp_size in param count because tensor parallel equally partitions parameters.
+    # It is irrelevant to how we partition pipeline stages.
     param_counts = (
-        [embed_param_counter(config)]
-        + [transformer_block_param_counter(config, i) for i in range(config.n_layers)]
-        + [head_param_counter(config)]
+        [ReaLModelParamCount.embed(config, 1)]
+        + [ReaLModelParamCount.tblock(config, i, 1) for i in range(config.n_layers)]
+        + [ReaLModelParamCount.head(config, 1)]
     )
+
     parts = None
     if method == "uniform":
+        # Each stage gets a simple uniform number of layers.
+        from deepspeed.runtime import utils as ds_utils
+
         parts = ds_utils.partition_uniform(
             num_items=config.n_layers + 2, num_parts=num_stages
         )
     elif method == "parameters":
-        parts = ds_utils.partition_balanced(weights=param_counts, num_parts=num_stages)
-    elif method == "parameters_balanced":
+        # Partition according to the parameter count.
         param_counts = np.array(param_counts)
-        parts = true_partition_balanced(nums=param_counts, k=num_stages)
+        parts = datapack.partition_balanced(param_counts, k=num_stages)
     else:
         raise NotImplementedError(f"Partitioning method {method} not implemented.")
 

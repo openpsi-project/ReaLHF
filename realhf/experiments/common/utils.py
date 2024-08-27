@@ -1,17 +1,18 @@
 import collections
 from typing import *
 
+import numpy as np
+
 from realhf.api.core.config import (
     ModelBackendAbstraction,
     ModelInterfaceType,
     ModelName,
 )
-from realhf.api.core.dfg import OffloadHook, SyncParamHook
+from realhf.api.core.dfg import OffloadHook, ParamReallocHook
 from realhf.api.quickstart.device_mesh import RPCAllocation
 from realhf.api.quickstart.model import (
     ModelTrainEvalConfig,
     ParallelismConfig,
-    get_real_model_config,
     parallelism_eq,
 )
 from realhf.base import logging
@@ -23,6 +24,7 @@ logger = logging.getLogger("Experiment Common Utils", "benchmark")
 def get_topo(
     parallel: ParallelismConfig,
     gradient_checkpointing: bool,
+    gradient_accumulation_fusion: bool,
     max_prompt_len: Optional[int] = None,
 ) -> PipeModelDataParallelTopology:
     return PipeModelDataParallelTopology(
@@ -32,6 +34,7 @@ def get_topo(
         sequence_parallel=parallel.use_sequence_parallel,
         gradient_checkpointing=gradient_checkpointing,
         max_prompt_len=max_prompt_len,
+        gradient_accumulation_fusion=gradient_accumulation_fusion,
     )
 
 
@@ -112,17 +115,6 @@ def make_inf_backend_config(
     return ModelBackendAbstraction("inference")
 
 
-def make_model_config(cfg: ModelTrainEvalConfig):
-    return get_real_model_config(
-        model_path=cfg.path,
-        hf_model_family=cfg.type._class,
-        is_critic=cfg.type.is_critic,
-        init_critic_from_actor=cfg.init_critic_from_actor,
-        dtype="bf16" if cfg.enable_bf16 else "fp16",
-        lora=cfg.lora,
-    )
-
-
 def resolve_replica_ids(rpc_allocs: List[RPCAllocation]):
     role_cnt = collections.defaultdict(int)
     first_device_mesh = dict()
@@ -161,14 +153,27 @@ def resolve_rpc_hooks(rpc_allocs: List[RPCAllocation]):
                     and device_mesh == other.device_mesh
                 ):
                     continue
-                other.rpc.add_pre_hook(SyncParamHook(source=rpc.model_name))
-                other.rpc.add_post_hook(SyncParamHook(target=rpc.model_name))
+                other.rpc.add_pre_hook(ParamReallocHook(source=rpc.model_name))
+                other.rpc.add_post_hook(ParamReallocHook(target=rpc.model_name))
                 logger.info(
                     f"Add param sync hooks between "
                     f"{rpc.name} and {other.rpc.name} for role {rpc.role}"
                 )
 
-        # add offload hooks for inference and generate rpcs
-        if ModelInterfaceType.TRAIN_STEP not in role_interface_types[rpc.role]:
+        # Add offload hooks for inference and generate rpcs.
+        # Add the offload hook only if the role will not be trained (e.g., reward model)
+        # and its allocation is overlapped with at least one other RPCs.
+        # As a result, a single inference/generate RPC will not be offloaded.
+        overlapped_with_other = False
+        for other in rpc_allocs:
+            if rpc.name == other.rpc.name:
+                continue
+            if np.any(np.logical_and(other.device_mesh.mapping, device_mesh.mapping)):
+                overlapped_with_other = True
+                break
+        if (
+            ModelInterfaceType.TRAIN_STEP not in role_interface_types[rpc.role]
+            and overlapped_with_other
+        ):
             rpc.add_post_hook(OffloadHook())
             logger.info(f"Add offload hook for rpc {rpc.name} for role {rpc.role}")

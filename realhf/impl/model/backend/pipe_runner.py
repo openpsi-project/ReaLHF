@@ -14,6 +14,7 @@ import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedu
 import realhf.impl.model.utils.cuda_graph as cuda_graph
 from realhf.api.core.data_api import SequenceSample
 from realhf.api.core.model_api import GenerationHyperparameters
+from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
 from realhf.impl.model.nn.real_llm_generate import (
@@ -54,7 +55,9 @@ def _split_and_prefill_pipe_input(
     partition_min_size = input_.bs // n_mbs
     splitted = input_.split(n_mbs, min_size=partition_min_size)
 
-    batch_seqlens = [torch.cat(s.seqlens["packed_input_ids"]) for s in splitted]
+    batch_seqlens = [
+        torch.tensor(flat2d(s.seqlens["packed_input_ids"])) for s in splitted
+    ]
     assert all(all(x > 0 for x in sls) for sls in batch_seqlens)
 
     # Sanity check to ensure that the order of splitted sequences
@@ -165,18 +168,36 @@ def _exec_pipe_schedule(
     stage_id = constants.pipe_parallel_rank()
     global_rank = dist.get_rank()
     parllelism_rank = constants.parallelism_rank()
+    will_break = False
 
-    # A termination machanism to avoid all-reduce at each step.
+    tensor_buffer.put(
+        "terminate",
+        0,
+        torch.tensor(False, dtype=torch.bool, device=torch.cuda.current_device()),
+    )  # a global terminate signal for all micro batches that is transferred across stages
+
+    # A termination mechanism to avoid all-reduce at each step.
     # If the schedule is about to terminate (i.e., will_break is True),
     # the last stage will send this message to the previous stages with
-    # one more pipeline round (last -> 0 -> 1 -> .. -> last-1).
-    will_break = False
+    # one more pipeline round (last -> 0 -> 1 -> .. -> last-1 -> last).
+    # After a stage receive terminate signal (or meet the terminate
+    # condition in the last stage), the stage will enter burnout in
+    # the next step. In burnout, the stage will only execute necessary
+    # communication instructions that send terminate to next stage or
+    # avoid communication stuck. Specifically:
+    # 1. The last stage: Send terminal signal to the first stage +
+    #    recv activations for num_stages // 2 + 1 steps;
+    # 2. stage_id % 2 == 0: Burnout one step, send terminal signal to
+    #    the next stage;
+    # 3. stage_id % 2 == 1: No burnout step, since receiving and sending
+    #    terminate signal happen in the same stage.
     if is_last_stage:
-        burn_out_steps = num_stages - 1
-    elif stage_id == num_stages - 2:
-        burn_out_steps = 0
+        burn_out_steps = num_stages // 2 + 1
     else:
-        burn_out_steps = 1
+        if stage_id % 2 == 1:
+            burn_out_steps = 0
+        else:
+            burn_out_steps = 1
 
     # For each step in the schedule
     for step_cmds in pipe_schedule:
@@ -189,15 +210,22 @@ def _exec_pipe_schedule(
                 )
 
             if will_break:
-                # With the termination mechanism, skip communication instructions
-                # because its peer stages have been terminated
-                if (
-                    is_last_stage
-                    and burn_out_steps < num_stages - 1
-                    and type(cmd) != schedule.RecvActivation
+                if is_last_stage:
+                    if burn_out_steps == num_stages // 2 + 1 and type(cmd) not in [
+                        schedule.SendNextTokens,
+                        schedule.RecvActivation,
+                    ]:
+                        continue
+                    if (
+                        burn_out_steps < num_stages // 2 + 1
+                        and type(cmd) != schedule.RecvActivation
+                    ):
+                        continue
+                elif (
+                    not is_last_stage
+                    and burn_out_steps == 1
+                    and type(cmd) != schedule.SendActivation
                 ):
-                    continue
-                elif not is_last_stage and type(cmd) != schedule.SendActivation:
                     continue
 
             try:
@@ -215,6 +243,14 @@ def _exec_pipe_schedule(
         if will_break:
             burn_out_steps -= 1
         if terminate_condition is not None and terminate_condition():
+            tensor_buffer.put(
+                "terminate",
+                0,
+                torch.tensor(
+                    True, dtype=torch.bool, device=torch.cuda.current_device()
+                ),
+            )
+        if tensor_buffer.get("terminate", 0):
             will_break = True
         if will_break and burn_out_steps <= 0:
             break
@@ -322,8 +358,8 @@ class PipeGenInstrSet:
         micro_batch_id: int,
         step_id: int,
     ):
-        cuda_graph_name = f"decoding_{micro_batch_id}"
-        graph = cuda_graph.get_graph(cuda_graph_name)
+        tokenizer = tensor_buffer.get("tokenizer", micro_batch_id)
+        gconfig = tensor_buffer.get("gconfig", micro_batch_id)
 
         is_first_stage = constants.is_first_pipe_stage()
         if is_first_stage:
@@ -348,9 +384,7 @@ class PipeGenInstrSet:
             if is_first_stage:
                 x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
                 ys = tensor_buffer.get("batch_input_ys", micro_batch_id, remove=False)
-                ys[0].packed_input_ids = (
-                    buf  # sequence parallel forward only accept one dim input_ids
-                )
+                ys[0].packed_input_ids = buf
                 ys[0].packed_position_ids = None
             else:
                 others = tensor_buffer.get(
@@ -361,6 +395,34 @@ class PipeGenInstrSet:
         else:
             x = tensor_buffer.get("batch_input_x", micro_batch_id, remove=True)
 
+        # Capture CUDAGraph in the first decoding step.
+        cuda_graph_name = f"decoding_{micro_batch_id}"
+        # Get the graph from the buffer instead of the global handle.
+        # This is because the graph may not be destroyed in the previous generation call,
+        # but we need to call into the `capture_decoding_graph` function to reinitialize
+        # the graph anyway. Getting from the buffer ensures that the `graph` variable at
+        # the first decoding step is None and we can get into the if branch.
+        graph = tensor_buffer.get(cuda_graph_name, micro_batch_id, raise_error=False)
+        if (
+            tensor_buffer.get("kv_cache_reserved", micro_batch_id)
+            and gconfig.use_cuda_graph
+            and graph is None
+        ):
+            # NOTE: we need to capture separate graphs for different micro-batches
+            # because the addresses of KV-caches are different.
+            # One CUDAGraph operates on exactly one KV-cache address.
+            graph, _, _ = maybe_capture_cudagraph(
+                module,
+                x,
+                ys,
+                cuda_graph_name,
+                force_recapture=gconfig.force_cudagraph_recapture,
+            )
+            tensor_buffer.put(cuda_graph_name, micro_batch_id, graph)
+
+        # Run model forward.
+        # NOTE: `step_id` is not the position of the instruction,
+        # but the position of the generated token.
         if graph is None or step_id == 0:
             x, ys = module.forward(x, ys)
         else:
@@ -389,17 +451,12 @@ class PipeGenInstrSet:
 
         tensor_buffer.put("batch_output_x", micro_batch_id, x)
 
-        tokenizer = tensor_buffer.get("tokenizer", micro_batch_id)
-        gconfig = tensor_buffer.get("gconfig", micro_batch_id)
-
         # Init KV cache.
         is_prefill_phase = False
         if not tensor_buffer.get("kv_cache_reserved", micro_batch_id):
             # KV cache is attached to x and ys.
             assert constants.pipe_parallel_world_size() >= 2
             x, ys = prepare_generate_inputs(module, gconfig, x, ys, cuda_graph_name)
-            if gconfig.use_cuda_graph:
-                graph, _, _ = maybe_capture_cudagraph(module, x, ys, cuda_graph_name)
             is_prefill_phase = True
             tensor_buffer.put("kv_cache_reserved", micro_batch_id, True)
 
@@ -438,7 +495,7 @@ class PipeGenInstrSet:
                     terminate, device=logits.device, dtype=torch.bool
                 )
 
-            tensor_buffer.put("terminate", micro_batch_id, terminate)
+            tensor_buffer.put("_terminate", micro_batch_id, terminate)
             tensor_buffer.put(
                 "unfinished_sequences", micro_batch_id, unfinished_sequences
             )
@@ -460,7 +517,7 @@ class PipeGenInstrSet:
             module, tensor_buffer, stage_id, micro_batch_id, step_id
         )
         tensor_buffer.put("first_token", micro_batch_id, False)
-        terminate = tensor_buffer.get("terminate", micro_batch_id)
+        terminate = tensor_buffer.get("terminate", 0)
         p2p.send(terminate, constants.next_pipe_stage())
 
     def _exec_recv_activations(
@@ -504,7 +561,8 @@ class PipeGenInstrSet:
 
         terminate = torch.empty((), dtype=torch.bool, device=device)
         p2p.recv(terminate, prev_stage)
-        tensor_buffer.put("terminate", micro_batch_id, terminate)
+        if terminate:
+            tensor_buffer.put("terminate", 0, terminate)
 
     def _exec_send_next_tokens(
         module: ReaLModel,
@@ -521,7 +579,7 @@ class PipeGenInstrSet:
             "next_tokens_to_send", micro_batch_id, remove=True
         )
         p2p.send(next_tokens_to_send, next_stage, async_op=False)
-        p2p.send(tensor_buffer.get("terminate", micro_batch_id), next_stage)
+        p2p.send(tensor_buffer.get("terminate", 0), next_stage)
         tensor_buffer.put("first_token", micro_batch_id, False)
 
     def _exec_recv_next_tokens(
@@ -552,7 +610,9 @@ class PipeGenInstrSet:
 
         terminate = torch.empty((), dtype=torch.bool, device=device)
         p2p.recv(terminate, prev_stage)
-        tensor_buffer.put("terminate", micro_batch_id, terminate)
+
+        if terminate:
+            tensor_buffer.put("terminate", 0, terminate)
 
     INSTRUCTION_MAP = {
         schedule.ForwardPass: _exec_forward_pass,
@@ -784,13 +844,10 @@ class PipelineRunner:
         )
 
         # for elegant generation termination
-        gconfig = copy.deepcopy(gconfig)
-        gconfig.max_new_tokens += constants.pipe_parallel_world_size() - 1
-
         for mbid in range(num_micro_batches):
             tensor_buffer.put("kv_cache_reserved", mbid, False)
             tensor_buffer.put(
-                "terminate",
+                "_terminate",
                 mbid,
                 torch.tensor(0, dtype=torch.bool, device=self.module.device),
             )
@@ -808,17 +865,19 @@ class PipelineRunner:
             tensor_buffer.put("tokenizer", mbid, tokenizer)
             tensor_buffer.put("gconfig", mbid, gconfig)
 
+        num_stages = constants.pipe_parallel_world_size()
         sched = schedule.GenerateSchedule(
             micro_batches=num_micro_batches,
             stages=constants.pipe_parallel_world_size(),
             stage_id=constants.pipe_parallel_rank(),
-            max_new_tokens=gconfig.max_new_tokens,
+            max_new_tokens=gconfig.max_new_tokens + num_stages // 2 + 10,
+            # extend generate schedule for graceful terminate
         )
 
         def terminate_condition():
             term = all(
                 [
-                    tensor_buffer.get("terminate", mbid)
+                    tensor_buffer.get("_terminate", mbid)
                     for mbid in range(num_micro_batches)
                 ]
             )
@@ -831,6 +890,10 @@ class PipelineRunner:
             pipe_schedule=sched,
             terminate_condition=terminate_condition,
         )
+
+        if gconfig.use_cuda_graph and gconfig.force_cudagraph_recapture:
+            for micro_batch_id in range(num_micro_batches):
+                cuda_graph.destroy(f"decoding_{micro_batch_id}")
 
         if not constants.is_last_pipe_stage():
             return None

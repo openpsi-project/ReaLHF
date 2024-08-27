@@ -8,6 +8,7 @@ import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
 from realhf.api.core.data_api import SequenceSample
+from realhf.base.datapack import flat2d
 
 logger = logging.getLogger("Reinforce Interface")
 
@@ -20,7 +21,7 @@ def _reinforce_loss_from_model_outputs(
     from realhf.impl.model.utils.functional import gather_packed_shifted_log_probs
 
     packed_input_ids = input_.data["packed_input_ids"]
-    seqlens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+    seqlens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
     cu_seqlens = torch.nn.functional.pad(seqlens.cumsum(0), (1, 0)).int()
     shift_one_indices = torch.cat(
         [
@@ -88,7 +89,10 @@ class ReinforceInterface(model_api.ModelInterface):
 
     @torch.no_grad()
     def generate(
-        self, model: model_api.Model, input_: SequenceSample
+        self,
+        model: model_api.Model,
+        input_: SequenceSample,
+        n_mbs=None,
     ) -> SequenceSample:
         # NOTE: import here to avoid cuda initialization
         from realhf.impl.model.nn.real_llm_generate import (
@@ -104,6 +108,7 @@ class ReinforceInterface(model_api.ModelInterface):
             input_=input_,
             tokenizer=model.tokenizer,
             gconfig=self.generation_config,
+            num_micro_batches=n_mbs,
         )
         if res is None:
             return None
@@ -126,8 +131,8 @@ class ReinforceInterface(model_api.ModelInterface):
             prompt_mask,
         ) = concat_prompt_to_generation_output(
             packed_prompts=input_.data["packed_input_ids"],
-            prompt_lengths=torch.cat(input_.seqlens["packed_input_ids"]).to(
-                model.device
+            prompt_lengths=torch.tensor(
+                flat2d(input_.seqlens["packed_input_ids"]), device=model.device
             ),
             gen_tokens=gen_tokens,
             logprobs=logprobs,
@@ -135,10 +140,6 @@ class ReinforceInterface(model_api.ModelInterface):
             gen_lengths=gen_lengths,
         )
 
-        seqlens = [
-            torch.tensor([s], dtype=torch.int32)
-            for s in seq_lengths.cpu().numpy().tolist()
-        ]
         data = dict(
             packed_input_ids=packed_input_ids,
             prompt_mask=prompt_mask,
@@ -146,12 +147,14 @@ class ReinforceInterface(model_api.ModelInterface):
 
         res = SequenceSample.from_default(
             ids=input_.ids,
-            seqlens=seqlens,
+            seqlens=seq_lengths.cpu().numpy().tolist(),
             data=data,
         )
         return res
 
-    def train_step(self, model: model_api.Model, input_: SequenceSample) -> Dict:
+    def train_step(
+        self, model: model_api.Model, input_: SequenceSample, n_mbs=None
+    ) -> Dict:
         # NOTE: import here to avoid cuda initialization
         from realhf.impl.model.utils.functional import masked_normalization
         from realhf.impl.model.utils.ppo_functional import (
@@ -161,7 +164,9 @@ class ReinforceInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        seqlens = torch.cat(input_.seqlens["packed_input_ids"]).cuda()
+        seqlens = torch.tensor(
+            flat2d(input_.seqlens["packed_input_ids"]), device=model.device
+        )
         short1seqlens = seqlens - 1
         rewards = torch.zeros(
             int(short1seqlens.sum()), dtype=torch.float32, device=model.device
@@ -222,10 +227,14 @@ class ReinforceInterface(model_api.ModelInterface):
             input_=input_,
             version_steps=model.version.global_step,
             loss_fn=_reinforce_loss_from_model_outputs,
+            num_micro_batches=n_mbs,
         )
 
         model.inc_version()
 
+        global_stats = constants.log_global_stats_tracker(
+            return_dict=True, clear_stats_after_logging=True
+        )
         if stats:
             bs = int(stats["bs"])
             stats = dict(
@@ -234,5 +243,6 @@ class ReinforceInterface(model_api.ModelInterface):
                 rewards=float(stats["rewards"] / bs),
             )
             stats["advantage"] = stats["rewards"] - stats["baseline_rewards"]
+            stats.update(global_stats)
 
         return dict(stats) if stats else {}

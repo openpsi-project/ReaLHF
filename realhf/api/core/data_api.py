@@ -3,6 +3,7 @@ import json
 import os
 import random
 import time
+from contextlib import contextmanager
 
 # NOTE: We don't sue wildcard importing here because the type
 # `Sequence` has a very similar name to `SequenceSample`.
@@ -105,17 +106,19 @@ class SequenceSample:
         >>> s.keys
         {'resp', 'prompt'}
         >>> s.seqlens
-        {'prompt': [tensor([13]), tensor([6])], 'resp': [tensor([ 6, 17, 15]), tensor([13, 15, 13])]}
+        {'prompt': [[13], [6]], 'resp': [[ 6, 17, 15], [13, 15, 13]]}
         >>> s.data
         {'prompt': torch.tensor([...]), 'resp': torch.tensor([...])}
 
     Keypoints:
 
-    - Pieces of data can have different lengths (e.g., the first prompt has a length of 13
+    - Data with different batch indices can have different lengths (e.g., the first prompt has a length of 13
       while the second has a length of 6).
 
-    - Inside a piece of data, a key ("response")
+    - A key ("response")
       can correspond to multiple sequences with different lengths.
+      Besides, the number of sequences for each key and for each data can be different.
+      For example, the first prompt may have 2 answers and the second may have 3.
 
     - No matter what is the batch size and how many sequences we store for each key,
       the data is concatenated as a 1D tensor. The outter dimension is the batch size
@@ -138,10 +141,11 @@ class SequenceSample:
         Used to amend new data into the buffer after a model function call.
     :type ids: List[Hashable]
     :param seqlens: The sequence lengths of each sequence in the data. For a given key,
-        it should be a list of 1D ``torch.IntTensor``,
-        with the list length equal to the batch size
-        and the size of the tensor equal to the number of sequences for this key.
-    :type seqlens: Dict[str, List[torch.Tensor]]
+        it should be a list of list of integers. The outer list is the batch size,
+        while the inner list is the sequence lengths for this key.
+        We use python-native list here because (1) pickling torch.Tensor or numpy array is inefficient
+        and (2) the size of the inner list can be different across the batch, so we cannot create 2D arrays easily.
+    :type seqlens: Dict[str, List[List[int]]]
     :param data: The actual concatenated data. If it is None,
         the sample is a metadata-only sample used by the master worker.
         The spec of the data should be consistent with the seqlens,
@@ -159,7 +163,7 @@ class SequenceSample:
 
     ids: List[Hashable]
 
-    seqlens: Dict[str, List[torch.Tensor]]
+    seqlens: Dict[str, List[List[int]]]
 
     data: Optional[Dict[str, torch.Tensor | None]] = None
 
@@ -187,22 +191,9 @@ class SequenceSample:
     ) -> Dict[str, List[torch.Tensor]]:
         for k, lens in seqlens.items():
             assert isinstance(lens, list)
-            assert all(isinstance(l, torch.Tensor) for l in lens)
+            assert all(isinstance(l, list) for l in lens)
             for i, lens_ in enumerate(lens):
-                if str(lens_.device) != "cpu":
-                    logger.warning(
-                        "The device of seqlens is not cpu. "
-                        "Transfering data between host and "
-                        "device will cause additional overheads."
-                    )
-                    lens[i] = lens_.cpu()
-                if lens_.dtype != torch.int32:
-                    logger.warning(
-                        "The dtype of seqlens is not int32. " "Converting to int32."
-                    )
-                    lens[i] = lens_.to(torch.int32)
-                if len(lens_.shape) != 1:
-                    raise ValueError(f"Seqlens should be 1D tensors: {lens_}.")
+                assert all(isinstance(l_, int) for l_ in lens_)
         return seqlens
 
     @model_validator(mode="after")
@@ -245,7 +236,7 @@ class SequenceSample:
         if self.data is None:
             return self
         acc_seqlen = {
-            k: sum(lens.sum() for lens in lens_list)
+            k: sum(sum(lens) for lens in lens_list)
             for k, lens_list in self.seqlens.items()
         }
         for k, v in self.data.items():
@@ -284,13 +275,9 @@ class SequenceSample:
         :type keys: Optional[List[str]]
         """
         if keys is None:
-            for sample in samples:
-                if sample.keys != samples[0].keys:
-                    raise ValueError("Keys of samples are not the same.")
             keys = samples[0].keys
         else:
-            for k in keys:
-                assert all(k in s.keys for s in samples)
+            keys = set(keys)
 
         seqlens = {k: sum([s.seqlens[k] for s in samples], []) for k in keys}
         if samples[0].data is not None:
@@ -303,30 +290,24 @@ class SequenceSample:
                 for k in keys
             }
         else:
-            assert all(s.data is None for s in samples)
             data = None
         id_ = sum([s.ids for s in samples], [])
-        # For metadata, assuming that all metadata have the same keys,
-        # simply convert a list of dicts to a dict of lists.
-        if not all(
-            set(s.metadata.keys()) == set(samples[0].metadata.keys()) for s in samples
-        ):
-            raise ValueError("Metadata keys are not the same.")
         metadata = {
             k: sum([s.metadata[k] for s in samples], []) for k in samples[0].metadata
         }
-        return cls(
-            keys=keys,
-            dtypes={key: samples[0].dtypes[key] for key in keys},
-            trailing_shapes={key: samples[0].trailing_shapes[key] for key in keys},
-            ids=id_,
-            seqlens=seqlens,
-            data=data,
-            metadata=metadata,
-        )
+        with cls.disable_validation():
+            return cls(
+                keys=keys,
+                dtypes={key: samples[0].dtypes[key] for key in keys},
+                trailing_shapes={key: samples[0].trailing_shapes[key] for key in keys},
+                ids=id_,
+                seqlens=seqlens,
+                data=data,
+                metadata=metadata,
+            )
 
     def _get_split_key(self):
-        acc_seqlen = {k: sum(l.sum() for l in lens) for k, lens in self.seqlens.items()}
+        acc_seqlen = {k: sum(sum(l) for l in lens) for k, lens in self.seqlens.items()}
         return max(acc_seqlen, key=acc_seqlen.get)
 
     def get_split_spec(
@@ -345,7 +326,7 @@ class SequenceSample:
         """
         if key is None:
             key = self._get_split_key()
-        lens = [lens.sum() for lens in self.seqlens[key]]
+        lens = [sum(lens) for lens in self.seqlens[key]]
         partitions = datapack.min_abs_diff_partition(lens, k, min_size)
         return SequenceSplitSpec(partitions=partitions)
 
@@ -358,7 +339,7 @@ class SequenceSample:
                 k: lens_list[start:end] for k, lens_list in self.seqlens.items()
             }
             _data_len = {
-                k: sum(lens.sum() for lens in lens_list)
+                k: sum(sum(lens) for lens in lens_list)
                 for k, lens_list in new_seqlens.items()
             }
             if self.data is not None:
@@ -380,17 +361,18 @@ class SequenceSample:
                     raise ValueError(
                         f"Unknown how to split non-list metadata: ({k}, {v})."
                     )
-            samples.append(
-                SequenceSample(
-                    dtypes=self.dtypes,
-                    trailing_shapes=self.trailing_shapes,
-                    keys=self.keys,
-                    ids=new_id,
-                    seqlens=new_seqlens,
-                    data=new_data,
-                    metadata={k: v[start:end] for k, v in self.metadata.items()},
+            with self.disable_validation():
+                samples.append(
+                    SequenceSample(
+                        dtypes=self.dtypes,
+                        trailing_shapes=self.trailing_shapes,
+                        keys=self.keys,
+                        ids=new_id,
+                        seqlens=new_seqlens,
+                        data=new_data,
+                        metadata={k: v[start:end] for k, v in self.metadata.items()},
+                    )
                 )
-            )
         return samples
 
     def split(
@@ -414,7 +396,8 @@ class SequenceSample:
 
     def unpack(self):
         """Unpack a batch of data into individual pieces of data."""
-        return self.split(self.bs, min_size=1)
+        partitions = [(i, i + 1) for i in range(self.bs)]
+        return self.split_with_spec(SequenceSplitSpec(partitions=partitions))
 
     def cuda(self):
         """Move the data to GPU inplace."""
@@ -432,15 +415,16 @@ class SequenceSample:
 
     def meta(self) -> "SequenceSample":
         """Create a new SequenceSample that does not contain any data."""
-        return SequenceSample(
-            keys=self.keys,
-            trailing_shapes=self.trailing_shapes,
-            dtypes=self.dtypes,
-            ids=self.ids,
-            data=None,
-            seqlens=self.seqlens,
-            metadata=self.metadata,
-        )
+        with self.disable_validation():
+            return SequenceSample(
+                keys=self.keys,
+                trailing_shapes=self.trailing_shapes,
+                dtypes=self.dtypes,
+                ids=self.ids,
+                data=None,
+                seqlens=self.seqlens,
+                metadata=self.metadata,
+            )
 
     def update_(self, other: "SequenceSample"):
         """Inplace update data from another SequenceSample.
@@ -465,7 +449,7 @@ class SequenceSample:
             "rewards",
             "greedy_rewards",
         ]:
-            return [torch.tensor([1], dtype=torch.int32) for _ in seqlens]
+            return [[1] for _ in seqlens]
         elif key in [
             "input_ids",
             "packed_seq",
@@ -479,7 +463,7 @@ class SequenceSample:
             "values",
             "packed_prompts",
         ]:
-            return [torch.tensor([seqlen], dtype=torch.int32) for seqlen in seqlens]
+            return [[seqlen] for seqlen in seqlens]
         elif key in [
             "packed_logprobs",
             "logprobs",
@@ -492,7 +476,7 @@ class SequenceSample:
             "kl_rewards",
             "returns",
         ]:
-            return [torch.tensor([seqlen - 1], dtype=torch.int32) for seqlen in seqlens]
+            return [[seqlen - 1] for seqlen in seqlens]
         else:
             raise NotImplementedError(
                 f"Seqlen could not be resolved given key {key}. "
@@ -538,7 +522,11 @@ class SequenceSample:
                     f"Metadata `{k}` should be a list of length {len(seqlens)}: {v}."
                 )
         keys = set(data.keys())
-        seqlens = [int(seqlen) for seqlen in seqlens]
+        if isinstance(seqlens[0], list):
+            assert len(seqlens[0]) == 1
+            seqlens = [seqlen[0] for seqlen in seqlens]
+        else:
+            assert all(isinstance(seqlen, int) for seqlen in seqlens)
         seqlens = {key: cls._resolve_seqlen_from_key(key, seqlens) for key in keys}
         trailing_shapes = {
             key: data[key].shape[1:] if data[key] is not None else None for key in keys
@@ -572,6 +560,27 @@ class SequenceSample:
                     self.data[new_k] = self.data.pop(k)
         self.keys = set(remap.get(k, k) for k in self.keys)
 
+    @classmethod
+    @contextmanager
+    def disable_validation(cls):
+        """Disable the expensive pydantic validation within this context.
+
+        Used to accelerate gather/split/transfer operations since we
+        have ensured that the data created in datasets and interfaces
+        are valid.
+        """
+        original_init = cls.__init__
+
+        def no_validation_init(self, *args, **kwargs):
+            kwargs["keys"] = set(kwargs["keys"])
+            self.__dict__.update(kwargs)
+
+        cls.__init__ = no_validation_init
+        try:
+            yield
+        finally:
+            cls.__init__ = original_init
+
 
 @dataclasses.dataclass
 class DataBatchMeta:
@@ -579,10 +588,6 @@ class DataBatchMeta:
     meta_sample: SequenceSample
     epoch: int
     is_final_batch: bool
-
-    def __post_init__(self):
-        if self.meta_sample.data is not None:
-            raise ValueError("meta_sample should not contain any data.")
 
 
 @dataclasses.dataclass

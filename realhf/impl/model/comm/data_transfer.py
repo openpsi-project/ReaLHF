@@ -194,7 +194,8 @@ def run_data_transfer(
                 # The receiver is also a sender.
                 # We can directly use the data without comm.
                 for _id in step.ids:
-                    storage[_id].data[step.key] = storage[_id].data[step.key].cuda()
+                    if storage[_id].data[step.key] is not None:
+                        storage[_id].data[step.key] = storage[_id].data[step.key].cuda()
             else:
                 # If we have to receive remote data, we first check whether
                 # the data has been sent here in previous function calls.
@@ -207,43 +208,72 @@ def run_data_transfer(
                         for _id in ids
                     ]
                 )
+
+                metadata_cached = all(
+                    [
+                        set(step.dst_ranks).issubset(
+                            set(received_worker_idx_table[_id]["__metadata__"])
+                        )
+                        for _id in ids
+                    ]
+                )
                 if cached:
                     pass
                 else:
                     dtype = meta_samples[ids[0]].dtypes[step.key]
                     total_len = sum(
-                        meta_samples[_id].seqlens[step.key][0].sum() for _id in ids
+                        sum(meta_samples[_id].seqlens[step.key][0]) for _id in ids
                     )
                     trailing_shape = meta_samples[ids[0]].trailing_shapes[step.key]
-                    buf = torch.zeros(
-                        (total_len, *trailing_shape),
-                        dtype=dtype,
-                        device=torch.cuda.current_device(),
-                    )
-                    dist.broadcast(buf, src=step.src, group=step.group)
-                    metadatas = [None for _ in step.ids]
-                    dist.broadcast_object_list(
-                        metadatas, src=step.src, group=step.group
-                    )
+
+                    # Receive data if it is not None.
+                    if trailing_shape is not None:
+                        buf = torch.zeros(
+                            (total_len, *trailing_shape),
+                            dtype=dtype,
+                            device=torch.cuda.current_device(),
+                        )
+                        dist.broadcast(buf, src=step.src, group=step.group)
+                    else:
+                        buf = None
+
+                    # Receive metadata if not cached.
+                    if not metadata_cached:
+                        metadatas = [{} for _ in step.ids]
+                        dist.broadcast_object_list(
+                            metadatas, src=step.src, group=step.group
+                        )
+
+                    # Mark that the data has been received.
                     for _id in ids:
                         received_worker_idx_table[_id][step.key].union(step.dst_ranks)
+                        received_worker_idx_table[_id]["__metadata__"].union(
+                            step.dst_ranks
+                        )
 
                     # Split the received data and put it into the storage.
                     offset = 0
                     for _id, metadata in zip(ids, metadatas):
                         seqlens = meta_samples[_id].seqlens[step.key]
                         assert len(seqlens) == 1
-                        seqlen = seqlens[0].sum()
-                        vs, offset = buf[offset : offset + seqlen], offset + seqlen
-                        s = SequenceSample(
-                            keys=[step.key],
-                            dtypes={step.key: vs.dtype},
-                            trailing_shapes={step.key: vs.shape[1:]},
-                            ids=[_id],
-                            seqlens={step.key: seqlens},
-                            data={step.key: vs},
-                            metadata=metadata,
-                        )
+                        seqlen = sum(seqlens[0])
+                        if buf is not None:
+                            vs = buf[offset : offset + seqlen]
+                        else:
+                            vs = None
+                        offset = offset + seqlen
+                        with SequenceSample.disable_validation():
+                            s = SequenceSample(
+                                keys=[step.key],
+                                dtypes={step.key: vs.dtype if vs is not None else None},
+                                trailing_shapes={
+                                    step.key: vs.shape[1:] if vs is not None else None
+                                },
+                                ids=[_id],
+                                seqlens={step.key: seqlens},
+                                data={step.key: vs},
+                                metadata=metadata,
+                            )
                         if _id in storage:
                             storage[_id].update_(s)
                         else:
@@ -259,21 +289,35 @@ def run_data_transfer(
                     for _id in step.ids
                 ]
             )
+            metadata_cached = all(
+                [
+                    set(step.dst_ranks).issubset(
+                        set(sent_worker_idx_table[_id]["__metadata__"])
+                    )
+                    for _id in step.ids
+                ]
+            )
             if cached:
                 pass
             else:
-                # If not, we fetch the data from the storage and send it to all destinations.
+                # If not cached, we fetch the data from the storage and send it to all destinations.
                 for _id in step.ids:
-                    storage[_id].data[step.key] = storage[_id].data[step.key].cuda()
-                vs = torch.cat(
-                    [storage[_id].data[step.key] for _id in step.ids],
-                    dim=0,
-                )
-                dist.broadcast(vs, src=step.rank, group=step.group)
-                dist.broadcast_object_list(
-                    [storage[_id].metadata for _id in step.ids],
-                    src=step.rank,
-                    group=step.group,
-                )
+                    if storage[_id].data[step.key] is not None:
+                        storage[_id].data[step.key] = storage[_id].data[step.key].cuda()
+                if all([storage[_id].data[step.key] is not None for _id in step.ids]):
+                    vs = torch.cat(
+                        [storage[_id].data[step.key] for _id in step.ids],
+                        dim=0,
+                    )
+                    dist.broadcast(vs, src=step.rank, group=step.group)
+
+                if not metadata_cached:
+                    dist.broadcast_object_list(
+                        [storage[_id].metadata for _id in step.ids],
+                        src=step.rank,
+                        group=step.group,
+                    )
+
                 for _id in step.ids:
                     sent_worker_idx_table[_id][step.key].union(step.dst_ranks)
+                    sent_worker_idx_table[_id]["__metadata__"].union(step.dst_ranks)

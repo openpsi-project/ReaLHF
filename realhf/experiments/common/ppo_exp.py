@@ -14,11 +14,7 @@ from realhf.api.core.config import (
 from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
-from realhf.api.quickstart.device_mesh import (
-    AllocationConfig,
-    DeviceMesh,
-    RPCAllocation,
-)
+from realhf.api.quickstart.device_mesh import DeviceMesh, MFCConfig, RPCAllocation
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.experiments.common.common import CommonExperimentConfig
@@ -32,19 +28,6 @@ class PPOHyperparameters:
 
     :param gen: Generation hyperparameters.
     :type gen: GenerationHyperparameters
-    :param force_no_logits_mask: Whether to omit logits mask.
-        The logits mask will be produced when using top-k or top-p sampling,
-        where it is used to mark tokens that are filtered out.
-        This mask will be used by the reference model and the actor model
-        during training in order to align inferred logits with that during
-        generation and produce accurate KLs.
-        Logits mask with top-k/top-p sampling will largely improve the
-        stability of PPO training because it narrows the action space.
-        However, this benefit does not come for free.
-        The logits mask will occupy a large amount of additional GPU memory.
-        If this option is set to True, logits mask will be forcely omitted to
-        save GPU memory, but the learning performance may also drop.
-    :type force_no_logits_mask: bool
     :param ppo_n_minibatches: Number of minibatches in each PPO update.
     :type ppo_n_minibatches: int
     :param kl_ctl: Coefficient of KL divergence rewards.
@@ -88,7 +71,6 @@ class PPOHyperparameters:
     gen: GenerationHyperparameters = dataclasses.field(
         default_factory=GenerationHyperparameters
     )
-    force_no_logits_mask: bool = False
     ppo_n_minibatches: int = 4
     kl_ctl: float = 0.1
     discount: float = 1.0
@@ -172,22 +154,34 @@ class PPOConfig(CommonExperimentConfig):
     :type ref: ModelTrainEvalConfig
     :param rew: Runtime configuration of the reward LLM.
     :type rew: ModelTrainEvalConfig
-    :param actor_train: :class:`AllocationConfig` for TrainActor.
-    :type actor_train: AllocationConfig
-    :param critic_train: :class:`AllocationConfig` for TrainCritic.
-    :type critic_train: AllocationConfig
-    :param actor_gen: :class:`AllocationConfig` for Rollout.
-    :type actor_gen: AllocationConfig
-    :param critic_inf: :class:`AllocationConfig` for InfValues.
-    :type critic_inf: AllocationConfig
-    :param rew_inf: :class:`AllocationConfig` for InfReward.
-    :type rew_inf: AllocationConfig
-    :param ref_inf: :class:`AllocationConfig` for InfRef.
-    :type ref_inf: AllocationConfig
+    :param actor_train: :class:`MFCConfig` for TrainActor.
+    :type actor_train: MFCConfig
+    :param critic_train: :class:`MFCConfig` for TrainCritic.
+    :type critic_train: MFCConfig
+    :param actor_gen: :class:`MFCConfig` for Rollout.
+    :type actor_gen: MFCConfig
+    :param critic_inf: :class:`MFCConfig` for InfValues.
+    :type critic_inf: MFCConfig
+    :param rew_inf: :class:`MFCConfig` for InfReward.
+    :type rew_inf: MFCConfig
+    :param ref_inf: :class:`MFCConfig` for InfRef.
+    :type ref_inf: MFCConfig
     :param dataset: Dataset configuration.
     :type dataset: PromptOnlyDatasetConfig
     :param ppo: Configuration for the PPO algorithm.
     :type ppo: PPOHyperparameters
+    :param actor_train_n_mbs: Number of minibatches for TrainActor.
+    :type actor_train_n_mbs: int
+    :param critic_train_n_mbs: Number of minibatches for TrainCritic.
+    :type critic_train_n_mbs: int
+    :param actor_gen_n_mbs: Number of minibatches for Rollout.
+    :type actor_gen_n_mbs: int
+    :param critic_inf_n_mbs: Number of minibatches for InfValues.
+    :type critic_inf_n_mbs: int
+    :param rew_inf_n_mbs: Number of minibatches for InfReward.
+    :type rew_inf_n_mbs: int
+    :param ref_inf_n_mbs: Number of minibatches for InfRef.
+    :type ref_inf_n_mbs: int
     """
 
     is_sft_lora: bool = False
@@ -206,12 +200,12 @@ class PPOConfig(CommonExperimentConfig):
     rew: ModelTrainEvalConfig = dataclasses.field(default_factory=ModelTrainEvalConfig)
 
     # for manual allocation only
-    actor_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    critic_train: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    actor_gen: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    critic_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    rew_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
-    ref_inf: AllocationConfig = dataclasses.field(default_factory=AllocationConfig)
+    actor_train: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    critic_train: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    actor_gen: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    critic_inf: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    rew_inf: MFCConfig = dataclasses.field(default_factory=MFCConfig)
+    ref_inf: MFCConfig = dataclasses.field(default_factory=MFCConfig)
 
     dataset: PromptOnlyDatasetConfig = dataclasses.field(
         default_factory=PromptOnlyDatasetConfig
@@ -269,7 +263,6 @@ class PPOConfig(CommonExperimentConfig):
                 **copy.deepcopy(self.ppo_kwargs),
                 "generation_config": self.ppo.gen,
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
-                "force_no_logits_mask": self.ppo.force_no_logits_mask,
                 "adv_norm": self.ppo.adv_norm,
             },
         )
@@ -292,6 +285,7 @@ class PPOConfig(CommonExperimentConfig):
         rollout = MFCDef(
             name="actor_gen",
             model_name="actor",
+            n_mbs=self.actor_gen.n_mbs,
             interface_type=ModelInterfaceType.GENERATE,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -311,6 +305,7 @@ class PPOConfig(CommonExperimentConfig):
         inf_reward = MFCDef(
             name="rew_inf",
             model_name="reward",
+            n_mbs=self.rew_inf.n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=rw_interface,
             model_type=self.rew.type,
@@ -321,13 +316,14 @@ class PPOConfig(CommonExperimentConfig):
         )
 
         inf_ref_inputs = ["packed_input_ids"]
-        if not self.ppo.force_no_logits_mask:
+        if not self.ppo.gen.force_no_logits_mask:
             inf_ref_inputs.append(
                 "packed_logits_mask",
             )
         inf_ref_logits = MFCDef(
             name="ref_inf",
             model_name="ref",
+            n_mbs=self.ref_inf.n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             model_type=self.ref.type,
             model_path=self.ref.path,
@@ -340,6 +336,7 @@ class PPOConfig(CommonExperimentConfig):
         inf_values = MFCDef(
             name="critic_inf",
             model_name="critic",
+            n_mbs=self.critic_inf.n_mbs,
             interface_type=ModelInterfaceType.INFERENCE,
             interface_impl=critic_interface,
             model_type=self.critic.type,
@@ -359,11 +356,12 @@ class PPOConfig(CommonExperimentConfig):
             "seq_no_eos_mask",
             "packed_logits_mask",
         ]
-        if self.ppo.force_no_logits_mask:
+        if self.ppo.gen.force_no_logits_mask:
             train_actor_inputs.remove("packed_logits_mask")
         train_actor = MFCDef(
             name="actor_train",
             model_name="actor",
+            n_mbs=self.actor_train.n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             model_type=self.actor.type,
             model_path=self.actor.path,
@@ -376,6 +374,7 @@ class PPOConfig(CommonExperimentConfig):
         train_critic = MFCDef(
             name="critic_train",
             model_name="critic",
+            n_mbs=self.critic_train.n_mbs,
             interface_type=ModelInterfaceType.TRAIN_STEP,
             interface_impl=critic_interface,
             model_type=self.critic.type,
@@ -420,6 +419,7 @@ class PPOConfig(CommonExperimentConfig):
                 args=dict(
                     dataset_path=self.dataset.path,
                     max_length=self.dataset.max_prompt_len,
+                    pad_to_max_length=self.dataset.pad_to_max_length,
                 ),
             )
         ]

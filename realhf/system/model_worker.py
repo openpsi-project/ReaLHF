@@ -1,8 +1,10 @@
 import collections
+import contextlib
 import gc
 import itertools
 import multiprocessing as mp
 import os
+import pickle
 import queue
 import socket
 import time
@@ -12,6 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import deepspeed
 import numpy as np
 import pynvml
+import tabulate
 import torch
 import torch.distributed as dist
 import torch.utils.data
@@ -32,6 +35,7 @@ from realhf.base import (
     topology,
 )
 from realhf.base.monitor import (
+    CUDAKernelTime,
     CUDATimeMarkType,
     cuda_tmark,
     cuda_tmarked,
@@ -58,17 +62,20 @@ TIME_RECORD_RPCS = [
 ]
 
 
-def get_pytorch_profiler(with_stack):
-    return torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True,
-        with_flops=True,
-    )
+def get_pytorch_profiler(with_stack: bool, enabled: bool = True):
+    if enabled:
+        return torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=with_stack,
+            with_flops=True,
+        )
+    else:
+        return contextlib.nullcontext()
 
 
 class NoRequestToHandle(Exception):
@@ -410,6 +417,7 @@ class ModelWorker(worker_base.Worker):
                 )
 
     def __handle_one_rpc_hook(self, hook: str, hook_data: Any):
+        tik = time.perf_counter()
         if hook == "data_transfer":
             self.__data_transfer_among_workers(hook_data)
         elif hook == "param_realloc":
@@ -451,7 +459,7 @@ class ModelWorker(worker_base.Worker):
                 from_model_name
             ):
                 self.__unwrapped_models[to_model_name].patch_reparallelization(
-                    (new_layers, new_param)
+                    (new_layers, new_param), eta=hook_data["eta"]
                 )
                 self.__model_is_handle[to_model_name] = False
         elif hook == "offload":
@@ -464,9 +472,14 @@ class ModelWorker(worker_base.Worker):
                     f"so it can't use offload."
                 )
                 return
-            m.async_offload()
+            if not m._offloaded:
+                m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
+        blogger.debug(
+            f"Model worker {self.__worker_index} handle "
+            f"RPC hook {hook} CPU time {time.perf_counter() - tik:.4f}s."
+        )
 
     def handle_all_pre_hooks(self):
         # drain request queues, handle all pending hooks, then recover the queue
@@ -577,9 +590,13 @@ class ModelWorker(worker_base.Worker):
                         self.__data_storage[x.ids[0]] = x
                         data_loaded.append(x)
 
+                if len(data_loaded) > 0:
+                    meta_sample = data_api.SequenceSample.gather(data_loaded).meta()
+                else:
+                    meta_sample = None
                 res = data_api.DataBatchMeta(
                     dp_rank=self._dp_rank,
-                    meta_sample=data_api.SequenceSample.gather(data_loaded).meta(),
+                    meta_sample=meta_sample,
                     epoch=self.__dataset_epoch,
                     is_final_batch=(
                         self.__dataset_batch_counter == len(self.__dataloader) - 1
@@ -641,6 +658,69 @@ class ModelWorker(worker_base.Worker):
 
         self.__request_queue.put_nowait((request, data, True, res))
 
+    @contextlib.contextmanager
+    def __maybe_profile_rpc(self, rpc: dfg.MFCDef):
+        # Whether to enable profiling is controlled by the following environment variables.
+        _enable_stack = os.getenv("REAL_DUMP_TRACE", "0") == "1"
+        _dump_kernel_time = os.getenv("REAL_DUMP_KERNEL_TIME", "0") == "1"
+        _enable_profiler = _enable_stack or _dump_kernel_time
+
+        # pfer ca be a null context if enable_profiler is False
+        pfer = get_pytorch_profiler(with_stack=_enable_stack, enabled=_enable_profiler)
+        pfer.__enter__()
+        # The pytorch profiler will call cuda synchronize for us.
+        profiler_tik = time.perf_counter()
+
+        try:
+            yield self
+        finally:
+            # Dump profiler results.
+            pfer.__exit__(None, None, None)
+            if _enable_profiler:
+                if self._dp_rank == 0 and self._is_dp_head:
+                    blogger.info(
+                        f"RPC {rpc.name} execution time "
+                        f"w/o external data processing: {time.perf_counter() - profiler_tik:.2f} secs."
+                    )
+                    collect_tik = time.perf_counter()
+                    blogger.info(
+                        f"Collecting system metrics from the profiler. "
+                        "This may take for a while..."
+                    )
+                if _dump_kernel_time:
+                    kernel_t = CUDAKernelTime.from_profiler(pfer)
+                    _kernel_time_dir = os.path.join(
+                        constants.LOG_ROOT,
+                        constants.experiment_name(),
+                        constants.trial_name(),
+                        "kernelTime",
+                    )
+                    os.makedirs(_kernel_time_dir, exist_ok=True)
+                    with open(
+                        os.path.join(
+                            _kernel_time_dir,
+                            f"{rpc.name}_r{dist.get_rank()}.pkl",
+                        ),
+                        "wb",
+                    ) as f:
+                        pickle.dump(kernel_t, f)
+                if _enable_stack:
+                    trace_dir = os.path.join(
+                        constants.LOG_ROOT,
+                        constants.experiment_name(),
+                        constants.trial_name(),
+                        "trace",
+                    )
+                    os.makedirs(trace_dir, exist_ok=True)
+                    pfer.export_chrome_trace(
+                        os.path.join(trace_dir, f"{rpc.name}_r{dist.get_rank()}.json")
+                    )
+                if self._dp_rank == 0 and self._is_dp_head:
+                    blogger.info(
+                        f"System metrics collected. Time consumption:"
+                        f" {time.perf_counter() - collect_tik:.2f} secs."
+                    )
+
     def __handle_model_function_calls(
         self, request: request_reply_stream.Payload, data: Any
     ):
@@ -660,14 +740,21 @@ class ModelWorker(worker_base.Worker):
         if rpc.input_key_remap:
             data.remap_keys_(rpc.input_key_remap)
 
-        if request.handle_name == "inference":
-            res = self._interface.inference(self._model, data)  # -> SequenceSample
-        elif request.handle_name == "train_step":
-            res = self._interface.train_step(self._model, data)  # -> Dict
-        elif request.handle_name == "generate":
-            res = self._interface.generate(self._model, data)  # -> SequenceSample
-        else:
-            raise NotImplementedError(f"Unknown MFC type: {request.handle_name}.")
+        with self.__maybe_profile_rpc(rpc):
+            if request.handle_name == "inference":
+                res = self._interface.inference(
+                    self._model, data, n_mbs=rpc.n_mbs
+                )  # -> SequenceSample
+            elif request.handle_name == "train_step":
+                res = self._interface.train_step(
+                    self._model, data, n_mbs=rpc.n_mbs
+                )  # -> Dict
+            elif request.handle_name == "generate":
+                res = self._interface.generate(
+                    self._model, data, n_mbs=rpc.n_mbs
+                )  # -> SequenceSample
+            else:
+                raise NotImplementedError(f"Unknown MFC type: {request.handle_name}.")
 
         if isinstance(res, data_api.SequenceSample) and rpc.output_key_remap:
             res.remap_keys_(rpc.output_key_remap)
@@ -683,18 +770,9 @@ class ModelWorker(worker_base.Worker):
         if isinstance(res, data_api.SequenceSample):
             res = res.meta()
 
-        # Log GPU utilization and memory statistics.
-        utilization = pynvml.nvmlDeviceGetUtilizationRates(self.__nvml_handle)
-        memory_info = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle)
-        total_memory = memory_info.total / (1024**2)  # Convert bytes to megabytes
-        used_memory = memory_info.used / (1024**2)
-        memory_usage_percentage = (used_memory / total_memory) * 100
-        logger.info(
-            f"Worker Index {self.__worker_index}, GPU {self.__pg_info.local_gpu_id}: "
-            f"Compute Utilization - {utilization.gpu}%, "
-            f"Total Memory - {total_memory:.2f}MB, Used Memory - {used_memory:.2f}MB, "
-            f"Memory Usage - {memory_usage_percentage:.2f}%"
-        )
+        # Monitoring info. There's an all-gather and an all-reduce
+        # over the parallelism group in this function.
+        self.__log_gpu_stats(request)
         return res
 
     @cuda_tmark("data_transfer", CUDATimeMarkType.comm)
@@ -871,3 +949,100 @@ class ModelWorker(worker_base.Worker):
                 logger.info("Received SIGINT, starting recover save")
 
         self.__recover_save()
+
+    def __log_gpu_stats(self, request: request_reply_stream.Payload):
+        # Log GPU utilization and memory statistics.
+        utilization = pynvml.nvmlDeviceGetUtilizationRates(self.__nvml_handle)  # bytes
+        memory_info = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle)  # bytes
+        torch_mem_stats = torch.cuda.memory_stats(0)
+
+        # All-gather hostname, gpu ID, and stats.
+        hostname = socket.gethostname()
+        hostname_len = len(hostname)
+        assert hostname_len < 64, "hostname should have more than 64 chars"
+        # Encode hostnames into long.
+        hostname_np = np.fromstring(
+            hostname + "x" * (64 - len(hostname)), dtype=np.int64
+        )
+        local_mem_stats = torch.tensor(
+            [hostname_len, self.__pg_info.local_gpu_id]
+            + hostname_np.tolist()
+            + [
+                torch_mem_stats["allocated_bytes.all.peak"],
+                torch_mem_stats["reserved_bytes.all.peak"],
+                memory_info.used,
+            ],
+            dtype=torch.long,
+            device="cuda",
+        )  # length 2 + 8 + 3 = 13
+        mem_stats = local_mem_stats.new_zeros(
+            size=(
+                dist.get_world_size(constants.parallelism_group()),
+                local_mem_stats.shape[0],
+            )
+        )
+        # All-gather memory stats.
+        dist.all_gather_into_tensor(
+            mem_stats, local_mem_stats, group=constants.parallelism_group()
+        )
+        mem_stats = mem_stats.cpu().numpy()
+
+        # All-reduce utilization.
+        gpu_compute_util = torch.tensor(
+            utilization.gpu, dtype=torch.float32, device="cuda"
+        )
+        dist.all_reduce(gpu_compute_util, group=constants.parallelism_group())
+        gpu_compute_util = gpu_compute_util.item() / dist.get_world_size(
+            constants.parallelism_group()
+        )
+
+        def _decode_hostname(idx):
+            hn_np = mem_stats[idx, 2 : 2 + 8]
+            l = mem_stats[idx, 0]
+            return hn_np.tobytes().decode("utf-8")[:l]
+
+        def _decode_gpu_id(idx):
+            return f"{_decode_hostname(idx)}:{mem_stats[idx, 1]}"
+
+        max_used_gpu_id = _decode_gpu_id(np.argmax(mem_stats[:, -1]))
+        max_reserved_gpu_id = _decode_gpu_id(np.argmax(mem_stats[:, -2]))
+        max_tensor_gpu_id = _decode_gpu_id(np.argmax(mem_stats[:, -3]))
+
+        # NOTE: We only log the peak memory because it's
+        # the most important for detecting OOM issues.
+        headers = [
+            " ",
+            "TotalMem",
+            "PeakUsedMem",
+            "PeakTensorMem",
+            "PeakReservedMem",
+            "MaxMemUtil",
+            "AvgComputeUtil",
+        ]
+        line1 = [
+            "Value",
+            f"{memory_info.total / 1024**2:.2f}MB",
+            f"{max(mem_stats[:, -1]) / 1024**2:.2f}MB",
+            f"{max(mem_stats[:, -3]) / 1024**2:.2f}MB",
+            f"{max(mem_stats[:, -2]) / 1024**2:.2f}MB",
+            f"{max(mem_stats[:, -1]) / memory_info.total * 100:.2f}%",
+            f"{gpu_compute_util:.2f}%",
+        ]
+        line2 = [
+            "GPU ID",
+            "-",
+            max_used_gpu_id,
+            max_tensor_gpu_id,
+            max_reserved_gpu_id,
+            max_used_gpu_id,
+            "-",
+        ]
+
+        if self._dp_rank == 0 and self._is_dp_head:
+            logger.info(
+                f"Aggregated GPU memory stats after MFC `{request.handle_name}`"
+                f" within model `{request.handler.model_name}`:\n"
+                + tabulate.tabulate(
+                    [headers, line1, line2], headers="firstrow", tablefmt="fancy_grid"
+                )
+            )

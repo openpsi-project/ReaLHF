@@ -18,18 +18,10 @@ from realhf.impl.model.nn.flatten_param import (
     param_intervals_from_keys,
     param_size_from_keys,
 )
-from realhf.impl.model.nn.real_llm_base import (
-    keys_from_layer_indices,
-    real_model_embed_param_count,
-    real_model_head_param_count,
-    real_model_tblock_param_count,
-)
+from realhf.impl.model.nn.real_llm_base import keys_from_layer_indices
 from realhf.impl.model.nn.real_llm_parallel import (
-    get_real_model_param_shape,
-    mp_partition_key,
     partition_pipeline_layers,
     pipeline_repartition_strategy,
-    shape_partition_fn,
 )
 
 _TRAINABLE: Dict[ModelName, bool] = {}
@@ -331,11 +323,7 @@ def _derive_reparallelize_comm_plan(
     dst_mp_size = to_topo.get_dim("model")
     assert src_mp_size % dst_mp_size == 0 or dst_mp_size % src_mp_size == 0
     for k, v in dataclasses.asdict(to_model_config).items():
-        if k not in [
-            "is_critic",
-            "sequence_parallel",
-            "gradient_accumulation_fusion",
-        ] and v != getattr(from_model_config, k):
+        if k not in ["is_critic"] and v != getattr(from_model_config, k):
             raise ValueError(
                 f"Can't load a checkpoint with different config (key `{k}`, "
                 f"value in checkpoint is `{v}`, current value is `{getattr(from_model_config, k)}`)."
@@ -348,9 +336,6 @@ def _derive_reparallelize_comm_plan(
     from_layer_mapping = partition_pipeline_layers(
         from_model_config,
         from_topo.get_dim("pipe"),
-        real_model_embed_param_count,
-        real_model_tblock_param_count,
-        real_model_head_param_count,
     )
     from_layer_mapping = {
         k: list(range(v[0], v[1])) for k, v in from_layer_mapping.items()
@@ -358,9 +343,6 @@ def _derive_reparallelize_comm_plan(
     to_layer_mapping = partition_pipeline_layers(
         to_model_config,
         to_topo.get_dim("pipe"),
-        real_model_embed_param_count,
-        real_model_tblock_param_count,
-        real_model_head_param_count,
     )
     to_layer_mapping = {k: list(range(v[0], v[1])) for k, v in to_layer_mapping.items()}
     repart_strat = pipeline_repartition_strategy(from_layer_mapping, to_layer_mapping)
@@ -384,7 +366,6 @@ def _derive_reparallelize_comm_plan(
                 mp_size=from_topo.get_dim("model"),
                 dp_size=from_topo.get_dim("data"),
                 pp_size=from_topo.get_dim("pipe"),
-                sequence_parallel=from_topo.sequence_parallel,
                 head_param_point_to_embedding=from_model_head_param_point_to_embedding,
             )
     if constants.has_model_name(to_model_name):
@@ -396,7 +377,6 @@ def _derive_reparallelize_comm_plan(
                 mp_size=to_topo.get_dim("model"),
                 pp_size=to_topo.get_dim("pipe"),
                 dp_size=to_topo.get_dim("data"),
-                sequence_parallel=to_topo.sequence_parallel,
                 head_param_point_to_embedding=to_model_head_param_point_to_embedding,
             )
 
@@ -449,7 +429,6 @@ def _derive_reparallelize_comm_plan(
                         sd_keys=param_keys,
                         src2dst_tp_size=max(dst_mp_size // src_mp_size, 1),
                         src2dst_tp_rank=sender_mp_portion_id,
-                        sequence_parallel=from_topo.sequence_parallel,
                         head_param_point_to_embedding=from_model_head_param_point_to_embedding,
                     )
                     if torch.distributed.is_initialized():
@@ -463,7 +442,6 @@ def _derive_reparallelize_comm_plan(
                                 sd_keys=param_keys,
                                 portion_size=max(dst_mp_size // src_mp_size, 1),
                                 portion_rank=sender_mp_portion_id,
-                                sequence_parallel=from_topo.sequence_parallel,
                                 head_param_point_to_embedding=from_model_head_param_point_to_embedding,
                             )
                             param_intervals_cuda = torch.tensor(
@@ -481,7 +459,6 @@ def _derive_reparallelize_comm_plan(
                                 sd_keys=param_keys,
                                 portion_size=max(src_mp_size // dst_mp_size, 1),
                                 portion_rank=receiver_mp_portion_id,
-                                sequence_parallel=to_topo.sequence_parallel,
                                 head_param_point_to_embedding=to_model_head_param_point_to_embedding,
                             )
                             receiver_param_intervals_cuda = torch.tensor(

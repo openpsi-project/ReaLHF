@@ -23,21 +23,15 @@ def new_or_get_group(ranks: List[int], backend=None):
     return GLOBAL_PROCESS_GROUP_REGISTRY[key]
 
 
-class PipeDataModelProcessCoord(NamedTuple):
+class ProcessCoord(NamedTuple):
     pipe: int
     data: int
     model: int
 
 
-class PipeDataProcessCoord(NamedTuple):
-    pipe: int
-    data: int
-
-
 # Explicitly define these class to allow pickling.
 PROCESS_COORD_REGISTRY = {
-    "pipe#data#model": PipeDataModelProcessCoord,
-    "pipe#data": PipeDataProcessCoord,
+    "pipe#data#model": ProcessCoord,
 }
 
 
@@ -293,6 +287,7 @@ class PipeModelDataParallelTopology(ProcessTopology):
         num_dp: int,
         sequence_parallel: bool,
         gradient_checkpointing: bool,
+        gradient_accumulation_fusion: bool,
         max_prompt_len: Optional[int] = None,
     ):
         super().__init__(axes=["pipe", "data", "model"], dims=[num_pp, num_dp, num_mp])
@@ -300,6 +295,7 @@ class PipeModelDataParallelTopology(ProcessTopology):
         self.sequence_parallel = sequence_parallel
         self.gradient_checkpointing = gradient_checkpointing
         self.max_prompt_len = max_prompt_len
+        self.gradient_accumulation_fusion = gradient_accumulation_fusion
 
 
 class ParallelGrid:
@@ -578,7 +574,7 @@ class FakeGrid:
         self.pipe_parallel_size = max(self._topo.get_dim("pipe"), 1)
         self.model_parallel_size = max(self._topo.get_dim("model"), 1)
 
-        self.coord: PipeDataModelProcessCoord = self._topo.get_coord(self.rank)
+        self.coord: ProcessCoord = self._topo.get_coord(self.rank)
         self.dp_id = self.coord.data
         self.pp_id = self.coord.pipe
         self.mp_id = self.coord.model

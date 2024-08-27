@@ -17,6 +17,7 @@ class PromptDataset(torch.utils.data.Dataset):
         max_length: Optional[int] = None,
         dataset_path: Optional[str] = None,
         dataset_builder: Optional[Callable[[], List[Dict]]] = None,
+        pad_to_max_length: bool = False,
     ):
         """A dataset with prompts. Usually used for PPO.
 
@@ -28,6 +29,9 @@ class PromptDataset(torch.utils.data.Dataset):
                 a key "prompt". Defaults to None.
             dataset_builder (Optional[Callable[[], List[Dict]]], optional): Alternative to dataset_path.
                 A callable that returns a list of dictionary. Defaults to None.
+            pad_to_max_length (bool): Whether to pad prompts to the maximum length.
+                Used only for benchmarking. If True, all mini-batches created by the DP balanced partition
+                algorithm will have the same number of tokens, making MFC time predictable. Defaults to False.
         """
         self._util = util
         self.max_length = max_length
@@ -41,7 +45,7 @@ class PromptDataset(torch.utils.data.Dataset):
             prompts_str,
             truncation=True,
             max_length=max_length,
-            padding=False,
+            padding=pad_to_max_length,
             return_length=True,
             return_attention_mask=False,
         )
