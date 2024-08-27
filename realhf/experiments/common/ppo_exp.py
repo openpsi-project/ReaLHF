@@ -256,7 +256,7 @@ class PPOConfig(CommonExperimentConfig):
                 # It is used for unifying the profiling API, which requires to
                 # pass external interface configurations in the launch command.
                 # Customized dataclass objects will not work in that case.
-                "generation_config": OmegaConf.to_container(self.gen, resolve=True),
+                "generation_config": OmegaConf.to_container(self.ppo.gen, resolve=True),
                 "early_stop_imp_ratio": self.ppo.early_stop_imp_ratio,
                 "adv_norm": self.ppo.adv_norm,
             },
