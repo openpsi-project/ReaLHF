@@ -1366,9 +1366,7 @@ class MasterWorker(worker_base.Worker):
                     "evaluate",
                     [None for _ in self.__all_model_handlers],
                 )
-                eval_stats = _gather_stat(
-                    list(filter(lambda x: bool(x), eval_stats))
-                )
+                eval_stats = _gather_stat(list(filter(lambda x: bool(x), eval_stats)))
                 logger.info(
                     f"Evaluation results at epoch {self._epoch} step {self._epoch_step}: {eval_stats}"
                 )

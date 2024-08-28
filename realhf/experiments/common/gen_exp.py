@@ -89,7 +89,10 @@ class GenerationConfig(CommonExperimentConfig):
         # Customized dataclass objects will not work in that case.
         interface = ModelInterfaceAbstraction(
             "generation",
-            args={"generation_config": OmegaConf.to_container(self.gen, resolve=True), "output_file": self.output_file},
+            args={
+                "generation_config": OmegaConf.to_container(self.gen, resolve=True),
+                "output_file": self.output_file,
+            },
         )
         gen = MFCDef(
             name="gen",
