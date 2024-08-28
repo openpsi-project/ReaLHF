@@ -8,6 +8,7 @@ from realhf.api.core.config import (
     ModelInterfaceType,
     ModelName,
 )
+from realhf.api.core.data_api import DatasetUtility, load_hf_tokenizer
 from realhf.api.core.dfg import MFCDef
 from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.api.quickstart.dataset import PromptOnlyDatasetConfig
@@ -45,6 +46,35 @@ class GenerationConfig(CommonExperimentConfig):
     )
     allocation: MFCConfig = dataclasses.field(default_factory=MFCConfig)
 
+    output_file: str = "output.jsonl"
+
+    def __post_init__(self):
+        from realhf.impl.dataset.prompt_dataset import PromptDataset
+
+        util = DatasetUtility(
+            seed=0,
+            ddp_rank=0,
+            world_size=1,
+            tokenizer=load_hf_tokenizer(self.model.path),
+        )
+        d = PromptDataset(
+            util, max_length=self.dataset.max_prompt_len, dataset_path=self.dataset.path
+        )
+        if len(d) % self.dataset.train_bs_n_seqs != 0:
+            raise ValueError(
+                f"The size of the dataset must be a multiple of batch size for generation. "
+                f"Otherwise the final batch will be dropped. Please pad your dataset size with random prompts. "
+                f"Current dataset size: {len(d)}, batch size: {self.dataset.train_bs_n_seqs}."
+            )
+        if self.output_file is not None:
+            if not self.output_file.endswith(".jsonl"):
+                raise ValueError("Output path must end with .jsonl")
+            if "/" in self.output_file:
+                raise ValueError(
+                    "Output path must not contain '/'. It should be a simple "
+                    "filename that will be saved to the logging directory."
+                )
+
     @property
     def models(self):
         return {
@@ -59,7 +89,10 @@ class GenerationConfig(CommonExperimentConfig):
         # Customized dataclass objects will not work in that case.
         interface = ModelInterfaceAbstraction(
             "generation",
-            args={"generation_config": OmegaConf.to_container(self.gen, resolve=True)},
+            args={
+                "generation_config": OmegaConf.to_container(self.gen, resolve=True),
+                "output_file": self.output_file,
+            },
         )
         gen = MFCDef(
             name="gen",

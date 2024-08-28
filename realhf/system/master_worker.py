@@ -156,13 +156,13 @@ def group_rpc_blocked(
     handle_type: str,
     datas: List,
     verbose: bool = True,
-) -> List:
-    request_ids = request_all(stream, handlers, handle_type, datas, verbose=verbose)
-    res = []
-    for req_id in request_ids:
-        r = stream.poll(pattern=create_exact_match_pattern([req_id]), block=True)
-        res.append(r)
-    return res
+):
+    req_ids = request_all(stream, handlers, handle_type, datas, verbose=verbose)
+    payloads = [
+        stream.poll(pattern=create_exact_match_pattern([req_id]), block=True)
+        for req_id in req_ids
+    ]
+    return [p.data for p in payloads]
 
 
 def _request_parameter_sync(
@@ -815,7 +815,7 @@ async def model_eval_thread_func(
         )
         eval_stats = _gather_stat(list(filter(lambda x: bool(x), eval_stats)))
         logger.info(
-            f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}"
+            f"Evaluation results at epoch {epoch} step {epoch_step}: {eval_stats}"
         )
 
 
@@ -1359,6 +1359,35 @@ class MasterWorker(worker_base.Worker):
             self.__benchmark_steps is not None
             and self._global_step >= self.__benchmark_steps
         ) or (is_new_epoch and self._epoch > self.__total_train_epochs):
+            if should_eval:
+                eval_stats = group_rpc_blocked(
+                    self.__stream,
+                    self.__all_model_handlers,
+                    "evaluate",
+                    [None for _ in self.__all_model_handlers],
+                )
+                eval_stats = _gather_stat(list(filter(lambda x: bool(x), eval_stats)))
+                logger.info(
+                    f"Evaluation results at epoch {self._epoch} step {self._epoch_step}: {eval_stats}"
+                )
+            if should_save:
+                model_save_dirs = [
+                    os.path.join(
+                        self.MODEL_SAVE_ROOT,
+                        s.model_name.role,
+                        f"epoch{self._epoch}epochstep{self._epoch_step}globalstep{self._global_step}",
+                    )
+                    for s in self.__trainable_model_handlers
+                ]
+                group_rpc_blocked(
+                    self.__stream,
+                    self.__trainable_model_handlers,
+                    "save",
+                    model_save_dirs,
+                )
+                logger.info(
+                    f"Save models at epoch {self._epoch} step {self._epoch_step}."
+                )
             if self.__benchmark_steps is not None:
                 logger.info(
                     f"Finished benchmark {self.__benchmark_steps}. "
