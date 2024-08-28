@@ -122,6 +122,7 @@ class ModelShardID:
     :param topo: The 3D parallelism topology of this model.
     :type topo: PipeModelDataParallelTopology
     """
+
     model_name: ModelName
     dp_rank: int
     mp_rank: int

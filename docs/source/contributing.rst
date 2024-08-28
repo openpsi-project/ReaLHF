@@ -38,8 +38,8 @@ enable RLHF technology to truly empower the applications of LLM.
  Documentation
 ***************
 
-The source code is documented using Sphinx under the ``docs`` folder. On
-a node that installs docker-compose, run
+The source code is documented using Sphinx in the ``docs`` folder. On a
+node with docker-compose installed, run
 
 .. code:: bash
 
@@ -47,10 +47,10 @@ a node that installs docker-compose, run
 
 Then the documentation will be available at ``http://localhost:7780``.
 
-Every time the documentation file is changed, you should run the above
+Every time the documentation files are changed, you should run the above
 command to update the documentation.
 
-The github pages will be updated automatically after the PR is merged.
+The GitHub Pages will be updated automatically after the PR is merged.
 
 ************
  Formatting
@@ -58,11 +58,11 @@ The github pages will be updated automatically after the PR is merged.
 
 .. code:: bash
 
-   # For .py file
+   # For .py files
    docformatter -i ${FILE} && isort ${FILE} && black -q ${FILE}
-   # For C/C++
+   # For C/C++ files
    clang-format -i ${FILE}
-   # For docs
+   # For documentation
    rstfmt docs
 
 *********
