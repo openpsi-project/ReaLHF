@@ -37,6 +37,7 @@ class RWConfig(CommonExperimentConfig):
     :param dataset: Configuration for the dataset.
     :type dataset: PairedComparisonDatasetConfig
     """
+
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
     model: ModelTrainEvalConfig = dataclasses.field(

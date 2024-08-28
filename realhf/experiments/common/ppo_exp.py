@@ -165,6 +165,7 @@ class PPOConfig(CommonExperimentConfig):
     :param ppo: Configuration for the PPO algorithm.
     :type ppo: PPOHyperparameters
     """
+
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
     is_rew_lora: bool = False

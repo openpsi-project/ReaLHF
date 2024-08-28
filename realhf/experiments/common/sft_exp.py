@@ -29,6 +29,7 @@ class SFTConfig(CommonExperimentConfig):
     :param dataset: Configuration for the dataset.
     :type dataset: PromptAnswerDatasetConfig
     """
+
     model: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )

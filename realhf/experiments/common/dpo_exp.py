@@ -52,6 +52,7 @@ class DPOConfig(CommonExperimentConfig):
     :param beta: KL regularization coefficient.
     :type beta: float
     """
+
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
 

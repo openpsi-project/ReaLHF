@@ -33,6 +33,7 @@ class GenerationConfig(CommonExperimentConfig):
     :param allocation: Configuration for device allocation and parallelism.
     :type allocation: MFCConfig
     """
+
     model: ModelTrainEvalConfig = dataclasses.field(
         default_factory=ModelTrainEvalConfig
     )
