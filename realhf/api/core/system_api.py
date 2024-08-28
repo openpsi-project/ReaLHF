@@ -155,42 +155,38 @@ class ModelWorker:
 
 @dataclasses.dataclass
 class ExperimentSaveEvalControl:
-    """Utility object for controlling the frequency of saving and evaluation.
+    """Utility object for controlling the frequency of saving and evaluation
+    during training.
 
-    ``Epoch`` means the number of times the training loop goes through the entire dataset.
-    ``Step`` means the number of iterations running the algorithm dataflow.
+    ``Epoch`` refers to the number of times the training loop iterates over the entire dataset.
+    ``Step`` refers to the number of iterations running the algorithm dataflow.
 
-    This object has independent counters for epochs, steps, and seconds.
-    Models will be saved or evaluated when any of the following conditions are met.
+    This object manages independent counters for epochs, steps, and seconds. The model will
+    be saved or evaluated when any of the following conditions are met.
 
     :param total_train_epochs: The total number of epochs to train the model.
     :type total_train_epochs: int
-    :param save_freq_epochs: Save the model every this number of epochs.
-        If None, the model will not be saved if the epoch number changes during training.
+    :param save_freq_epochs: Frequency in epochs at which to save the model. If None,
+        the model will not be saved based on epoch changes during training.
     :type save_freq_epochs: Optional[int]
-    :param save_freq_steps: Save the model every this number of steps.
-        If None, the model will not be saved if the step number changes during training.
+    :param save_freq_steps: Frequency in steps at which to save the model. If None,
+        the model will not be saved based on step changes during training.
     :type save_freq_steps: Optional[int]
-    :param save_freq_secs: Save the model every this number of seconds.
-        If None, the model will not be saved if the time changes during training.
+    :param save_freq_secs: Frequency in seconds at which to save the model. If None,
+        the model will not be saved based on time changes during training.
     :type save_freq_secs: Optional[int]
-    :param eval_freq_epochs: Evaluate the model every this number of epochs.
-        If None, the model will not be evaluated if the epoch number changes during training.
+    :param eval_freq_epochs: Frequency in epochs at which to evaluate the model. If None,
+        the model will not be evaluated based on epoch changes during training.
     :type eval_freq_epochs: Optional[int]
-    :param eval_freq_steps: Evaluate the model every this number of steps.
-        If None, the model will not be evaluated if the step number changes during training.
+    :param eval_freq_steps: Frequency in steps at which to evaluate the model. If None,
+        the model will not be evaluated based on step changes during training.
     :type eval_freq_steps: Optional[int]
-    :param eval_freq_secs: Evaluate the model every this number of seconds.
-        If None, the model will not be evaluated if the time changes during training.
+    :param eval_freq_secs: Frequency in seconds at which to evaluate the model. If None,
+        the model will not be evaluated based on time changes during training.
     :type eval_freq_secs: Optional[int]
-    :param benchmark_steps: Terminate the training after this number of steps.
-        Used by system benchmark only. Please leave it to None for normal training.
+    :param benchmark_steps: Terminate training after this number of steps. Used for system
+        benchmarking only. Set to None for normal training.
     :type benchmark_steps: Optional[int]
-    :param save_eval_timeout: Timeout in seconds for saving and evaluation.
-        Will be used for the last step of the experiment. The master worker will sleep
-        for `save_eval_timeout` seconds to wait all save or evaluations to finish.
-        Defaults to 120 seconds.
-    :type save_eval_timeout: int
     """
 
     total_train_epochs: int = 1
@@ -204,8 +200,6 @@ class ExperimentSaveEvalControl:
     eval_freq_secs: Optional[int] = None
     # benchmark
     benchmark_steps: Optional[int] = None
-    # Graceful exit
-    save_eval_timeout: int = 120
 
 
 @dataclasses.dataclass

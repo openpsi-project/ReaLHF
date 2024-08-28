@@ -91,14 +91,13 @@ class SequenceSplitSpec:
 
 @pdclasses.dataclass(config=dict(arbitrary_types_allowed=True))
 class SequenceSample:
-    """The data structure we use to represent sequence data.
+    """The data structure used to represent sequence data.
 
-    We assume that each piece of data has serval "keys" (like a dict),
-    and each key can correspond to multiple sequences.
+    Each piece of data is assumed to have several "keys" (like a dictionary),
+    with each key potentially corresponding to multiple sequences.
 
-    For example, when running PPO, we can generate multiple responses
-    for each prompt. Say we have 2 prompts and each with 3 responses,
-    the batch can look like:
+    For example, when running PPO, multiple responses can be generated for each prompt.
+    If there are 2 prompts, each with 3 responses, the batch might look like:
 
     .. code-block:: console
 
@@ -106,31 +105,30 @@ class SequenceSample:
         >>> s.keys
         {'resp', 'prompt'}
         >>> s.seqlens
-        {'prompt': [[13], [6]], 'resp': [[ 6, 17, 15], [13, 15, 13]]}
+        {'prompt': [[13], [6]], 'resp': [[6, 17, 15], [13, 15, 13]]}
         >>> s.data
         {'prompt': torch.tensor([...]), 'resp': torch.tensor([...])}
 
-    Keypoints:
+    Key points:
 
-    - Data with different batch indices can have different lengths (e.g., the first prompt has a length of 13
+    - Data with different batch indices can have varying lengths (e.g., the first prompt has a length of 13
       while the second has a length of 6).
 
-    - A key ("response")
-      can correspond to multiple sequences with different lengths.
-      Besides, the number of sequences for each key and for each data can be different.
-      For example, the first prompt may have 2 answers and the second may have 3.
+    - A key (e.g., "response") can correspond to multiple sequences with different lengths.
+      Additionally, the number of sequences for each key can differ from the number of sequences for the data.
+      For example, the first prompt may have 2 responses, and the second may have 3.
 
-    - No matter what is the batch size and how many sequences we store for each key,
-      the data is concatenated as a 1D tensor. The outter dimension is the batch size
-      and the inner dimension is the number of sequences for the key.
+    - Regardless of the batch size or the number of sequences stored for each key,
+      the data is concatenated into a 1D tensor. The outer dimension represents the batch size,
+      and the inner dimension represents the number of sequences for the key.
 
-    With such a data structure, we can easily gather, split,
-    and transfer non-padded batches among different GPUs.
+    This data structure facilitates easy gathering, splitting,
+    and transferring of non-padded batches between different GPUs.
 
     :param keys: The keys of the data.
     :type keys: Set[str]
     :param trailing_shapes: The trailing shapes of the data,
-        ignoring the first dimension, which must be the sequence length.
+        excluding the first dimension, which must be the sequence length.
         Used to construct the receiving buffer for data transfer.
     :type trailing_shapes: Dict[str, torch.Size | Tuple | None]
     :param dtypes: The types of the data. Used to construct
@@ -138,35 +136,31 @@ class SequenceSample:
     :type dtypes: Dict[str, torch.dtype | None]
     :param ids: Unique identifiers for each piece of data.
         Should be provided in the dataset implementation.
-        Used to amend new data into the buffer after a model function call.
+        Used to append new data to the buffer after a model function call.
     :type ids: List[Hashable]
     :param seqlens: The sequence lengths of each sequence in the data. For a given key,
-        it should be a list of list of integers. The outer list is the batch size,
-        while the inner list is the sequence lengths for this key.
-        We use python-native list here because (1) pickling torch.Tensor or numpy array is inefficient
-        and (2) the size of the inner list can be different across the batch, so we cannot create 2D arrays easily.
+        this should be a list of lists of integers. The outer list represents the batch size,
+        while the inner lists represent the sequence lengths for this key.
+        Python-native lists are used here because (1) pickling torch.Tensor or numpy array is inefficient,
+        and (2) the size of the inner lists can vary across the batch, making 2D arrays impractical.
     :type seqlens: Dict[str, List[List[int]]]
-    :param data: The actual concatenated data. If it is None,
+    :param data: The actual concatenated data. If this is None,
         the sample is a metadata-only sample used by the master worker.
-        The spec of the data should be consistent with the seqlens,
+        The specification of the data should be consistent with the seqlens,
         dtypes, and trailing_shapes.
     :type data: Optional[Dict[str, torch.Tensor | None]]
-    :param metadata: Metadata of the sample. It should be a
-        dict of lists and provided in the dataset implementation
-        Adding metadata can slow down data transfer.
+    :param metadata: Metadata for the sample. It should be a
+        dictionary of lists, provided in the dataset implementation.
+        Note that adding metadata can slow down data transfer.
     :type metadata: Dict[str, List[Any]]
     """
 
     keys: Set[str]
     trailing_shapes: Dict[str, torch.Size | Tuple | None]
     dtypes: Dict[str, torch.dtype | None]
-
     ids: List[Hashable]
-
     seqlens: Dict[str, List[List[int]]]
-
     data: Optional[Dict[str, torch.Tensor | None]] = None
-
     metadata: Dict[str, List[Any]] = Field(default_factory=dict)
 
     @field_validator("ids")
@@ -266,12 +260,13 @@ class SequenceSample:
 
     @classmethod
     def gather(cls, samples: List["SequenceSample"], keys: Optional[List[str]] = None):
-        """Gather a list of SequenceSample into a single batch.
+        """Gather a list of SequenceSample objects into a single batch.
 
-        :param samples: A list of SequenceSample to be gathered.
+        :param samples: A list of SequenceSample objects to be gathered.
         :type samples: List[SequenceSample]
-        :param keys: The keys to be gathered. Can only gather a subset
-            of keys. If None, use the keys of the first sample.
+        :param keys: The keys to be gathered. Only a subset of keys can
+            be gathered. If None, the keys from the first sample will be
+            used.
         :type keys: Optional[List[str]]
         """
         if keys is None:
@@ -313,16 +308,20 @@ class SequenceSample:
     def get_split_spec(
         self, k: int, key: Optional[str] = None, min_size: int = 1
     ) -> SequenceSplitSpec:
-        """Get the partition spec for splitting the data into k parts. It runs
-        a DP algorithm to find the best-possible balanced partitioning.
+        """Get the partition specification for splitting the data into `k`
+        parts using a dynamic programming algorithm to achieve the most
+        balanced partitioning.
 
-        :param k: The number of parts to split the data.
+        :param k: The number of parts to split the data into.
         :type k: int
-        :param key: The key to be used for splitting. If None, use the
-            key with the largest total sequence length.
+        :param key: The key to be used for splitting. If None, the key
+            with the largest total sequence length will be used.
         :type key: Optional[str]
         :param min_size: The minimum size of each partition.
         :type min_size: int
+        :return: A SequenceSplitSpec object representing the
+            partitioning specification.
+        :rtype: SequenceSplitSpec
         """
         if key is None:
             key = self._get_split_key()
@@ -381,15 +380,21 @@ class SequenceSample:
         key: Optional[str] = None,
         min_size: int = 1,
     ) -> List["SequenceSample"]:
-        """Split the data into k parts.
+        """Split the data into `k` parts.
 
-        :param k: The number of parts to split the data.
+        This method uses the specified key or the key with the largest total sequence length
+        to split the data into `k` parts. The partitioning ensures that each part meets the
+        minimum size requirement.
+
+        :param k: The number of parts to split the data into.
         :type k: int
-        :param key: The key to be used for splitting. If None, use the
-            key with the largest total sequence length.
+        :param key: The key to use for splitting. If None, the key with the largest
+            total sequence length will be used.
         :type key: Optional[str]
         :param min_size: The minimum size of each partition.
         :type min_size: int
+        :return: A list of `SequenceSample` objects, each representing a part of the split data.
+        :rtype: List[SequenceSample]
         """
         spec = self.get_split_spec(k, key, min_size)
         return self.split_with_spec(spec)
@@ -492,26 +497,27 @@ class SequenceSample:
         data: Dict[str, torch.Tensor],
         metadata: Optional[Dict[str, Any]] = None,
     ):
-        """A helper function to construct the SequenceSample object.
+        """Construct a `SequenceSample` object from default parameters.
 
-        This is designed for the special case where each piece of data has
+        This helper function is intended for cases where each piece of data has
         a single sequence length (e.g., a single response for each prompt).
-        Sequence length of different keys will be resolved automatically
-        according to the rules in ``_resolve_seqlen_from_key``.
-        This function can reduce the boilerplate code but introduce potential bugs.
-        Please use this function with caution.
+        The sequence lengths for different keys are resolved automatically
+        according to the rules in ``_resolve_seqlen_from_key``. While this function
+        can reduce boilerplate code, it may introduce potential bugs, so it should
+        be used with caution.
 
-        :param seqlens: The sequence lengths of each piece of data.
-            This is the length of the main attribute, i.e., packed_input_ids.
-            Sequence lengths for other attributes, e.g., rewards and logprobs,
-            will be computed from this parameter. It is **NOT** the actual length
-            of rewards or logprobs even if it is the only key in data.
+        :param seqlens: The sequence lengths of each piece of data. This represents
+            the length of the main attribute (e.g., `packed_input_ids`). Sequence lengths
+            for other attributes (e.g., rewards and logprobs) are computed from this parameter.
+            It is **NOT** the actual length of rewards or logprobs even if it is the only key
+            in the data.
         :type seqlens: List[int]
         :param ids: Unique identifiers for each piece of data.
         :type ids: List[Hashable]
         :param data: The actual data.
         :type data: Dict[str, torch.Tensor]
-        :param metadata: Metadata of the sample.
+        :param metadata: Metadata for the sample. Should be a dictionary where each value
+            is a list with a length equal to the number of sequence lengths.
         :type metadata: Optional[Dict[str, Any]]
         """
         if metadata is None:

@@ -25,47 +25,46 @@ logger = logging.getLogger("PPO exp", "colored")
 
 @dataclasses.dataclass
 class PPOHyperparameters:
-    """Configuration of PPO hyperparameters.
+    """Configuration for PPO hyperparameters.
 
-    :param gen: Generation hyperparameters.
+    :param gen: Hyperparameters for generation.
     :type gen: GenerationHyperparameters
     :param ppo_n_minibatches: Number of minibatches in each PPO update.
     :type ppo_n_minibatches: int
-    :param kl_ctl: Coefficient of KL divergence rewards.
+    :param kl_ctl: Coefficient for KL divergence rewards.
     :type kl_ctl: float
-    :param discount: Discount factor.
+    :param discount: Discount factor for future rewards.
     :type discount: float
-    :param gae_lambda: Lambda factor in GAE.
+    :param gae_lambda: Lambda factor used in Generalized Advantage Estimation (GAE).
     :type gae_lambda: float
-    :param eps_clip: PPO actor probability ratio clipping factor.
+    :param eps_clip: Clipping factor for the PPO actor probability ratio.
     :type eps_clip: float
-    :param value_eps_clip: PPO value clipping factor.
+    :param value_eps_clip: Clipping factor for the PPO value function.
     :type value_eps_clip: float
-    :param max_reward_clip: Maximum reward value.
+    :param max_reward_clip: Maximum reward value after clipping.
     :type max_reward_clip: float
-    :param reward_output_scaling: Scaling factor of the reward model output.
+    :param reward_output_scaling: Scaling factor for the reward model output.
     :type reward_output_scaling: float
-    :param reward_output_bias: Bias of the reward model output.
-        The number outputed by the reward model will be
+    :param reward_output_bias: Bias for the reward model output.
+        The output of the reward model will be clipped to the range
+        [-max_reward_clip, max_reward_clip] after applying the scaling and bias:
         CLIP((x - bias) * scaling, -max_reward_clip, max_reward_clip).
     :type reward_output_bias: float
-    :param early_stop_imp_ratio: PPO update will be early stopped if importance ratio
-        exceeds this maximum value.
+    :param early_stop_imp_ratio: Maximum value of the importance ratio. PPO updates
+        will be early stopped if the ratio exceeds this value.
     :type early_stop_imp_ratio: float
-    :param use_adaptive_kl_ctl: Whether to use adaptive KL divergence coefficient.
+    :param use_adaptive_kl_ctl: Whether to use an adaptive KL divergence coefficient.
     :type use_adaptive_kl_ctl: bool
-    :param adv_norm: Whether to use advantage normalization.
+    :param adv_norm: Whether to normalize the advantage estimates.
     :type adv_norm: bool
-    :param value_norm: Whether to denormalize valued and normalize return predictions.
+    :param value_norm: Whether to denormalize values and normalize return predictions.
     :type value_norm: bool
     :param value_norm_type: Type of value normalization.
-        Either exponential moving average ("exp") or moving average ("ma").
+        Can be either "exp" for exponential moving average or "ma" for moving average.
     :type value_norm_type: str
-    :param value_norm_beta: Exponential decay factor
-        in exponential moving average.
+    :param value_norm_beta: Exponential decay factor for the exponential moving average.
     :type value_norm_beta: float
-    :param value_norm_eps: Epsilon factor in the
-        denominator of exponential moving average.
+    :param value_norm_eps: Epsilon factor in the denominator of the exponential moving average.
     :type value_norm_eps: float
     """
 
@@ -94,16 +93,15 @@ class PPOHyperparameters:
 
 @dataclasses.dataclass
 class PPOConfig(CommonExperimentConfig):
-    """PPO experiment configuration.
+    """Configuration for PPO experiments.
 
-    It is a subclass of :class:`CommonExperimentConfig`,
-    so all CLI options in the base class are available.
+    This class is a subclass of :class:`CommonExperimentConfig`,
+    so all CLI options from the base class are available.
 
-    We don't implement runtime evaluation for PPO.
+    Note that runtime evaluation is not implemented for PPO.
 
-    We identify that the RLHF process is composed of four
-    distinct models with independent parameters and six
-    *model function calls* upon these models.
+    The RLHF process involves four distinct models with independent parameters and six
+    *model function calls*:
 
     The four models are\:
 
@@ -112,79 +110,61 @@ class PPOConfig(CommonExperimentConfig):
     - Ref\: The reference LLM that provides KL regularization.
     - Rew\: The reward model that provides reward signals.
 
-    The four model function calls and their dependencies are\:
+    The six model function calls and their dependencies are\:
 
     - Rollout\: Generate text from the actor model.
-    - InfReward\: Infer rewards from the reward model given generated text.
-    - InfRef\: Infer log probabilities from the reference model given generated text.
-    - InfValues\: Infer values from the critic model given generated text.
-    - TrainActor\: Train the actor model given generated text, rewards, values, and reference log probabilities.
-    - TrainCritic\: Train the critic model given generated text, rewards, values, and reference log probabilities.
+    - InfReward\: Infer rewards from the reward model based on generated text.
+    - InfRef\: Infer log probabilities from the reference model based on generated text.
+    - InfValues\: Infer values from the critic model based on generated text.
+    - TrainActor\: Train the actor model using generated text, rewards, values, and reference log probabilities.
+    - TrainCritic\: Train the critic model using generated text, rewards, values, and reference log probabilities.
 
-    This class resolves these dependencies under the hood.
-    What the users should specify are the runtime configurations
-    of models and allocations of *each model function call*.
+    This class manages these dependencies internally. Users should specify
+    the runtime configurations of the models and the allocations for each model function call.
 
     :param is_sft_lora: Whether LoRA was used for SFT.
-        If so, the saved SFT model should only contain LoRA parameters.
-        Since LoRA is currently not supported for SFT,
-        this option is not used for now.
+        If LoRA was used, the saved SFT model should only contain LoRA parameters.
+        Since LoRA is currently not supported for SFT, this option is not utilized at present.
     :type is_sft_lora: bool
     :param sft_lora_path: Path to the LoRA model for SFT.
-        Since LoRA is currently not supported for SFT,
-        this option is not used for now.
+        Since LoRA is currently not supported for SFT, this option is not utilized at present.
+    :type sft_lora_path: str or None
     :param is_rw_lora: Whether LoRA was used for reward modeling.
-        If so, the saved reward model should only contain LoRA parameters
+        If LoRA was used, the saved reward model should only contain LoRA parameters
         and the new reward head.
-        Since LoRA is currently not supported for reward modeling,
-        this option is not used for now.
+        Since LoRA is currently not supported for reward modeling, this option is not utilized at present.
     :type is_rw_lora: bool
     :param rw_lora_path: Path to the LoRA model for reward modeling.
-        Since LoRA is currently not supported for reward modeling,
-        this option is not used for now.
-    :type rw_lora_path: str
+        Since LoRA is currently not supported for reward modeling, this option is not utilized at present.
+    :type rw_lora_path: str or None
     :param rew_head_path: Path to the new reward head for reward modeling.
-        Since LoRA is currently not supported for reward modeling,
-        this option is not used for now.
-    :type rw_head_path: str
-    :param actor: Runtime configuration of the primary LLM.
+        Since LoRA is currently not supported for reward modeling, this option is not utilized at present.
+    :type rew_head_path: str or None
+    :param actor: Runtime configuration for the primary LLM.
     :type actor: ModelTrainEvalConfig
-    :param critic: Runtime configuration of the critic model of PPO.
+    :param critic: Runtime configuration for the critic model of PPO.
     :type critic: ModelTrainEvalConfig
-    :param ref: Runtime configuration of the reference LLM.
+    :param ref: Runtime configuration for the reference LLM.
     :type ref: ModelTrainEvalConfig
-    :param rew: Runtime configuration of the reward LLM.
+    :param rew: Runtime configuration for the reward LLM.
     :type rew: ModelTrainEvalConfig
-    :param actor_train: :class:`MFCConfig` for TrainActor.
+    :param actor_train: :class:`MFCConfig` for the TrainActor function call.
     :type actor_train: MFCConfig
-    :param critic_train: :class:`MFCConfig` for TrainCritic.
+    :param critic_train: :class:`MFCConfig` for the TrainCritic function call.
     :type critic_train: MFCConfig
-    :param actor_gen: :class:`MFCConfig` for Rollout.
+    :param actor_gen: :class:`MFCConfig` for the Rollout function call.
     :type actor_gen: MFCConfig
-    :param critic_inf: :class:`MFCConfig` for InfValues.
+    :param critic_inf: :class:`MFCConfig` for the InfValues function call.
     :type critic_inf: MFCConfig
-    :param rew_inf: :class:`MFCConfig` for InfReward.
+    :param rew_inf: :class:`MFCConfig` for the InfReward function call.
     :type rew_inf: MFCConfig
-    :param ref_inf: :class:`MFCConfig` for InfRef.
+    :param ref_inf: :class:`MFCConfig` for the InfRef function call.
     :type ref_inf: MFCConfig
-    :param dataset: Dataset configuration.
+    :param dataset: Configuration for the dataset.
     :type dataset: PromptOnlyDatasetConfig
     :param ppo: Configuration for the PPO algorithm.
     :type ppo: PPOHyperparameters
-    :param actor_train_n_mbs: Number of minibatches for TrainActor.
-    :type actor_train_n_mbs: int
-    :param critic_train_n_mbs: Number of minibatches for TrainCritic.
-    :type critic_train_n_mbs: int
-    :param actor_gen_n_mbs: Number of minibatches for Rollout.
-    :type actor_gen_n_mbs: int
-    :param critic_inf_n_mbs: Number of minibatches for InfValues.
-    :type critic_inf_n_mbs: int
-    :param rew_inf_n_mbs: Number of minibatches for InfReward.
-    :type rew_inf_n_mbs: int
-    :param ref_inf_n_mbs: Number of minibatches for InfRef.
-    :type ref_inf_n_mbs: int
     """
-
     is_sft_lora: bool = False
     sft_lora_path: Optional[str] = None
     is_rew_lora: bool = False

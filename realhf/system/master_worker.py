@@ -1359,12 +1359,6 @@ class MasterWorker(worker_base.Worker):
             self.__benchmark_steps is not None
             and self._global_step >= self.__benchmark_steps
         ) or (is_new_epoch and self._epoch > self.__total_train_epochs):
-            if should_eval or should_save:
-                logger.info(
-                    f"Waiting for all save/eval requests at the last step"
-                    f" for {self.config.exp_ctrl.save_eval_timeout} secs..."
-                )
-                time.sleep(self.config.exp_ctrl.save_eval_timeout)
             if self.__benchmark_steps is not None:
                 logger.info(
                     f"Finished benchmark {self.__benchmark_steps}. "
