@@ -33,3 +33,47 @@ issues or pull requests.
 
 We hope the open-source community can help improve this repository and
 enable RLHF technology to truly empower the applications of LLM.
+
+***************
+ Documentation
+***************
+
+The source code is documented using Sphinx under the ``docs`` folder. On
+a node that installs docker-compose, run
+
+.. code:: bash
+
+   make docs
+
+Then the documentation will be available at ``http://localhost:7780``.
+
+Every time the documentation file is changed, you should run the above
+command to update the documentation.
+
+The github pages will be updated automatically after the PR is merged.
+
+************
+ Formatting
+************
+
+.. code:: bash
+
+   # For .py file
+   docformatter -i ${FILE} && isort ${FILE} && black -q ${FILE}
+   # For C/C++
+   clang-format -i ${FILE}
+   # For docs
+   rstfmt docs
+
+*********
+ Testing
+*********
+
+.. code:: bash
+
+   # Run CPU tests
+   pytest -m "not gpu"
+   # Run CPU tests and GPU tests that require a single GPU
+   pytest -m "not distributed"
+   # On a node with multiple GPUs, run all tests
+   pytest

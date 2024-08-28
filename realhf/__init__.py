@@ -1,7 +1,7 @@
 # Re-import these classes for clear documentation,
 # otherwise the name will have a long prefix like
 # realhf.api.quickstart.model.ModelTrainEvalConfig.
-from .api.core.config import ModelFamily, ModelName
+from .api.core.config import ModelFamily, ModelName, ModelShardID
 from .api.core.data_api import SequenceSample
 from .api.core.dfg import MFCDef
 from .api.core.model_api import (

@@ -100,6 +100,28 @@ class ModelFamily:
 
 @dataclasses.dataclass
 class ModelShardID:
+    """The ID of the model shard in a specific model worker.
+
+    Basically the combination of the model name and the 3D parallelism
+    rank. Can be used as dictionary keys. It's the identity of a "model
+    handler". The master worker will keep a lookup table mapping from
+    the ModelShardID to the model worker index. It can be a many-to-one
+    mapping. Requests are created with the ModelShardID, e.g., the
+    actors with ranks (dp=*, mp=0, pp=0) should transfer data to the
+    critics. The ModelShardID is then mapped to the model worker index,
+    and the requests will be sent to the corresponding model workers.
+
+    :param model_name: The name of the model.
+    :type model_name: ModelName
+    :param dp_rank: The data parallel rank.
+    :type dp_rank: int
+    :param mp_rank: The tensor-model parallel rank.
+    :type mp_rank: int
+    :param pp_rank: The pipeline-model parallel rank.
+    :type pp_rank: int
+    :param topo: The 3D parallelism topology of this model.
+    :type topo: PipeModelDataParallelTopology
+    """
     model_name: ModelName
     dp_rank: int
     mp_rank: int

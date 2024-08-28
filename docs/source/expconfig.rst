@@ -92,6 +92,8 @@ recursively with command line arguments.
    These configurations are not supposed to be modified by users. They
    are used to help understand the code architecture of ReaL.
 
+.. autoclass:: realhf.ModelShardID
+
 .. autoclass:: realhf.ModelName
 
 .. autoclass:: realhf.ModelVersion
