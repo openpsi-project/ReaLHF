@@ -48,7 +48,10 @@ def load_hf_tokenizer(
     if padding_side is not None:
         kwargs["padding_side"] = padding_side
     tokenizer = transformers.AutoTokenizer.from_pretrained(
-        model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
+        model_name_or_path,
+        fast_tokenizer=fast_tokenizer,
+        trust_remote_code=True,
+        **kwargs,
     )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
