@@ -83,7 +83,9 @@ def make_train_backend_config(
         if model_cfg.zero_stage == 3:
             raise ValueError("Zero stage 3 is not supported in Megatron backend.")
         if model_cfg.zero_stage == 2:
-            logger.warning("Megatron does not ZeRO stage 2. Degenerates to stage 1.")
+            logger.warning(
+                "Megatron does not support ZeRO stage 2. Degenerates to stage 1."
+            )
             model_cfg.zero_stage = 1
         return ModelBackendAbstraction(
             "megatron",
