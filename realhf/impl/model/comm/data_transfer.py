@@ -123,9 +123,9 @@ class DataTransferReceiverStep:
 
 
 def chunked_bcast(buf, src_rank, group, chunk_size_bytes=BCAST_CHUNK_SIZE_BYTES):
-    # Broadcasting super-large data may cause DistBackendError,
+    # Broadcasting super-large data for the first time may hang and cause DistBackendError,
     # which I believe is due to the limitation of PyTorch.
-    # Broadcasting in chunk instead. The chunk size is not well-tuned,
+    # Broadcast in chunk instead. The chunk size is not well-tuned,
     # and it's just a value that works for our experiments with bs 8192 and ctx 4096.
     shape = buf.shape
     chunk_size = chunk_size_bytes // buf.dtype.itemsize
