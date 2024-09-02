@@ -96,7 +96,7 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
         for mb_input in input_.split(num_micro_batches):
             if constants.pipe_parallel_world_size() > 1:
                 model_output = self.pipe_runner.forward(
-                    input_=input_,
+                    input_=mb_input,
                     post_hook=post_hook,
                     aggregate_fn=aggregate_fn,
                 )
@@ -141,7 +141,7 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
         for mb_input in input_.split(num_micro_batches):
             if constants.pipe_parallel_world_size() > 1:
                 res = self.pipe_runner.generate(
-                    input_=input_,
+                    input_=mb_input,
                     tokenizer=tokenizer,
                     gconfig=gconfig,
                 )
