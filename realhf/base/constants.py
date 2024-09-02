@@ -52,6 +52,10 @@ class GlobalMemoryBuffer:
             res.zero_()
         return res
 
+# 30 minutes. Transferring super-large batches via NCCL bcast
+# for the first time may consumer over 600 secs, which is the 
+# pytorch's default. Increase this value to 30 minutes.
+NCCL_DEFAULT_TIMEOUT = 1800  
 
 # constants in experiment instance scope
 MODEL_SAVE_ROOT = f"{cluster_spec.fileroot}/checkpoints/{getpass.getuser()}"

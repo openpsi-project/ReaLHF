@@ -6,6 +6,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import torch.distributed as dist
 
 import realhf.base.logging as logging
+from realhf.base.constants import NCCL_DEFAULT_TIMEOUT
 
 logger = logging.getLogger("Topology")
 
@@ -19,7 +20,9 @@ def new_or_get_group(ranks: List[int], backend=None):
     global GLOBAL_PROCESS_GROUP_REGISTRY
     key = (ranks, backend)
     if key not in GLOBAL_PROCESS_GROUP_REGISTRY:
-        GLOBAL_PROCESS_GROUP_REGISTRY[key] = dist.new_group(ranks, backend=backend)
+        GLOBAL_PROCESS_GROUP_REGISTRY[key] = dist.new_group(
+            ranks, backend=backend, timeout=NCCL_DEFAULT_TIMEOUT
+        )
     return GLOBAL_PROCESS_GROUP_REGISTRY[key]
 
 
