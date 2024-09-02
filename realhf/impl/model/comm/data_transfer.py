@@ -11,6 +11,8 @@ from realhf.base import topology
 from realhf.impl.model.comm.global_comm import filter_match_mwids
 from realhf.impl.model.comm.param_realloc import pipeline_repartition_strategy
 
+BCAST_CHUNK_SIZE_BYTES = int(4e6)
+
 
 @dataclasses.dataclass(unsafe_hash=True)
 class DataTransferPair:
@@ -118,6 +120,20 @@ class DataTransferReceiverStep:
     group: dist.ProcessGroup
     key: str
     ids: List[int]
+
+
+def chunked_bcast(buf, src_rank, group, chunk_size_bytes=BCAST_CHUNK_SIZE_BYTES):
+    # Broadcasting super-large data may cause DistBackendError,
+    # which I believe is due to the limitation of PyTorch.
+    # Broadcasting in chunk instead. The chunk size is not well-tuned,
+    # and it's just a value that works for our experiments with bs 8192 and ctx 4096.
+    shape = buf.shape
+    chunk_size = chunk_size_bytes // buf.dtype.itemsize
+    buf = buf.flatten()
+    for i in range(0, buf.numel(), chunk_size):
+        s = slice(i, i + chunk_size)
+        dist.broadcast(buf[s], src=src_rank, group=group)
+    return buf.view(*shape)
 
 
 def derive_data_transfer_plan(
@@ -233,7 +249,7 @@ def run_data_transfer(
                             dtype=dtype,
                             device=torch.cuda.current_device(),
                         )
-                        dist.broadcast(buf, src=step.src, group=step.group)
+                        chunked_bcast(buf, step.src, step.group)
                     else:
                         buf = None
 
@@ -309,7 +325,7 @@ def run_data_transfer(
                         [storage[_id].data[step.key] for _id in step.ids],
                         dim=0,
                     )
-                    dist.broadcast(vs, src=step.rank, group=step.group)
+                    chunked_bcast(vs, step.rank, step.group)
 
                 if not metadata_cached:
                     dist.broadcast_object_list(
