@@ -88,11 +88,11 @@ class CommonExperimentConfig(Experiment):
 
     - ``heuristic``\: allocate resources and configure parallel strategies with heuristic strategies previously obtained by search.
 
-    - ``pipe_data``\: identical parallelization (like DSChat) with pipe+data parallelism. A world size under 8 will use data parallelism only.
+    - ``pipe_data``\: identical parallelization (like DSChat) with pipe+data parallelism for all MFCs. A world size under 8 will use data parallelism only.
 
-    - ``pipe_model``\: identical parallelization (like DSChat) with pipe+model parallelism. A world size under 8 will use tensor-model parallelism only.
+    - ``pipe_model``\: identical parallelization (like DSChat) with pipe+model parallelism for all MFCs. A world size under 8 will use tensor-model parallelism only.
 
-    - A regex pattern like ``d${DP}p${PP}m${TP}``\: a symmetric parallelization pattern with ${DP}-way data parallelism, ${PP}-way pipeline parallelism, and ${TP}-way model parallelism.
+    - A regex pattern like ``d${DP}p${PP}m${TP}``\: identical parallelization for all MFCs with ${DP}-way data parallelism, ${PP}-way pipeline parallelism, and ${TP}-way model parallelism.
 
     :param experiment_name: Name of the experiment.
         Arbitrary string without "_" and "/", e.g., ``ultra-chat-llama``.
