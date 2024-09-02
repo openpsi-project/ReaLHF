@@ -736,7 +736,8 @@ class ReaLMegatronEngine(model_api.PipelinableEngine):
             self.engine.zero_grad()
             if constants.pipe_parallel_world_size() > 1:
                 # Fusing the minibatched forward-backward in a pipeline training schedule.
-                instr_set = PipeTrainInstrSetForMegatron(self.engine, num_micro_batches)
+                n_pp_mbs = self.pipe_runner.default_train_mbs * num_micro_batches
+                instr_set = PipeTrainInstrSetForMegatron(self.engine, n_pp_mbs)
                 # NOTE: When training with pipeline parallel, num micro batches should be
                 # larger than 2 x num_pipeline_stages to avoid idle time.
                 return self.pipe_runner.train_batch(
@@ -744,7 +745,7 @@ class ReaLMegatronEngine(model_api.PipelinableEngine):
                     input_=input_,
                     loss_fn=loss_fn,
                     version_steps=version_steps,
-                    n_pp_mbs=self.pipe_runner.default_train_mbs * num_micro_batches,
+                    n_pp_mbs=n_pp_mbs,
                 )
             else:
                 no_sync_ctx = self.engine.ddp.no_sync()
