@@ -367,7 +367,7 @@ def _attach_payloads_with_hooks(
     return payloads, mwids
 
 
-async def scatter_tensor_to_mws(
+async def _request_model_function_call(
     rpc: dfg.MFCDef,
     stream: request_reply_stream.NameResolvingRequestClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
@@ -585,7 +585,7 @@ async def model_rpc_request_func(
             producer_mappings[names[0], k] = producer_mapping
 
         # send partitioned data to model workers
-        req_ids, other_req_ids = await scatter_tensor_to_mws(
+        req_ids, other_req_ids = await _request_model_function_call(
             rpc=rpc,
             stream=stream,
             msid2mwid=msid2mwid,
