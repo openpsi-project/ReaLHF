@@ -92,6 +92,8 @@ class CommonExperimentConfig(Experiment):
 
     - ``pipe_model``\: identical parallelization (like DSChat) with pipe+model parallelism. A world size under 8 will use tensor-model parallelism only.
 
+    - A regex pattern like ``d${DP}p${PP}m${TP}``\: a symmetric parallelization pattern with ${DP}-way data parallelism, ${PP}-way pipeline parallelism, and ${TP}-way model parallelism.
+
     :param experiment_name: Name of the experiment.
         Arbitrary string without "_" and "/", e.g., ``ultra-chat-llama``.
         Must be provided.
