@@ -1,12 +1,12 @@
 # log format constants
 import contextlib
 import copy
+import datetime
 import getpass
 import os
 import pathlib
 from collections import defaultdict
 from typing import *
-import datetime
 
 import numpy as np
 
