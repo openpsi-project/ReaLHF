@@ -206,9 +206,7 @@ class GenerateSchedule(PipeSchedule):
         self.next_stage = self.next_stage % self.stages
         self.max_new_tokens = max_new_tokens
         self.max_steps = (
-            max_new_tokens * max(self.n_pp_mbs, self.stages)
-            + self.n_pp_mbs
-            - 1
+            max_new_tokens * max(self.n_pp_mbs, self.stages) + self.n_pp_mbs - 1
         )  # a configurable upper bound
 
     def _valid_token_id(self, token_id):
@@ -233,9 +231,7 @@ class GenerateSchedule(PipeSchedule):
                 else -1
             )
             # the micro_batch_id of the last stage on last step
-            token_id = (step_id - self.stage_id) // max(
-                self.n_pp_mbs, self.stages
-            )
+            token_id = (step_id - self.stage_id) // max(self.n_pp_mbs, self.stages)
             # token id in current round
 
             # TODO: from last stage to first stage, need one buffer for each microbatch?
