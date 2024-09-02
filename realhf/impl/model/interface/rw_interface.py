@@ -229,12 +229,13 @@ class PairedRewardInterface(model_api.ModelInterface):
 
         for step, data in enumerate(tqdm.tqdm(eval_dataloader)):
             data: SequenceSample
-            stats = model.eval_batch(
+            res = model.eval_batch(
                 input_=data.cuda(),
                 loss_fn=_paired_rw_loss_from_model_outputs,
             )
 
-            if stats:
+            if res is not None:
+                _, stats = res
                 losses += stats["loss"].item()
                 correct_predictions += stats["correct_predictions"].item()
                 total_predictions += stats["total_predictions"].item()

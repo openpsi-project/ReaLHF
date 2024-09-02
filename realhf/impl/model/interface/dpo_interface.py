@@ -110,17 +110,28 @@ class DPOInterface(model_api.ModelInterface):
         module = model.module
         module.eval()
 
-        logits = module.forward(input_=input_, num_micro_batches=n_mbs)
-        if logits is None:
-            return None
-
         input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
         cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
-        prompt_lens = input_.data["prompt_lens"]
 
-        logprobs = gather_packed_shifted_log_probs(
-            logits, cu_seqlens, input_.data["packed_input_ids"]
-        ).float()
+        # This post_hook will gather log probabilities in mini-batches,
+        # reducing peak memory usage.
+        def calc_logprobs(logits, input_):
+            logprobs = gather_packed_shifted_log_probs(
+                logits, cu_seqlens, input_.data["packed_input_ids"]
+            )
+            return logprobs
+
+        logprobs = module.forward(
+            input_=input_,
+            num_micro_batches=n_mbs,
+            post_hook=calc_logprobs,
+        )
+
+        if logprobs is None:
+            return None
+
+        prompt_lens = input_.data["prompt_lens"]
+        logprobs = logprobs.float()
 
         assert (prompt_lens > 0).all(), prompt_lens
         logprob_sum = []

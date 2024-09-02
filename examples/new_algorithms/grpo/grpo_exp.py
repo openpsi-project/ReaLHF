@@ -58,16 +58,6 @@ class GRPOConfig(CommonExperimentConfig):
             adaptive_kl_ctl=self.ppo.use_adaptive_kl_ctl,
         )
 
-        if self.ppo.gen.use_cuda_graph and (
-            self.actor_train.parallel != self.actor_gen.parallel
-        ):
-            raise ValueError(
-                "CUDA graph cannot be used with parameter reallocation "
-                "because CUDA graph requires pinned parameter memory. "
-                "Either set use_cuda_graph=False or set identical parallel "
-                "strategies for actor_train and actor_gen."
-            )
-
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
         # role to config

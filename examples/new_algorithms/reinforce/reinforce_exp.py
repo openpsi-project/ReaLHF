@@ -50,19 +50,6 @@ class ReinforceConfig(CommonExperimentConfig):
     discount: float = 0.99
     adv_norm: bool = True
 
-    def __post_init__(self):
-
-        if self.gen.use_cuda_graph and (
-            self.actor_train.parallel != self.greedy_gen.parallel
-            or self.actor_train.parallel != self.sample_gen.parallel
-        ):
-            raise ValueError(
-                "CUDA graph cannot be used with parameter reallocation "
-                "because CUDA graph requires pinned parameter memory. "
-                "Either set use_cuda_graph=False or set identical parallel "
-                "strategies for training and generation."
-            )
-
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
         # role to config

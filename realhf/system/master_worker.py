@@ -148,7 +148,7 @@ async def gather_all_replies(
     return responses
 
 
-async def group_rpc_blocked(
+async def async_group_rpc(
     stream: request_reply_stream.NameResolvingRequestClient,
     handlers: List[Union[config_pkg.ModelShardID, str]],
     handle_type: str,
@@ -159,6 +159,21 @@ async def group_rpc_blocked(
         stream,
         request_all(stream, handlers, handle_type, datas, verbose=verbose),
     )
+    return [p.data for p in payloads]
+
+
+def group_rpc_blocked(
+    stream: request_reply_stream.NameResolvingRequestClient,
+    handlers: List[Union[config_pkg.ModelShardID, str]],
+    handle_type: str,
+    datas: List,
+    verbose: bool = True,
+):
+    req_ids = request_all(stream, handlers, handle_type, datas, verbose=verbose)
+    payloads = [
+        stream.poll(pattern=create_exact_match_pattern([req_id]), block=True)
+        for req_id in req_ids
+    ]
     return [p.data for p in payloads]
 
 
@@ -551,7 +566,7 @@ async def model_rpc_request_func(
             assert sample.bs % dp_size == 0
             min_n_seqs_per_dp = sample.bs // dp_size
         else:
-            min_n_seqs_per_dp = 1
+            min_n_seqs_per_dp = rpc.n_mbs if rpc.n_mbs is not None else 1
         split_spec = sample.get_split_spec(dp_size, min_size=min_n_seqs_per_dp)
         partitions = split_spec.partitions
         target_mapping = {i: list(range(v[0], v[1])) for i, v in enumerate(partitions)}
@@ -705,7 +720,7 @@ async def load_data_func(
         while not is_final_batch:
             # Send request to model workers to get the specification of data.
             # Data itself is not transferred to the master worker.
-            data_batches: List[data_api.DataBatchMeta] = await group_rpc_blocked(
+            data_batches: List[data_api.DataBatchMeta] = await async_group_rpc(
                 stream,
                 handlers=[f"__data{i}__" for i in range(src_rpc_dp_size)],
                 handle_type="fetch",
@@ -807,12 +822,12 @@ async def model_eval_thread_func(
 ):
     while not stop_ctl.is_set():
         epoch, epoch_step = await eval_queue.get()
-        eval_stats = await group_rpc_blocked(
+        eval_stats = await async_group_rpc(
             stream, handlers, "evaluate", [None for _ in handlers]
         )
         eval_stats = _gather_stat(list(filter(lambda x: bool(x), eval_stats)))
         logger.info(
-            f"Evaluation results at epoch {epoch + 1} step {epoch_step + 1}: {eval_stats}"
+            f"Evaluation results at epoch {epoch} step {epoch_step}: {eval_stats}"
         )
 
 
@@ -833,7 +848,7 @@ async def model_save_thread_func(
             )
             for s in handlers
         ]
-        await group_rpc_blocked(stream, handlers, "save", model_save_dirs)
+        await async_group_rpc(stream, handlers, "save", model_save_dirs)
         logger.info(f"Save models at epoch {epoch} step {epoch_step}.")
 
 
@@ -979,12 +994,23 @@ class MasterWorker(worker_base.Worker):
         # Build some data required for subsequent model function calls.
         self.__all_model_handlers: List[config_pkg.ModelShardID] = []
         self.__dp0_model_handlers: List[config_pkg.ModelShardID] = []
+        self.__trainable_model_handlers: List[config_pkg.ModelShardID] = []
         for model_name, topo in self.config.model_topos.items():
             num_dp = topo.get_dim("data")
             self.__all_model_handlers += [
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in range(topo.world_size())
             ]
+
+            if any(
+                rpc.model_name == model_name
+                and rpc.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
+                for rpc in self.__model_rpcs
+            ):
+                self.__trainable_model_handlers += [
+                    config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
+                    for j in range(topo.world_size())
+                ]
             self.__dp0_model_handlers += [
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
                 for j in topo.filter_match(data=0)
@@ -1119,7 +1145,7 @@ class MasterWorker(worker_base.Worker):
                 )
 
             _task = event_loop.create_task(
-                group_rpc_blocked(
+                async_group_rpc(
                     self.__stream,
                     handlers=_handlers,
                     handle_type="initialize",
@@ -1230,7 +1256,7 @@ class MasterWorker(worker_base.Worker):
         save_task = event_loop.create_task(
             model_save_thread_func(
                 stream=self.__stream,
-                handlers=self.__all_model_handlers,
+                handlers=self.__trainable_model_handlers,
                 model_save_root=self.MODEL_SAVE_ROOT,
                 save_queue=self.__rpc_ctrl.save_queue,
                 stop_ctl=self.__rpc_ctrl.stop,
@@ -1333,6 +1359,37 @@ class MasterWorker(worker_base.Worker):
 
         if is_new_epoch:
             if self._epoch > self.__total_train_epochs:
+                if should_eval:
+                    eval_stats = group_rpc_blocked(
+                        self.__stream,
+                        self.__all_model_handlers,
+                        "evaluate",
+                        [None for _ in self.__all_model_handlers],
+                    )
+                    eval_stats = _gather_stat(
+                        list(filter(lambda x: bool(x), eval_stats))
+                    )
+                    logger.info(
+                        f"Evaluation results at epoch {self._epoch} step {self._epoch_step}: {eval_stats}"
+                    )
+                if should_save:
+                    model_save_dirs = [
+                        os.path.join(
+                            self.MODEL_SAVE_ROOT,
+                            s.model_name.role,
+                            f"epoch{self._epoch}epochstep{self._epoch_step}globalstep{self._global_step}",
+                        )
+                        for s in self.__trainable_model_handlers
+                    ]
+                    group_rpc_blocked(
+                        self.__stream,
+                        self.__trainable_model_handlers,
+                        "save",
+                        model_save_dirs,
+                    )
+                    logger.info(
+                        f"Save models at epoch {self._epoch} step {self._epoch_step}."
+                    )
                 self.experiment_complete_exit(f"Training completes! Yeah!!!")
 
         total_time_consumption = time.perf_counter() - self._train_start_time
