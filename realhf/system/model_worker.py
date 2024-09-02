@@ -558,6 +558,17 @@ class ModelWorker(worker_base.Worker):
                     self._model, data
                 )
                 self.__backend_initialized[request.handler.model_name] = True
+                # Offload this model after initialization if any MFC requires offloading.
+                for rpc in self.config.model_rpcs:
+                    if rpc.model_name != request.handler.model_name:
+                        continue
+                    if all(
+                        not isinstance(hook, dfg.OffloadHook)
+                        for hook in rpc._post_hooks
+                    ):
+                        continue
+                    self.__unwrapped_models[request.handler.model_name].async_offload()
+                    break
             elif request.handle_name == "model_config":
                 if isinstance(
                     self.__unwrapped_models[request.handler.model_name],
