@@ -202,8 +202,12 @@ class ReaLDeepSpeedEngine(model_api.PipelinableEngine):
         num_micro_batches: Optional[int] = None,
     ):
         if constants.pipe_parallel_world_size() > 1:
+            # Fusing the minibatched forward-backward in a pipeline training schedule.
             if num_micro_batches is not None:
-                if num_micro_batches < self.pipe_runner.default_train_mbs:
+                if (
+                    num_micro_batches < self.pipe_runner.default_train_mbs
+                    and constants.parallelism_rank() == 0
+                ):
                     logger.warning(
                         "When training with pipeline parallel, num micro batches should be "
                         "larger than 2 x num_pipeline_stages to avoid idle time. "
@@ -220,7 +224,7 @@ class ReaLDeepSpeedEngine(model_api.PipelinableEngine):
                 input_=input_,
                 loss_fn=loss_fn,
                 version_steps=version_steps,
-                num_micro_batches=num_micro_batches,
+                n_pp_mbs=num_micro_batches,
             )
         else:
             if num_micro_batches is None:

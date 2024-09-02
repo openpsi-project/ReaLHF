@@ -733,6 +733,7 @@ class ReaLMegatronEngine(model_api.PipelinableEngine):
         with megatron_ctx():
             self.engine.zero_grad()
             if constants.pipe_parallel_world_size() > 1:
+                # Fusing the minibatched forward-backward in a pipeline training schedule.
                 if num_micro_batches is not None:
                     if (
                         num_micro_batches < self.pipe_runner.default_train_mbs
@@ -754,7 +755,7 @@ class ReaLMegatronEngine(model_api.PipelinableEngine):
                     input_=input_,
                     loss_fn=loss_fn,
                     version_steps=version_steps,
-                    num_micro_batches=num_micro_batches,
+                    n_pp_mbs=num_micro_batches,
                 )
             else:
                 if num_micro_batches is None:
