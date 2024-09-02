@@ -52,6 +52,7 @@ python3 examples/new_algorithms/reinforce/reinforce_exp.py reinforce \
     dataset.train_bs_n_seqs=512 \
     gen.max_new_tokens=512 \
     gen.min_new_tokens=512 \
+    gen.use_cuda_graph=True \
     gen.top_p=0.9 gen.top_k=5000 \
     allocation_mode=manual \
     n_nodes=1 \

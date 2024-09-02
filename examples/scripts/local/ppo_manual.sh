@@ -74,6 +74,7 @@ python3 -m realhf.apps.quickstart ppo \
     ppo.gen.max_new_tokens=512 \
     ppo.gen.min_new_tokens=512 \
     ppo.gen.top_p=0.9 ppo.gen.top_k=1000 \
+    ppo.gen.use_cuda_graph=True \
     ppo.ppo_n_minibatches=4 \
     ppo.kl_ctl=0.1 \
     ppo.value_eps_clip=0.2 \

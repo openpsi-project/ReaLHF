@@ -111,7 +111,7 @@ class PipeSchedule(ABC):
         return self.stages
 
     @property
-    def num_micro_batches(self):
+    def n_pp_mbs(self):
         """The number of total micro_batches used to configure this
         schedule."""
         return self.micro_batches
@@ -206,9 +206,7 @@ class GenerateSchedule(PipeSchedule):
         self.next_stage = self.next_stage % self.stages
         self.max_new_tokens = max_new_tokens
         self.max_steps = (
-            max_new_tokens * max(self.num_micro_batches, self.stages)
-            + self.num_micro_batches
-            - 1
+            max_new_tokens * max(self.n_pp_mbs, self.stages) + self.n_pp_mbs - 1
         )  # a configurable upper bound
 
     def _valid_token_id(self, token_id):
@@ -220,22 +218,20 @@ class GenerateSchedule(PipeSchedule):
         for step_id in range(self.max_steps):
             cmds = []
             micro_batch_id = (
-                (step_id - self.stage_id) % max(self.num_micro_batches, self.stages)
+                (step_id - self.stage_id) % max(self.n_pp_mbs, self.stages)
                 if step_id - self.stage_id >= 0
                 else -1
             )  # micro batch id for current stage
             first_round = (
-                step_id < self.num_micro_batches
+                step_id < self.n_pp_mbs
             )  # whether it is the first round of generate
             last_stage_last_mbid = (
-                (step_id - self.stages) % max(self.num_micro_batches, self.stages)
+                (step_id - self.stages) % max(self.n_pp_mbs, self.stages)
                 if step_id >= self.stages
                 else -1
             )
             # the micro_batch_id of the last stage on last step
-            token_id = (step_id - self.stage_id) // max(
-                self.num_micro_batches, self.stages
-            )
+            token_id = (step_id - self.stage_id) // max(self.n_pp_mbs, self.stages)
             # token id in current round
 
             # TODO: from last stage to first stage, need one buffer for each microbatch?
@@ -312,13 +308,12 @@ class GenerateSchedule(PipeSchedule):
 
     def num_pipe_buffers(self):
         """2 buffers for inter stage transfer (except last stage to first
-        stage) self.num_micro_batches buffers for last stage to first stage
-        transfer.
+        stage) self.n_pp_mbs buffers for last stage to first stage transfer.
 
         Returns:
-            ``2 + self.num_micro_batches``
+            ``2 + self.n_pp_mbs``
         """
-        return 2  # + self.num_micro_batches
+        return 2  # + self.n_pp_mbs
 
 
 class TrainSchedule(PipeSchedule):

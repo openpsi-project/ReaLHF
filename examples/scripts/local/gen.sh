@@ -16,9 +16,9 @@ python3 -m realhf.apps.quickstart gen \
     allocation_mode=manual \
     model.type._class=$MODEL_FAMILY \
     model.path=$SFT_MODEL_PATH \
-    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
+    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt-small.jsonl \
     dataset.max_prompt_len=1024 \
-    dataset.train_bs_n_seqs=128 \
+    dataset.train_bs_n_seqs=100 \
     allocation.parallel.pipeline_parallel_size=1 \
     allocation.parallel.model_parallel_size=2 \
     allocation.parallel.data_parallel_size=4 \

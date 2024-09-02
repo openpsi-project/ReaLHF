@@ -12,9 +12,9 @@ SFT_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-sft/$MODEL_FAMILY-loca
 RW_MODEL_PATH=/lustre/aigc/llm/checkpoints/fw/quickstart-rw/$MODEL_FAMILY-ray-manual/default/epoch1epochstep10globalstep10/
 
 # Option 1: The experiment runs locally with subprocesses.
-# MODE=local
+MODE=local
 # Option 2: The experiment runs in a Ray cluster
-MODE=ray
+# MODE=ray
 # Option 3: The experiment runs in a SLURM + pyxis cluster
 # Using the slurm mode requires a cluster spec file
 # and setting CLUSTER_SPEC_PATH to the path of it.
@@ -47,7 +47,7 @@ python3 -m realhf.apps.quickstart ppo \
     trial_name=$TRIAL_NAME \
     exp_ctrl.total_train_epochs=1 \
     exp_ctrl.save_freq_steps=null \
-    n_nodes=4 \
+    n_nodes=1 \
     allocation_mode=heuristic \
     actor.type._class=$MODEL_FAMILY \
     actor.path=$SFT_MODEL_PATH \
@@ -61,13 +61,20 @@ python3 -m realhf.apps.quickstart ppo \
     rew.path=$RW_MODEL_PATH \
     dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
     dataset.max_prompt_len=128 \
-    dataset.train_bs_n_seqs=128 \
+    dataset.train_bs_n_seqs=1024 \
     ppo.gen.max_new_tokens=512 \
     ppo.gen.min_new_tokens=512 \
     ppo.gen.use_cuda_graph=True \
+    ppo.gen.force_no_logits_mask=True \
     ppo.gen.top_p=0.9 ppo.gen.top_k=1000 \
     ppo.ppo_n_minibatches=4 \
     ppo.kl_ctl=0.1 \
     ppo.value_eps_clip=0.2 \
     ppo.reward_output_scaling=1.0 \
-    ppo.adv_norm=True ppo.value_norm=True
+    ppo.adv_norm=True ppo.value_norm=True \
+    actor_gen.n_mbs=2 \
+    actor_train.n_mbs=4 \
+    critic_inf.n_mbs=4 \
+    critic_train.n_mbs=4 \
+    rew_inf.n_mbs=2 \
+    ref_inf.n_mbs=8

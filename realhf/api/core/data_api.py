@@ -48,7 +48,10 @@ def load_hf_tokenizer(
     if padding_side is not None:
         kwargs["padding_side"] = padding_side
     tokenizer = transformers.AutoTokenizer.from_pretrained(
-        model_name_or_path, fast_tokenizer=fast_tokenizer, **kwargs
+        model_name_or_path,
+        fast_tokenizer=fast_tokenizer,
+        trust_remote_code=True,
+        **kwargs,
     )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -628,10 +631,17 @@ def load_shuffle_split_dataset(
             with open(dataset_path, "r") as f:
                 data = json.load(f)
         else:
-            raise NotImplementedError(f"Unkown dataset extension: {dataset_path}")
+            raise NotImplementedError(f"Unknown dataset extension: {dataset_path}")
     else:
         assert dataset_builder is not None
         data = dataset_builder()
+
+    if any("id" not in d for d in data):
+        logger.warning(
+            f'Key "id" not found in the dataset. Use indices as dataset IDs.'
+        )
+        for idx, d in enumerate(data):
+            d["id"] = idx
 
     datasize_per_rank = len(data) // util.world_size
     shuffle_indices = get_shuffle_indices(
