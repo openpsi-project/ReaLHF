@@ -40,6 +40,7 @@ from realhf.api.quickstart.model import (
 )
 from realhf.experiments.common.check import check_is_realhf_native_model_interface
 from realhf.experiments.common.utils import (
+    extract_symmetric_allocation,
     get_topo,
     make_inf_backend_config,
     make_train_backend_config,
@@ -335,27 +336,35 @@ class CommonExperimentConfig(Experiment):
                 else:
                     raise ValueError(f"RPC {rpc_alloc.rpc} not found in rpcs.")
         elif (
-            self.allocation_mode == "pipe_data" or self.allocation_mode == "pipe_model"
+            self.allocation_mode == "pipe_data"
+            or self.allocation_mode == "pipe_model"
+            or extract_symmetric_allocation(self.allocation_mode)
         ):
+            if self.allocation_mode == "pipe_data":
+                dp, pp, mp = self.n_gpus_per_node, self.n_nodes, 1
+            elif self.allocation_mode == "pipe_model":
+                dp, pp, mp = 1, self.n_nodes, self.n_gpus_per_node
+            else:
+                para = extract_symmetric_allocation(self.allocation_mode)
+                dp, pp, mp = para["d"], para["p"], para["m"]
+                if dp * pp * mp != self.n_nodes * self.n_gpus_per_node:
+                    raise ValueError(
+                        "The multiplication of 3D parallel degrees "
+                        "does not equal to the number of gpus. "
+                        f"dp={dp}, pp={pp}, mp={mp}, "
+                        f"n_nodes={self.n_nodes}, n_gpus_per_node={self.n_gpus_per_node}"
+                    )
             rpc_allocs: List[RPCAllocation] = [
                 RPCAllocation(
                     rpc=rpc,
                     device_mesh=self.global_device_mesh,
                     parallel=ParallelismConfig(
-                        data_parallel_size=(
-                            self.n_gpus_per_node
-                            if self.allocation_mode == "pipe_data"
-                            else 1
-                        ),
-                        pipeline_parallel_size=self.n_nodes,
-                        model_parallel_size=(
-                            self.n_gpus_per_node
-                            if self.allocation_mode == "pipe_model"
-                            else 1
-                        ),
+                        data_parallel_size=dp,
+                        pipeline_parallel_size=pp,
+                        model_parallel_size=mp,
                         use_sequence_parallel=(
                             rpc.interface_type == ModelInterfaceType.TRAIN_STEP
-                            and self.allocation_mode == "pipe_model"
+                            and mp > 1
                         ),
                     ),
                 )
@@ -380,7 +389,9 @@ class CommonExperimentConfig(Experiment):
         elif self.allocation_mode == "heuristic":
             rpc_allocs: List[RPCAllocation] = self._heuristic_rpc_allocation()
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(
+                f'Unknown allocation mode "{self.allocation_mode}".'
+            )
         return rpc_allocs
 
     def _get_model_worker_configs(
