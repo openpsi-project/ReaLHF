@@ -1,6 +1,7 @@
 # Modified from https://github.com/microsoft/DeepSpeed/blob/aed599b4422b1cdf7397abb05a58c3726523a333/deepspeed/runtime/pipe/topology.py#
 
-from itertools import product as cartesian_product, permutations
+from itertools import permutations
+from itertools import product as cartesian_product
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import torch.distributed as dist
