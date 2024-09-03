@@ -1,4 +1,6 @@
 import collections
+import itertools
+import re
 from typing import *
 
 import numpy as np
@@ -83,7 +85,9 @@ def make_train_backend_config(
         if model_cfg.zero_stage == 3:
             raise ValueError("Zero stage 3 is not supported in Megatron backend.")
         if model_cfg.zero_stage == 2:
-            logger.warning("Megatron does not ZeRO stage 2. Degenerates to stage 1.")
+            logger.warning(
+                "Megatron does not support ZeRO stage 2. Degenerates to stage 1."
+            )
             model_cfg.zero_stage = 1
         return ModelBackendAbstraction(
             "megatron",
@@ -192,3 +196,17 @@ def resolve_rpc_hooks(
         ):
             rpc.add_post_hook(OffloadHook())
             logger.info(f"Add offload hook for rpc {rpc.name} for role {rpc.role}")
+
+
+def extract_symmetric_allocation(allocation_mode: str) -> Dict | None:
+    for x, y, z in itertools.permutations(["d", "m", "p"]):
+        pattern = rf"{x}(\d+){y}(\d+){z}(\d+)"
+        m = re.match(pattern, allocation_mode)
+        if not m:
+            continue
+        a, b, c = map(int, m.groups())
+        return {
+            x: a,
+            y: b,
+            z: c,
+        }

@@ -112,6 +112,7 @@ def setup_global_comm(
         rank=global_rank,
         init_method=ddp_init_address,
         backend=backend,
+        timeout=constants.NCCL_DEFAULT_TIMEOUT,
     )
     if torch.cuda.is_available():
         torch.cuda.set_device(

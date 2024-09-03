@@ -518,24 +518,6 @@ class ModelWorker(worker_base.Worker):
         else:
             handler_model_name = request.handler.model_name
 
-        # handle post hooks
-        if handled and len(request.post_hooks) > 0:
-            assert len(request.post_hooks) == len(request.post_hook_data)
-            self.__handle_one_rpc_hook(
-                request.post_hooks.pop(0), request.post_hook_data.pop(0)
-            )
-            self.__request_queue.put_nowait((request, data, True, res))
-            return
-
-        if handled and len(request.post_hooks) == 0:
-            self.__reply_queue.put_nowait((request, res))
-            # self.logger.info(f"Model worker {self.__worker_index} #{request.handler}# "
-            #                          f"finish handling request *{request.handle_name}*, "
-            #                          f"request_id {request.request_id}.")
-            sample_count = data.bs if isinstance(data, data_api.SequenceSample) else 1
-            self.__request_sample_size[request.request_id] = sample_count
-            return
-
         assert not handled and res is None, (
             handled,
             res,
@@ -555,6 +537,17 @@ class ModelWorker(worker_base.Worker):
                     self._model, data
                 )
                 self.__backend_initialized[request.handler.model_name] = True
+                # Offload this model after initialization if any MFC requires offloading.
+                for rpc in self.config.model_rpcs:
+                    if rpc.model_name != request.handler.model_name:
+                        continue
+                    if all(
+                        not isinstance(hook, dfg.OffloadHook)
+                        for hook in rpc._post_hooks
+                    ):
+                        continue
+                    self.__unwrapped_models[request.handler.model_name].async_offload()
+                    break
             elif request.handle_name == "model_config":
                 if isinstance(
                     self.__unwrapped_models[request.handler.model_name],
@@ -625,6 +618,7 @@ class ModelWorker(worker_base.Worker):
                             f"Model worker {self.__worker_index} cleared cache in {et-st:.4f}s"
                         )
                 dump_tmark_db(self.__worker_index)
+                res = request_reply_stream.NoResponse()
             ############## computation function calls ##############
             elif request.handle_name in ["inference", "generate", "train_step"]:
                 res = self.__handle_model_function_calls(request, data)
@@ -653,7 +647,15 @@ class ModelWorker(worker_base.Worker):
                     f" in ${time.perf_counter() - tik:.4f}$s"
                 )
 
-        self.__request_queue.put_nowait((request, data, True, res))
+        # Handle all post hooks right after the main computation
+        if len(request.post_hooks) > 0:
+            assert len(request.post_hooks) == len(request.post_hook_data)
+            for hook, hook_data in zip(request.post_hooks, request.post_hook_data):
+                self.__handle_one_rpc_hook(hook, hook_data)
+
+        self.__reply_queue.put_nowait((request, res))
+        sample_count = data.bs if isinstance(data, data_api.SequenceSample) else 1
+        self.__request_sample_size[request.request_id] = sample_count
 
     @contextlib.contextmanager
     def __maybe_profile_rpc(self, rpc: dfg.MFCDef):
@@ -824,6 +826,9 @@ class ModelWorker(worker_base.Worker):
 
         batch_size = sample_size = 0
         for request, res in ready_to_post:
+            # For some requests, do not respond to the master worker.
+            if isinstance(res, request_reply_stream.NoResponse):
+                continue
             request: request_reply_stream.Payload
             reply = request_reply_stream.Payload(
                 handler="master",
@@ -856,7 +861,7 @@ class ModelWorker(worker_base.Worker):
 
     @cuda_tmark("receive_request", CUDATimeMarkType.misc)
     def maybe_receive_requests(self):
-        for _ in range(8):
+        for _ in range(16):
             self.__maybe_receive_one_request()
 
         while len(self.__request_cache) > 0:
@@ -894,18 +899,17 @@ class ModelWorker(worker_base.Worker):
         # at any time through a TCP-like protocol, i.e., req -> ack -> syn -> resp.
         # Each request is composed of pre-hooks, the main request, and post-hooks.
         # We execute all pre-hooks first because they involve data transfer
-        # among workers. Then, we round-robinly execute hooks and requests.
-        # These are designed to prevent mutual blocking when different requests
-        # are handled in different but intersected sets of model workers.
-        # E.g., If we have a request A and a request B, the execution order will be
-        # A.pre_hook -> B.pre_hook -> A -> B -> A.post_hook -> B.post_hook.
+        # among workers. Executing them first avoids blocking MFCs that require
+        # data from the same set of GPUs but are executed on disjoint GPUs.
         self.handle_all_pre_hooks()
-        for _ in range(16):
-            try:
-                request, data, handled, res = self.__request_queue.get_nowait()
-                self.model_poll_step(request, data, handled, res)
-            except queue.Empty:
-                break
+
+        # Execute one MFC them immediately return the result, such that
+        # we can correctly log the time consumption in the master worker.
+        try:
+            request, data, handled, res = self.__request_queue.get_nowait()
+            self.model_poll_step(request, data, handled, res)
+        except queue.Empty:
+            pass
 
         r = self.maybe_post_responses()
         return r

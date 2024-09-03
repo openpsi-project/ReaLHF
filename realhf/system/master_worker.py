@@ -367,7 +367,7 @@ def _attach_payloads_with_hooks(
     return payloads, mwids
 
 
-async def scatter_tensor_to_mws(
+async def _request_model_function_call(
     rpc: dfg.MFCDef,
     stream: request_reply_stream.NameResolvingRequestClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
@@ -508,6 +508,8 @@ async def model_rpc_request_func(
         while any(
             this_rpc_consumed_seqs >= (ctrl.rpc_traversal[c.name] + 1) * c.n_seqs
             for c in rpc.all_successors()
+            if c.interface_type == dfg.ModelInterfaceType.TRAIN_STEP
+            and c.model_name.role == rpc.model_name.role
         ):
             await asyncio.sleep(0.1)
 
@@ -583,7 +585,7 @@ async def model_rpc_request_func(
             producer_mappings[names[0], k] = producer_mapping
 
         # send partitioned data to model workers
-        req_ids, other_req_ids = await scatter_tensor_to_mws(
+        req_ids, other_req_ids = await _request_model_function_call(
             rpc=rpc,
             stream=stream,
             msid2mwid=msid2mwid,
@@ -623,18 +625,6 @@ async def model_rpc_reply_func(
         # Wait for master worker's request.
         buf_indices, ids, req_ids, other_req_ids, tik = await request_queue.get()
 
-        # First, wait for all side-effect requests to finish.
-        # Side-effect or empty requests are required for data transfer
-        # and parameter synchronization.
-        await asyncio.gather(
-            *[
-                _awaitable_response(
-                    stream, pattern=create_exact_match_pattern([req_id])
-                )
-                for req_id in other_req_ids
-            ]
-        )
-
         # Then, wait for all main requests to finish.
         responses = await asyncio.gather(
             *[
@@ -663,6 +653,10 @@ async def model_rpc_reply_func(
         if rpc.log_return_value:
             logger.info(f"RPC name {rpc.name} returns {res}")
 
+        logger.info(
+            f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s."
+        )
+
         # Release the semaphore to let the request corountine continue running.
         can_do_rpc.release()
         ctrl.rpc_traversal[rpc.name] += 1
@@ -677,8 +671,17 @@ async def model_rpc_reply_func(
             logger.info(f"Amending RPC {rpc.name} output keys: {res.keys}")
             await buffer.amend_batch(buf_indices, res.unpack())
 
-        logger.info(
-            f"Model rpc {rpc.name} finished. Run time {time.perf_counter() - tik:.4f}s."
+        # Wait for all side-effect requests to finish.
+        # Side-effect or empty requests are required for data transfer
+        # and parameter synchronization.
+        # Wait them after the main request to log the oorrect MFC time.
+        await asyncio.gather(
+            *[
+                _awaitable_response(
+                    stream, pattern=create_exact_match_pattern([req_id])
+                )
+                for req_id in other_req_ids
+            ]
         )
 
 
@@ -1261,8 +1264,6 @@ class MasterWorker(worker_base.Worker):
         self.__initialized = True
         self._train_start_time = time.perf_counter()
 
-        self.__clear_data_cache_reqids = None
-
         self.__cur_steps_per_epoch = None
         self.__cur_avg_tokens_per_batch = None
 
@@ -1485,14 +1486,7 @@ class MasterWorker(worker_base.Worker):
         )
 
     def _clear_gpu_cache(self):
-        if self.__clear_data_cache_reqids is not None:
-            [
-                self.__stream.poll(
-                    block=True, pattern=create_exact_match_pattern([reqid])
-                )
-                for reqid in self.__clear_data_cache_reqids
-            ]
-        self.__clear_data_cache_reqids = request_all(
+        request_all(
             self.__stream,
             [vs[0] for vs in self.__mwid2msids.values()],
             "clear_data_cache",

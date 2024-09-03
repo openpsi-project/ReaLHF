@@ -201,30 +201,21 @@ class ReaLDeepSpeedEngine(model_api.PipelinableEngine):
         version_steps: int,
         num_micro_batches: Optional[int] = None,
     ):
+        if num_micro_batches is None:
+            num_micro_batches = 1
         if constants.pipe_parallel_world_size() > 1:
-            if num_micro_batches is not None:
-                if num_micro_batches < self.pipe_runner.default_train_mbs:
-                    logger.warning(
-                        "When training with pipeline parallel, num micro batches should be "
-                        "larger than 2 x num_pipeline_stages to avoid idle time. "
-                        f"Setting num_micro_batches to {self.pipe_runner.default_train_mbs}"
-                    )
-                num_micro_batches = max(
-                    num_micro_batches, self.pipe_runner.default_train_mbs
-                )
-            else:
-                num_micro_batches = self.pipe_runner.default_train_mbs
+            # Fusing the minibatched forward-backward in a pipeline training schedule.
             instr_set = PipeTrainSetForDeepSpeed(self.ds_engine)
+            # NOTE: When training with pipeline parallel, num micro batches should be
+            # larger than 2 x num_pipeline_stages to avoid idle time.
             return self.pipe_runner.train_batch(
                 instr_set=instr_set,
                 input_=input_,
                 loss_fn=loss_fn,
                 version_steps=version_steps,
-                num_micro_batches=num_micro_batches,
+                n_pp_mbs=self.pipe_runner.default_train_mbs * num_micro_batches,
             )
         else:
-            if num_micro_batches is None:
-                num_micro_batches = 1
             self.ds_engine._config.gradient_accumulation_steps = num_micro_batches
             self.ds_engine.set_gradient_accumulation_boundary(False)
             if isinstance(

@@ -637,10 +637,17 @@ def load_shuffle_split_dataset(
             with open(dataset_path, "r") as f:
                 data = json.load(f)
         else:
-            raise NotImplementedError(f"Unkown dataset extension: {dataset_path}")
+            raise NotImplementedError(f"Unknown dataset extension: {dataset_path}")
     else:
         assert dataset_builder is not None
         data = dataset_builder()
+
+    if any("id" not in d for d in data):
+        logger.warning(
+            f'Key "id" not found in the dataset. Use indices as dataset IDs.'
+        )
+        for idx, d in enumerate(data):
+            d["id"] = idx
 
     datasize_per_rank = len(data) // util.world_size
     shuffle_indices = get_shuffle_indices(
