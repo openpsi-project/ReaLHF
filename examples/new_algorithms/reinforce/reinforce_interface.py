@@ -66,12 +66,13 @@ def _reinforce_loss_from_model_outputs(
 class ReinforceInterface(model_api.ModelInterface):
 
     force_greedy: bool = False
-    generation_config: model_api.GenerationHyperparameters = dataclasses.field(
-        default_factory=model_api.GenerationHyperparameters
-    )
+    generation_config: Dict = dataclasses.field(default_factory=dict)
     enable_save: bool = True
     discount: float = 0.99
     adv_norm: bool = True
+
+    def __post_init__(self):
+        self.gconfig = model_api.GenerationHyperparameters(**self.generation_config)
 
     def save(self, model: model_api.Model, save_dir: str):
         # NOTE: import here to avoid cuda initialization
@@ -103,11 +104,11 @@ class ReinforceInterface(model_api.ModelInterface):
 
         module.eval()
 
-        self.generation_config.greedy = self.force_greedy
+        self.gconfig.greedy = self.force_greedy
         res = module.generate(
             input_=input_,
             tokenizer=model.tokenizer,
-            gconfig=self.generation_config,
+            gconfig=self.gconfig,
             num_micro_batches=n_mbs,
         )
         if res is None:

@@ -54,7 +54,7 @@ def setup_global_comm(
             map(
                 int,
                 name_resolve.get_subtree(
-                    names.trainer_ddp_peer(
+                    names.distributed_peer(
                         expr_name,
                         trial_name,
                         gpu_utils.GLOBAL_PROCESS_GROUP_NAME,
@@ -90,27 +90,27 @@ def setup_global_comm(
     else:
         local_gpu_id = global_rank
 
-    ddp_master_name = names.trainer_ddp_master(
+    pg_master_name = names.distributed_master(
         expr_name, trial_name, gpu_utils.GLOBAL_PROCESS_GROUP_NAME
     )
 
     if worker_index == 0:
         host_ip = socket.gethostbyname(socket.gethostname())
         port = network.find_free_port()
-        ddp_init_address = f"tcp://{host_ip}:{port}"
-        name_resolve.add(ddp_master_name, ddp_init_address, keepalive_ttl=300)
+        pg_init_addr = f"tcp://{host_ip}:{port}"
+        name_resolve.add(pg_master_name, pg_init_addr, keepalive_ttl=300)
     else:
         try:
-            ddp_init_address = name_resolve.wait(ddp_master_name, timeout=300)
+            pg_init_addr = name_resolve.wait(pg_master_name, timeout=300)
         except TimeoutError:
             raise TimeoutError(
-                f"global_rank={global_rank} worker_index={worker_index} wait for ddp_init_method timeout."
+                f"global_rank={global_rank} worker_index={worker_index} wait for process group init timeout."
             )
 
     torch_dist_kwargs = dict(
         world_size=world_size,
         rank=global_rank,
-        init_method=ddp_init_address,
+        init_method=pg_init_addr,
         backend=backend,
         timeout=constants.NCCL_DEFAULT_TIMEOUT,
     )

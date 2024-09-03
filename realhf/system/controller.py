@@ -10,6 +10,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import colorama
 import ray
 import ray.util.queue as rq
 import torch
@@ -66,7 +67,6 @@ class Controller:
         logger.info("Experiment: %s %s", self.experiment_name, self.trial_name)
 
         self.__control = panel
-        self.json_config_file_path = f"{cluster_spec.fileroot}/logs/{getpass.getuser()}/{self.experiment_name}_{self.trial_name}"
 
     def reconnect(self):
         """Automatically reconnect to workers.
@@ -75,32 +75,12 @@ class Controller:
         """
         self.__control.auto_connect()
 
-    def start(self, experiment: system_api.Experiment, ignore_worker_error=False):
-        if ignore_worker_error:
-            check_worker_status = ()
-            remove_worker_status = (
-                Wss.COMPLETED,
-                Wss.ERROR,
-                Wss.LOST,
-                Wss.UNKNOWN,
-            )
-        else:
-            check_worker_status = (Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
-            remove_worker_status = (Wss.COMPLETED,)
-
-        scheduling: system_api.ExperimentScheduling = experiment.scheduling_setup()
-        setup = experiment.initial_setup()
-        setup.set_worker_information(
-            experiment_name=self.experiment_name, trial_name=self.trial_name
-        )
-
-        if setup.config is not None:
-            os.makedirs(self.json_config_file_path, exist_ok=True)
-            with open(
-                os.path.join(self.json_config_file_path, "config.json"), "w"
-            ) as f:
-                json.dump(asdict(setup.config), f, indent=4)
-
+    def __check_consistent_scheduling(
+        self,
+        scheduling: system_api.ExperimentScheduling,
+        setup: system_api.ExperimentConfig,
+        verbose=False,
+    ):
         # Scheduling and connecting to workers.
         workers_configs = [
             (k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES
@@ -131,7 +111,33 @@ class Controller:
                 raise IndexError(
                     f"Configuration has {len(config)} {name}, {count} scheduled."
                 )
-            logger.info(f"Configuration has {len(config)} {name}.")
+            if verbose:
+                logger.info(f"Configuration has {len(config)} {name}.")
+
+    def start(self, experiment: system_api.Experiment, ignore_worker_error=False):
+        if ignore_worker_error:
+            check_worker_status = ()
+            remove_worker_status = (
+                Wss.COMPLETED,
+                Wss.ERROR,
+                Wss.LOST,
+                Wss.UNKNOWN,
+                Wss.PAUSED,
+            )
+        else:
+            check_worker_status = (Wss.ERROR, Wss.LOST, Wss.UNKNOWN)
+            remove_worker_status = (Wss.COMPLETED, Wss.PAUSED)
+
+        scheduling = experiment.scheduling_setup()
+        setups = experiment.initial_setup()
+        if not isinstance(setups, list):
+            setups = [setups]
+
+        # Sanity check before launching workers.
+        for i, setup in enumerate(setups):
+            self.__check_consistent_scheduling(scheduling, setup, verbose=(i == 0))
+
+        worker_counts = [(k, len(getattr(setups[0], k))) for k in WORKER_TYPES]
 
         name_resolve.add(
             names.trial_registry(self.experiment_name, self.trial_name),
@@ -155,8 +161,8 @@ class Controller:
                 self.__control.connect(
                     [
                         self.__control.name(name, i)
-                        for name, cfgs, _ in workers_configs
-                        for i in range(len(cfgs))
+                        for name, count in worker_counts
+                        for i in range(count)
                     ],
                     progress=True,
                     timeout=CONNECTION_RETRY_AFTER_SECONDS,
@@ -178,39 +184,92 @@ class Controller:
             )
         )
 
-        # Configure workers.
-        try:
-            for name, cfgs, _ in workers_configs:
-                logger.info(f"Configuring Workers: {name}...")
-                self.__control.group_request(
-                    "configure",
-                    worker_names=[
-                        self.__control.name(name, i) for i in range(len(cfgs))
-                    ],
-                    worker_kwargs=[dict(config=cfg) for cfg in cfgs],
-                    progress=True,
-                )
-        except Exception as e:
-            logger.error(f"Configuring Failed: {e}. Exiting Workers.")
-            logger.error(traceback.format_exc())
-            self.interrupt(wait_timeout=120)
-            raise e
+        # NOTE: Since worker processes are created and killed by the scheduler,
+        # the controller cannot restart a dead worker when error occurs,
+        # and it's impossible to continue the experiment when any of the multiple setups fails.
+        # We can only relaunch the entire experiment in this case.
+        # In particular, while it seems to be possible to continue the experiment if
+        # the OOM error occurs, OOM will cause NCCL communication getting stuck (e.g, send/recv),
+        # which will finally throw out a C++ exception in the watchdog thread after reaching timeout.
+        # We cannot catch this exception, so OOM is irrecoverable.
+        for i, setup in enumerate(setups):
 
-        logger.info("Start workers...")
-        self.__control.group_request("start")
-        logger.info("Started.")
-        try:
-            self.wait(
-                timeout=None,
-                check_status=check_worker_status,
-                remove_status=remove_worker_status,
+            s = f" Entering setup {i+1}/{len(setups)}... ".center(80, "#")
+            logger.info(colorama.Fore.RED + "#" * len(s) + colorama.Style.RESET_ALL)
+            logger.info(colorama.Fore.RED + s + colorama.Style.RESET_ALL)
+            logger.info(colorama.Fore.RED + "#" * len(s) + colorama.Style.RESET_ALL)
+
+            # Configure workers.
+            setup.set_worker_information(
+                experiment_name=self.experiment_name, trial_name=self.trial_name
             )
-        except worker_base.WorkerException as e:
-            logger.error(e)
-            self.interrupt(wait_timeout=30)
-        except KeyboardInterrupt:
-            logger.info("Interrupted.")
-            self.interrupt(wait_timeout=30)
+            workers_configs = [
+                (k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES
+            ]
+            try:
+                for name, cfgs, _ in workers_configs:
+                    logger.info(f"Configuring Workers: {name}...")
+                    self.__control.group_request(
+                        "configure",
+                        worker_names=[
+                            self.__control.name(name, i) for i in range(len(cfgs))
+                        ],
+                        worker_kwargs=[dict(config=cfg) for cfg in cfgs],
+                        progress=True,
+                    )
+            except Exception as e:
+                logger.error(f"Configuring Failed: {e}. Exiting Workers.")
+                logger.error(traceback.format_exc())
+                self.interrupt(wait_timeout=120)
+                raise e
+
+            logger.info("Start workers...")
+            self.__control.group_request("start")
+            logger.info("Started.")
+            try:
+                self.wait(
+                    timeout=None,
+                    check_status=check_worker_status,
+                    remove_status=remove_worker_status,
+                )
+            except worker_base.WorkerException as e:
+                logger.error(e)
+                self.interrupt(wait_timeout=30)
+            except KeyboardInterrupt:
+                logger.info("Interrupted.")
+                self.interrupt(wait_timeout=30)
+
+            s = f" Finishing setup {i+1}/{len(setups)}, pausing workers... ".center(
+                80, "#"
+            )
+            logger.info(colorama.Fore.RED + s + colorama.Style.RESET_ALL)
+
+        logger.info(
+            colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + "=" * 80
+            + colorama.Style.RESET_ALL
+        )
+        logger.info(
+            colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + (
+                f" All {len(setups)} setups are done. "
+                "You've done an excellent job! Congrats! "
+            ).center(80, "=")
+            + colorama.Style.RESET_ALL
+        )
+        logger.info(
+            colorama.Fore.YELLOW
+            + colorama.Style.BRIGHT
+            + "\033[1m"
+            + "=" * 80
+            + colorama.Style.RESET_ALL
+        )
+        logger.info(f"Existing all workers...")
+        self.__control.group_request("exit")
 
     def wait(
         self,

@@ -1,0 +1,1 @@
+{"type_": "ppo_actor", "args": {"generation_config": {"max_new_tokens": 1024,"min_new_tokens": 1024,"use_cuda_graph": true,"force_no_logits_mask": true,"force_cudagraph_recapture": true,"top_p": 1.0,"top_k": 1000000},"enable_save": false,"n_minibatches": 8}}

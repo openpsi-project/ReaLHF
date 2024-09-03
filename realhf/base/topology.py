@@ -26,6 +26,27 @@ def new_or_get_group(ranks: List[int], backend=None):
     return GLOBAL_PROCESS_GROUP_REGISTRY[key]
 
 
+def destroy_all_comm_groups():
+    if not dist.is_initialized():
+        return
+    global GLOBAL_PROCESS_GROUP_REGISTRY
+    for group in GLOBAL_PROCESS_GROUP_REGISTRY.values():
+        dist.destroy_process_group(group)
+    GLOBAL_PROCESS_GROUP_REGISTRY = {}
+    dist.destroy_process_group()
+
+
+def decompose_to_three_factors(n: int) -> List[Tuple[int, int, int]]:
+    factors = []
+    for i in range(1, int(n ** (1 / 2)) + 1):
+        if n % i == 0:
+            for j in range(i, int((n // i) ** (1 / 2)) + 1):
+                if (n // i) % j == 0:
+                    k = (n // i) // j
+                    factors += list(set(itertools.permutations([i, j, k])))
+    return factors
+
+
 class ProcessCoord(NamedTuple):
     pipe: int
     data: int

@@ -1,0 +1,1 @@
+{"type_": "prompt", "args": {"max_length": 1024, "pad_to_max_length": true, "dataset_path": "/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl"}}

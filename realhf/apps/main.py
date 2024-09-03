@@ -16,7 +16,6 @@ from realhf.scheduler.client import JobException, JobState
 logger = logging.getLogger("main", "system")
 
 CONTROLLER_TIME_LIMIT = None
-TRACE_TIMEOUT = 360  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 
 
 def scheduler_mode(mode: str) -> str:
@@ -193,9 +192,6 @@ def main_start(args, recover_count: int = 0):
                 args.image_name,
             )
 
-    timeout = (
-        None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT
-    )  # run 5 mins to collect trace
     try:
         sched.wait(
             check_status=(
@@ -205,13 +201,8 @@ def main_start(args, recover_count: int = 0):
                 JobState.COMPLETED,
             ),
             remove_status=(),
-            timeout=timeout,
         )
     except (KeyboardInterrupt, JobException, TimeoutError) as e:
-        if os.getenv("REAL_TRACE", "0") != "0" and isinstance(e, TimeoutError):
-            s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
-            logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
-
         recover_states = [
             JobState.CANCELLED,
             JobState.FAILED,
@@ -284,6 +275,11 @@ def _main_profile_layers(model_family, model_path):
     )
 
     if check_slurm_availability():
+        if not os.environ.get("CLUSTER_SPEC_PATH", ""):
+            raise ValueError(
+                "Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
+                "See example/cluster_config.json for a template."
+            )
         BASE_ENVIRONS = constants.get_env_vars(
             WANDB_MODE="disabled",
             REAL_MODE="slurm",

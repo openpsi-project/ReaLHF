@@ -1254,6 +1254,7 @@ class MasterWorker(worker_base.Worker):
 
         # Set up a run context of EventLoop.run_util_complete, baiscally copy-paste from cpython.
         # With this context, we can call the non-block EventLoop._run_once (similar to worker._poll).
+        self.__asyncio_tasks: List[asyncio.Task] = coroutine_tasks
         self.__asyncio_ctx = setup_run_until_complete(
             event_loop, asyncio.gather(*coroutine_tasks)
         )
@@ -1494,6 +1495,8 @@ class MasterWorker(worker_base.Worker):
 
     def experiment_complete_exit(self):
         self.__rpc_ctrl.stop.set()
+        for task in self.__asyncio_tasks:
+            task.cancel()
         self.__asyncio_ctx.future.set_result(None)
         # NOTE: stopping the loop immediately after cancelling tasks may
         # raise warnings sometimes, but it doesn't matter.
@@ -1507,6 +1510,29 @@ class MasterWorker(worker_base.Worker):
             + "Experiment Completes! Yeah!!!!!!!!"
             + colorama.Style.RESET_ALL
         )
+
+        # Send requests to pause model workers.
+        # Model workers will not respond to this message.
+        request_all(
+            self.__stream,
+            handlers=self.__all_model_handlers,
+            handle_type="reset",
+            datas=[None for _ in self.__all_model_handlers],
+        )
+        self.__stream.close()
+        constants.reset_run()
+        # Reset names used for distributed training.
+        # The next round of training will set up a new distributed environment.
+        name_resolve.clear_subtree(
+            names.distributed_root(constants.experiment_name(), constants.trial_name())
+        )
+        name_resolve.clear_subtree(
+            names.request_reply_stream_root(
+                constants.experiment_name(), constants.trial_name()
+            )
+        )
+        self.__initialized = False
+        self.pause()
         return worker_base.PollResult(0, 0)
 
     def __recover_save(self):

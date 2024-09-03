@@ -13,6 +13,7 @@ import realhf.base.constants as constants
 import realhf.base.topology as topology
 from realhf.api.core.config import ModelFamily, ModelName
 from realhf.api.core.model_api import ReaLModelConfig
+from realhf.base.topology import decompose_to_three_factors
 
 
 def bcast_cost(
@@ -105,17 +106,6 @@ def compute_cost(
         max_bcast_cnt = max(max_bcast_cnt, bcast_cnt)
 
     return max_cost
-
-
-def decompose_to_three_factors(n: int):
-    factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
-        if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
-                if (n // i) % j == 0:
-                    k = (n // i) // j
-                    factors += list(set(itertools.permutations([i, j, k])))
-    return factors
 
 
 def dump_table(

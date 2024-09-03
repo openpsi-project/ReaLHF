@@ -76,7 +76,6 @@ TORCH_EXTENSIONS_DIR = (
 QUICKSTART_EXPR_CACHE_PATH = f"{cluster_spec.fileroot}/.cache/{getpass.getuser()}/"
 BASE_ENVIRONS = {
     "PYTHONPATH": "/realhf",
-    "REAL_TRACE": os.getenv("REAL_TRACE", "0"),
     "REAL_IS_REMOTE": "1",
     # "NCCL_P2P_DISABLE": "1",
     # "NCCL_IB_DISABLE": "1",
@@ -107,7 +106,9 @@ BASE_ENVIRONS = {
     # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
     "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
     # Whether to enable time mark to plot timelines.
-    # "REAL_CUDA_TMARK": "1",
+    "REAL_CUDA_TMARK": os.getenv("REAL_CUDA_TMARK", "0"),
+    "REAL_DUMP_TRACE": os.getenv("REAL_DUMP_TRACE", "0"),
+    "REAL_DUMP_MEMORY": os.getenv("REAL_DUMP_MEMORY", "0"),
 }
 
 
@@ -142,7 +143,27 @@ _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
 _fake_mp_world_size = None
 _fake_mp_rank = None
 
+# GLOBAL_STATS_TRACKER is used to track and log training stats that cannot be gracefully obtained via model outputs
+# in interface implementations, e.g. load balancing loss in each MoE layer.
+GLOBAL_STATS_TRACKER = defaultdict(dict)
+GLOBAL_STATS_TRACKER_LOG_HOOKS = defaultdict(dict)
+
 # TODO: As in Megatron, we can set NCCL group options. Is it necessary?
+
+
+def reset_run():
+    global _model_name, _grids, _pgroups, _pgroup_ranks, _self_group, _rank_mapping, _global_memory_buffer, _fake_mp_world_size, _fake_mp_rank, GLOBAL_STATS_TRACKER, GLOBAL_STATS_TRACKER_LOG_HOOKS
+    _model_name = None
+    _grids = {}
+    _pgroups = {}
+    _pgroup_ranks = {}
+    _self_group = None
+    _rank_mapping = {}
+    _global_memory_buffer = GlobalMemoryBuffer()
+    _fake_mp_world_size = None
+    _fake_mp_rank = None
+    GLOBAL_STATS_TRACKER = defaultdict(dict)
+    GLOBAL_STATS_TRACKER_LOG_HOOKS = defaultdict(dict)
 
 
 @contextlib.contextmanager
@@ -453,10 +474,6 @@ def get_env_vars(**kwargs):
 
 
 ################# logging related #################
-# GLOBAL_STATS_TRACKER is used to track and log training stats that cannot be gracefully obtained via model outputs
-# in interface implementations, e.g. load balancing loss in each MoE layer.
-GLOBAL_STATS_TRACKER = defaultdict(dict)
-GLOBAL_STATS_TRACKER_LOG_HOOKS = defaultdict(dict)
 
 
 def save_to_global_stats_tracker(
