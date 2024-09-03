@@ -53,7 +53,7 @@ class GenerationConfig(CommonExperimentConfig):
 
         util = DatasetUtility(
             seed=0,
-            ddp_rank=0,
+            dp_rank=0,
             world_size=1,
             tokenizer=load_hf_tokenizer(self.model.path),
         )

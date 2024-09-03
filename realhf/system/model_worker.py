@@ -102,7 +102,6 @@ class ModelWorker(worker_base.Worker):
 
         self.data_consumers = self.config.model_rpcs[0].data_consumers
 
-        # NOTE: here worker_index is different from peer/ddp rank
         self.__worker_index = cfg.worker_info.worker_index
 
         torch.backends.cudnn.benchmark = cfg.cudnn_benchmark
@@ -110,8 +109,8 @@ class ModelWorker(worker_base.Worker):
 
         seeding.set_random_seed(cfg.seed)
 
-        # Reveal DDP identity of this worker to world.
-        gpu_utils.reveal_ddp_identity(
+        # Reveal process group identity of this worker to world.
+        gpu_utils.reveal_pg_identity(
             self.__experiment_name, self.__trial_name, self.__worker_index
         )
         self.__dist_env_resolved = False

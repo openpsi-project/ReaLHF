@@ -54,7 +54,7 @@ def set_cuda_device(device):
         torch.cuda.set_device(device)
 
 
-def reveal_ddp_identity(expr_name, trial_name, worker_index):
+def reveal_pg_identity(expr_name, trial_name, worker_index):
     master_group_name = names.distributed_peer(
         expr_name, trial_name, GLOBAL_PROCESS_GROUP_NAME
     )
@@ -75,8 +75,6 @@ def isolate_cuda_device(
     For example, if a job has 2 jobsteps, each with 1 GPU, and is allocated onto GPU 0 and 1,
     then CUDA_VISIBLE_DEVICES of these jobsteps will be 0,1, instead of 0 and 1.
     We use this function in `apps.remote` to isolate CUDA_VISIBLE_DEVICES for each jobstep.
-
-    Note that this function is completely independent of `setup_ddp`.
 
     Args:
         worker_type (str): .
