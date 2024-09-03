@@ -75,6 +75,11 @@ class _TensorDictSequenceBuffer:
             self.__has_keys[idx] = [
                 k in self.__storage[idx].sample.keys for k in self.__keys
             ]
+            if any(k not in self.__keys for k in self.__storage[idx].sample.keys):
+                logger.warning(
+                    f"Unexpected keys in the sample. Expected keys from all MFCDef: {self.__keys}."
+                    f"Keys in the current sample: {self.__storage[idx].sample.keys}"
+                )
 
     def _get_has_keys(self, indices):
         return self.__has_keys[indices, :]

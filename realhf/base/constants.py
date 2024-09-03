@@ -142,7 +142,27 @@ _global_memory_buffer: GlobalMemoryBuffer = GlobalMemoryBuffer()
 _fake_mp_world_size = None
 _fake_mp_rank = None
 
+# GLOBAL_STATS_TRACKER is used to track and log training stats that cannot be gracefully obtained via model outputs
+# in interface implementations, e.g. load balancing loss in each MoE layer.
+GLOBAL_STATS_TRACKER = defaultdict(dict)
+GLOBAL_STATS_TRACKER_LOG_HOOKS = defaultdict(dict)
+
 # TODO: As in Megatron, we can set NCCL group options. Is it necessary?
+
+
+def reset_run():
+    global _model_name, _grids, _pgroups, _pgroup_ranks, _self_group, _rank_mapping, _global_memory_buffer, _fake_mp_world_size, _fake_mp_rank, GLOBAL_STATS_TRACKER, GLOBAL_STATS_TRACKER_LOG_HOOKS
+    _model_name = None
+    _grids = {}
+    _pgroups = {}
+    _pgroup_ranks = {}
+    _self_group = None
+    _rank_mapping = {}
+    _global_memory_buffer = GlobalMemoryBuffer()
+    _fake_mp_world_size = None
+    _fake_mp_rank = None
+    GLOBAL_STATS_TRACKER = defaultdict(dict)
+    GLOBAL_STATS_TRACKER_LOG_HOOKS = defaultdict(dict)
 
 
 @contextlib.contextmanager
@@ -453,10 +473,6 @@ def get_env_vars(**kwargs):
 
 
 ################# logging related #################
-# GLOBAL_STATS_TRACKER is used to track and log training stats that cannot be gracefully obtained via model outputs
-# in interface implementations, e.g. load balancing loss in each MoE layer.
-GLOBAL_STATS_TRACKER = defaultdict(dict)
-GLOBAL_STATS_TRACKER_LOG_HOOKS = defaultdict(dict)
 
 
 def save_to_global_stats_tracker(

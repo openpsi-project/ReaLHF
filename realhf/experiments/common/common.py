@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import pprint
+import re
 from collections import defaultdict
 from typing import *
 
@@ -323,6 +324,7 @@ class CommonExperimentConfig(Experiment):
 
         self.__check_legal_allocation_options()
 
+        para3d_pattern = r"d(\d+)p(\d+)m(\d+)"
         rpcs = self.rpcs
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"

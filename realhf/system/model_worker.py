@@ -35,7 +35,6 @@ from realhf.base import (
     topology,
 )
 from realhf.base.monitor import (
-    CUDAKernelTime,
     CUDATimeMarkType,
     cuda_tmark,
     cuda_tmarked,
@@ -43,6 +42,7 @@ from realhf.base.monitor import (
     gpu_utilization_monitor,
 )
 from realhf.impl.model.nn.real_llm_api import ReaLModel
+from realhf.impl.model.utils import cuda_graph
 from realhf.system import request_reply_stream, worker_base
 
 # NOTE: Register all implemented datasets and models.
@@ -83,8 +83,11 @@ class NoRequestToHandle(Exception):
 
 
 class ModelWorker(worker_base.Worker):
+    _setup_counter = -1
 
     def _configure(self, cfg: system_api.ModelWorker):
+        self._setup_counter += 1
+
         self.config = cfg
         self.model_names = [s.id.model_name for s in cfg.shards]
         self.shard_indices = [
@@ -470,6 +473,7 @@ class ModelWorker(worker_base.Worker):
                 )
                 return
             if not m._offloaded:
+                # TODO: we should offload during initialize as well
                 m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
@@ -660,12 +664,13 @@ class ModelWorker(worker_base.Worker):
     @contextlib.contextmanager
     def __maybe_profile_rpc(self, rpc: dfg.MFCDef):
         # Whether to enable profiling is controlled by the following environment variables.
-        _enable_stack = os.getenv("REAL_DUMP_TRACE", "0") == "1"
-        _dump_kernel_time = os.getenv("REAL_DUMP_KERNEL_TIME", "0") == "1"
-        _enable_profiler = _enable_stack or _dump_kernel_time
+        _enable_profiler = os.getenv("REAL_DUMP_TRACE", "0") == "1"
+        _enable_memory_dump = os.getenv("REAL_DUMP_MEMORY", "0") == "1"
+        if _enable_memory_dump:
+            torch.cuda.memory._record_memory_history()
 
         # pfer ca be a null context if enable_profiler is False
-        pfer = get_pytorch_profiler(with_stack=_enable_stack, enabled=_enable_profiler)
+        pfer = get_pytorch_profiler(with_stack=True, enabled=_enable_profiler)
         pfer.__enter__()
         # The pytorch profiler will call cuda synchronize for us.
         profiler_tik = time.perf_counter()
@@ -686,39 +691,35 @@ class ModelWorker(worker_base.Worker):
                         f"Collecting system metrics from the profiler. "
                         "This may take for a while..."
                     )
-                if _dump_kernel_time:
-                    kernel_t = CUDAKernelTime.from_profiler(pfer)
-                    _kernel_time_dir = os.path.join(
+
+                def _get_subdir(name):
+                    subdir = os.path.join(
                         constants.LOG_ROOT,
                         constants.experiment_name(),
                         constants.trial_name(),
-                        "kernelTime",
+                        name,
+                        f"setup{self._setup_counter}",
                     )
-                    os.makedirs(_kernel_time_dir, exist_ok=True)
-                    with open(
-                        os.path.join(
-                            _kernel_time_dir,
-                            f"{rpc.name}_r{dist.get_rank()}.pkl",
-                        ),
-                        "wb",
-                    ) as f:
-                        pickle.dump(kernel_t, f)
-                if _enable_stack:
-                    trace_dir = os.path.join(
-                        constants.LOG_ROOT,
-                        constants.experiment_name(),
-                        constants.trial_name(),
-                        "trace",
-                    )
-                    os.makedirs(trace_dir, exist_ok=True)
+                    os.makedirs(subdir, exist_ok=True)
+                    return subdir
+
+                if _enable_profiler:
                     pfer.export_chrome_trace(
-                        os.path.join(trace_dir, f"{rpc.name}_r{dist.get_rank()}.json")
+                        os.path.join(
+                            _get_subdir("trace"), f"{rpc.name}_r{dist.get_rank()}.json"
+                        )
                     )
                 if self._dp_rank == 0 and self._is_dp_head:
                     blogger.info(
                         f"System metrics collected. Time consumption:"
                         f" {time.perf_counter() - collect_tik:.2f} secs."
                     )
+            if _enable_memory_dump:
+                torch.cuda.memory._dump_snapshot(
+                    os.path.join(
+                        _get_subdir("gpuMemory"), f"{rpc.name}_r{dist.get_rank()}.pkl"
+                    )
+                )
 
     def __handle_model_function_calls(
         self, request: request_reply_stream.Payload, data: Any
@@ -736,6 +737,10 @@ class ModelWorker(worker_base.Worker):
         )
 
         data: data_api.SequenceSample = input_queue.get_nowait()
+
+        if self.config.profile_mode:
+            data = self._interface.mock(request.handle_name, self._model, data)
+
         if rpc.input_key_remap:
             data.remap_keys_(rpc.input_key_remap)
 
@@ -882,6 +887,13 @@ class ModelWorker(worker_base.Worker):
 
         self.maybe_receive_requests()
 
+        # Prioritize the reset request.
+        for _ in range(self.__request_queue.qsize()):
+            request, data, handled, res = self.__request_queue.get_nowait()
+            if request.handle_name == "reset":
+                return self.__experiment_complete_exit()
+            self.__request_queue.put_nowait((request, data, handled, res))
+
         # NOTE: We ensure that all model workers have the same set of requests
         # at any time through a TCP-like protocol, i.e., req -> ack -> syn -> resp.
         # Each request is composed of pre-hooks, the main request, and post-hooks.
@@ -900,6 +912,49 @@ class ModelWorker(worker_base.Worker):
 
         r = self.maybe_post_responses()
         return r
+
+    def __experiment_complete_exit(self):
+        self.__stream.close()
+
+        self.__unwrapped_models.clear()
+
+        # Calling backend.destroy removes all hooks and releases the memory.
+        for model_name, backend in self.__backends.items():
+            backend.destroy(self.__models[model_name])
+
+        self.__models.clear()
+        self.__backends.clear()
+        self.__interfaces.clear()
+        self.__data_storage.clear()
+
+        # Reset model worker states.
+        self.__dist_env_resolved = False
+
+        before_mem = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle).used
+
+        constants.reset_run()
+        topology.destroy_all_comm_groups()
+        cuda_graph.destroy_all()
+
+        gc.collect()
+        if torch.cuda.is_initialized():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+        # Record memory.
+        after_mem = pynvml.nvmlDeviceGetMemoryInfo(self.__nvml_handle).used
+        blogger.debug(
+            f"GPU memory used upon experiment complete: "
+            f"{before_mem/1024**2:.2f}MB -> {after_mem / 1024**2:.2f}MB"
+        )
+
+        self.__nvml_handle = None
+        try:
+            pynvml.nvmlShutdown()
+        except pynvml.nvml.NVMLError_Uninitialized:
+            pass
+        self.pause()
+        return worker_base.PollResult(sample_count=0, batch_count=0)
 
     def __recover_save(self):
         # store model and dataset states for recover

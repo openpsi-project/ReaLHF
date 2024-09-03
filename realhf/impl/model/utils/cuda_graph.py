@@ -40,13 +40,15 @@ def outer_capture_context(stream=None, no_grad=False):
     """
     if stream is None:
         stream = torch.cuda.Stream()
-    maybe_ca_context = (
-        nullcontext()
-        if custom_all_reduce._CA_HANDLE is None
-        else custom_all_reduce._CA_HANDLE.capture()
-    )
+    # NOTE: Omit the custom all-reduce context because it is not used.
+    # Using the context will cause errors when we re-launch workers.
+    # maybe_ca_context = (
+    #     nullcontext()
+    #     if custom_all_reduce._CA_HANDLE is None
+    #     else custom_all_reduce._CA_HANDLE.capture()
+    # )
     maybe_no_grad = nullcontext() if not no_grad else torch.no_grad()
-    with torch.cuda.stream(stream), maybe_ca_context, maybe_no_grad:
+    with torch.cuda.stream(stream), maybe_no_grad:
         yield
 
 
@@ -119,7 +121,7 @@ def capture_func(
             CUDA_GRAPH_OUTPUT_BUFFER[name],
         )
 
-    custom_all_reduce_assertion()
+    # custom_all_reduce_assertion()
     stream = torch.cuda.Stream()
     st = time.monotonic()
     logger.debug(f"Rank {dist.get_rank()}: Capturing CUDA graph for {name}")
@@ -214,3 +216,20 @@ def destroy(name):
     CUDA_GRAPH_INPUT_BUFFER[name] = None
     CUDA_GRAPH_OUTPUT_BUFFER[name] = None
     CUDA_GRAPH_DESTROYED[name] = True
+
+
+def destroy_all():
+    global CUDA_GRAPH_STORAGE
+    global CUDA_GRAPH_INPUT_BUFFER
+    global CUDA_GRAPH_OUTPUT_BUFFER
+    global CUDA_GRAPH_FIRST_CAPTURE
+    global CUDA_GRAPH_DESTROYED
+
+    for name in CUDA_GRAPH_STORAGE:
+        if CUDA_GRAPH_DESTROYED[name]:
+            continue
+        CUDA_GRAPH_STORAGE[name].reset()
+        CUDA_GRAPH_STORAGE[name] = None
+        CUDA_GRAPH_INPUT_BUFFER[name] = None
+        CUDA_GRAPH_OUTPUT_BUFFER[name] = None
+        CUDA_GRAPH_DESTROYED[name] = True

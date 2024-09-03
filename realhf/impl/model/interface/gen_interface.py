@@ -38,9 +38,10 @@ def write_dict_to_jsonl(dict_data, file_path, lock_file):
 @dataclasses.dataclass
 class GenerationInterface(model_api.ModelInterface):
     output_file: str | None = None
-    generation_config: model_api.GenerationHyperparameters = dataclasses.field(
-        default_factory=model_api.GenerationHyperparameters
-    )
+    generation_config: dict = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        self.gconfig = model_api.GenerationHyperparameters(**self.generation_config)
 
     @torch.no_grad()
     def generate(
@@ -64,7 +65,7 @@ class GenerationInterface(model_api.ModelInterface):
         res = module.generate(
             input_=x,
             tokenizer=model.tokenizer,
-            gconfig=self.generation_config,
+            gconfig=self.gconfig,
             num_micro_batches=n_mbs,
         )
         if res is None:

@@ -117,6 +117,8 @@ def main_start(args, recover_count: int = 0):
         CLUSTER_SPEC_PATH=cluster_spec_path,
         REAL_RECOVER_RUN="1" if is_recover_run else "0",
         REAL_SAVE_RECOVER_STATES="1" if save_recover_states else "0",
+        REAL_DUMP_TRACE=os.environ.get("REAL_DUMP_TRACE", "0"),
+        REAL_DUMP_MEMORY=os.environ.get("REAL_DUMP_MEMORY", "0"),
     )
     for k, v in BASE_ENVIRONS.items():
         os.environ[k] = v
@@ -284,10 +286,17 @@ def _main_profile_layers(model_family, model_path):
     )
 
     if check_slurm_availability():
+        if not os.environ.get("CLUSTER_SPEC_PATH", ""):
+            raise ValueError(
+                "Environment variable CLUSTER_SPEC_PATH must be set for slurm mode! "
+                "See example/cluster_config.json for a template."
+            )
         BASE_ENVIRONS = constants.get_env_vars(
             WANDB_MODE="disabled",
             REAL_MODE="slurm",
             CLUSTER_SPEC_PATH=os.environ.get("CLUSTER_SPEC_PATH", ""),
+            REAL_DUMP_TRACE=os.environ.get("REAL_DUMP_TRACE", "0"),
+            REAL_DUMP_MEMORY=os.environ.get("REAL_DUMP_MEMORY", "0"),
         )
         clear_name_resolve(expr_name, trial_name)
         sched = sched_client.make(
