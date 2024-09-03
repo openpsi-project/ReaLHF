@@ -472,7 +472,6 @@ class ModelWorker(worker_base.Worker):
                 )
                 return
             if not m._offloaded:
-                # TODO: we should offload during initialize as well
                 m.async_offload()
         else:
             raise NotImplementedError(f"Unknown hook {hook}.")
