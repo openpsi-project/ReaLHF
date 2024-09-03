@@ -269,8 +269,9 @@ Normal checkpointing is usually sufficient for most cases.</p>
 <li><p><code class="docutils literal notranslate"><span class="pre">manual</span></code>: manually allocate resources with given commandline options.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">search</span></code>: allocate resources and configure parallel strategies with the search engine.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">heuristic</span></code>: allocate resources and configure parallel strategies with heuristic strategies previously obtained by search.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">pipe_data</span></code>: identical parallelization (like DSChat) with pipe+data parallelism. A world size under 8 will use data parallelism only.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">pipe_model</span></code>: identical parallelization (like DSChat) with pipe+model parallelism. A world size under 8 will use tensor-model parallelism only.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pipe_data</span></code>: identical parallelization (like DSChat) with pipe+data parallelism for all MFCs. A world size under 8 will use data parallelism only.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pipe_model</span></code>: identical parallelization (like DSChat) with pipe+model parallelism for all MFCs. A world size under 8 will use tensor-model parallelism only.</p></li>
+<li><p>A regex pattern like <code class="docutils literal notranslate"><span class="pre">d${DP}p${PP}m${TP}</span></code>: identical parallelization for all MFCs with ${DP}-way data parallelism, ${PP}-way pipeline parallelism, and ${TP}-way model parallelism.</p></li>
 </ul>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
