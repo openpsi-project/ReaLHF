@@ -206,7 +206,7 @@ def extract_symmetric_allocation(allocation_mode: str) -> Dict | None:
             continue
         a, b, c = map(int, m.groups())
         return {
-            "d": a,
-            "m": b,
-            "p": c,
+            x: a,
+            y: b,
+            z: c,
         }
