@@ -79,6 +79,82 @@ configurations define an ``rpcs`` property, which is first processed by
 the ``initial_setup`` method in ``realhf/experiments/common/common.py``
 and then passed to the ``ExperimentConfig`` object to build the graph.
 
+**********************
+ Parallelism Strategy
+**********************
+
+Suppose we have a cluster with the dimensions (N, M), where N is the
+number of nodes and M is the number of GPUs per node. ReaL will launch N
+* M model worker processes, each exclusively occupying a GPU. These
+processes will share a global PyTorch process group, and each MFC will
+create sub-groups on their respective device meshes. Furthermore, the
+data, tensor, and pipeline parallel groups are created within each
+sub-group, similar to Megatron-LM. These groups will be kept in
+`constants.py
+<https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py>`_
+as per-process global constants.
+
+When different MFCs are executed on the same GPU (i.e., their device
+meshes are overlapped), ReaL switches the process group by using a
+``model_scope`` context defined in `constants.py
+<https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py>`_.
+The model name is provided by the MFC. Within the scope, the 3D
+parallelism groups specifically refer to the groups of this MFC.
+
+In summary, there are three levels of process groups in ReaL. The
+innermost level is the data/tensor/pipeline parallel group for a
+specific MFC. The intermediate level is each MFC's sub-group. The
+outermost level is the global PyTorch global group created by
+``dist.init_process_group``. The conversion from the innermost level to
+the intermediate level is handled by the ``ProcessTopology`` class in
+`topology.py
+<https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/topology.py>`_,
+and the conversion from the intermediate level to the outermost level is
+managed by the ``rank_mapping`` dictionary in `constants.py
+<https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py>`_.
+
+For example, suppose we have a 2x8 device mesh two MFCs. MFC#1 occupies
+the last 1x8 GPUs, aka the second node, and MFC#2 occupies all 2x8 GPUs.
+MFC#1 has a parallel strategy of (DP=2,TP=2,PP=2), and MFC#2 has a
+parallel strategy of (DP=4,TP=4,PP=1). Denote the GPUs on the first node
+as [g0, ..., g7] and the GPUs on the second node as [g8, ..., g15]. The
+following process groups will be created:
+
+-  The global group: [g0, g1, g2, ..., g15], aka all GPUs.
+
+-  MFC#1's sub-group: [g8, g9, g10, g11, g12, g13, g14, g15], aka the
+   second node.
+
+-  MFC#2's sub-group: [g0, g1, g2, ..., g15], aka all GPUs. This is a
+   virtual group and ReaL will just use the global group when we have
+   some operations on this sub-group.
+
+-  MFC#1's 4 pipeline parallel groups: [g8, g12], [g9, g13], [g10, g14],
+   [g11, g15].
+
+-  MFC#1's 4 tensor parallel groups: [g8, g9], [g10, g11], [g12, g13],
+   [g14, g15].
+
+-  MFC#1's 4 data parallel groups: [g8, g10], [g9, g11], [g12, g14],
+   [g13, g15].
+
+-  MFC#2's pipeline parallel group: [g0, g1, ..., g15]. This is also a
+   virual group.
+
+-  MFC#2's 4 tensor parallel groups: [g0, g1, g2, g3], [g4, g5, g6, g7],
+   [g8, g9, g10, g11], [g12, g13, g14, g15].
+
+-  MFC#2's 4 data parallel groups: [g0, g4, g8, g12], [g1, g5, g9, g13],
+   [g2, g6, g10, g14], [g3, g7, g11, g15].
+
+The rank mapping from MFC1 to the global group is
+
+.. code:: python
+
+   {0: 8, 1: 9, 2: 10, 3: 11, 4: 12, 5: 13, 6: 14, 7: 15}
+
+and the rank mapping of MFC2 is an identical mapping.
+
 ************************
  Runtime Infrastructure
 ************************

@@ -146,8 +146,7 @@ uses a heuristic allocation mode provided by ReaL. If users wish to make
 manual allocations for distributed experiments, they can refer to
 `local/ppo_manual.sh
 <https://github.com/openpsi-project/ReaLHF/tree/main/examples/scripts/local/ppo_manual.sh>`_
-to properly set device mesh strings. Customized Algorithms
-=====================
+to properly set device mesh strings.
 
 Customized algorithms typically involve implementing a new interface
 file and a new experiment configuration file so that the experiment can
@@ -317,39 +316,6 @@ APIs for the ``search`` allocation mode. Currently not functional.
 
 Parallelism Strategy
 ====================
-
-Suppose we have a cluster with the dimensions (N, M), where N is the
-number of nodes and M is the number of GPUs per node. ReaL will launch N
-* M model worker processes, each exclusively occupying a GPU. These
-processes will share a global PyTorch process group, and each MFC will
-create several sub-groups on their respective device meshes.
-
-For example, suppose N=4, M=8, and we have MFC 1 occupying the first two
-nodes, MFC 2 occupying the last three nodes, and MFC 3 occupying the
-first node. ReaL will first create process groups on their device meshes
-after creating the global group. Next, ReaL will create data, tensor,
-and pipeline parallel groups within each sub-group, similar to
-Megatron-LM. These groups will be kept in `constants.py
-<https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py>`_
-as per-process global constants.
-
-In the above example, the first node is shared by MFC 1 and 2. When
-different MFCs are executed on the same GPU, ReaL switches the process
-group by using a ``model_scope`` context defined in `constants.py
-<https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py>`_.
-The model name is provided by the MFC. Within the scope, the 3D
-parallelism groups specifically refer to the groups of this MFC.
-
-In summary, there are three levels of process groups in ReaL. The first
-level is the data/tensor/pipeline parallel group for a specific MFC. The
-intermediate level is the rank within the MFC's sub-group. The outermost
-level is the global rank across all nodes in the global group. The
-conversion from the first level to the intermediate level is handled by
-the ``ProcessTopology`` class in `topology.py
-<https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/topology.py>`_,
-and the conversion from the intermediate level to the outermost level is
-managed by the ``rank_mapping`` dictionary in `constants.py
-<https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py>`_.
 
 -  `constants.py
    <https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py>`_
