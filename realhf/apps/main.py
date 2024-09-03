@@ -16,7 +16,6 @@ from realhf.scheduler.client import JobException, JobState
 logger = logging.getLogger("main", "system")
 
 CONTROLLER_TIME_LIMIT = None
-TRACE_TIMEOUT = 360  # Should be larger than TRACER_SAVE_INTERVAL_SECONDS defined in system/worker_base.py
 
 
 def scheduler_mode(mode: str) -> str:
@@ -117,8 +116,6 @@ def main_start(args, recover_count: int = 0):
         CLUSTER_SPEC_PATH=cluster_spec_path,
         REAL_RECOVER_RUN="1" if is_recover_run else "0",
         REAL_SAVE_RECOVER_STATES="1" if save_recover_states else "0",
-        REAL_DUMP_TRACE=os.environ.get("REAL_DUMP_TRACE", "0"),
-        REAL_DUMP_MEMORY=os.environ.get("REAL_DUMP_MEMORY", "0"),
     )
     for k, v in BASE_ENVIRONS.items():
         os.environ[k] = v
@@ -195,9 +192,6 @@ def main_start(args, recover_count: int = 0):
                 args.image_name,
             )
 
-    timeout = (
-        None if os.getenv("REAL_TRACE", "0") == "0" else TRACE_TIMEOUT
-    )  # run 5 mins to collect trace
     try:
         sched.wait(
             check_status=(
@@ -207,13 +201,8 @@ def main_start(args, recover_count: int = 0):
                 JobState.COMPLETED,
             ),
             remove_status=(),
-            timeout=timeout,
         )
     except (KeyboardInterrupt, JobException, TimeoutError) as e:
-        if os.getenv("REAL_TRACE", "0") != "0" and isinstance(e, TimeoutError):
-            s = "#" * 30 + "  Trace complete. Killing all processes...  " + "#" * 30
-            logger.info("\n" + "#" * len(s) + "\n" + s + "\n" + "#" * len(s))
-
         recover_states = [
             JobState.CANCELLED,
             JobState.FAILED,
@@ -295,8 +284,6 @@ def _main_profile_layers(model_family, model_path):
             WANDB_MODE="disabled",
             REAL_MODE="slurm",
             CLUSTER_SPEC_PATH=os.environ.get("CLUSTER_SPEC_PATH", ""),
-            REAL_DUMP_TRACE=os.environ.get("REAL_DUMP_TRACE", "0"),
-            REAL_DUMP_MEMORY=os.environ.get("REAL_DUMP_MEMORY", "0"),
         )
         clear_name_resolve(expr_name, trial_name)
         sched = sched_client.make(

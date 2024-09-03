@@ -19,20 +19,10 @@ from realhf.api.quickstart.device_mesh import MFCConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.base import constants, logging
+from realhf.base.topology import decompose_to_three_factors
 from realhf.experiments.common.common import CommonExperimentConfig
 
 logger = logging.getLogger("Profiling Experiment", "system")
-
-
-def decompose_to_three_factors(n: int) -> List[Tuple[int, int, int]]:
-    factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
-        if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
-                if (n // i) % j == 0:
-                    k = (n // i) // j
-                    factors += list(set(itertools.permutations([i, j, k])))
-    return factors
 
 
 def default_parallel_config(n_gpus: int) -> List[Dict[str, Any]]:

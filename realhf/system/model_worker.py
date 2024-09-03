@@ -678,6 +678,18 @@ class ModelWorker(worker_base.Worker):
         finally:
             # Dump profiler results.
             pfer.__exit__(None, None, None)
+
+            def _get_subdir(name):
+                subdir = os.path.join(
+                    constants.LOG_ROOT,
+                    constants.experiment_name(),
+                    constants.trial_name(),
+                    name,
+                    f"setup{self._setup_counter}",
+                )
+                os.makedirs(subdir, exist_ok=True)
+                return subdir
+
             if _enable_profiler:
                 if self._dp_rank == 0 and self._is_dp_head:
                     blogger.info(
@@ -690,23 +702,11 @@ class ModelWorker(worker_base.Worker):
                         "This may take for a while..."
                     )
 
-                def _get_subdir(name):
-                    subdir = os.path.join(
-                        constants.LOG_ROOT,
-                        constants.experiment_name(),
-                        constants.trial_name(),
-                        name,
-                        f"setup{self._setup_counter}",
+                pfer.export_chrome_trace(
+                    os.path.join(
+                        _get_subdir("trace"), f"{rpc.name}_r{dist.get_rank()}.json"
                     )
-                    os.makedirs(subdir, exist_ok=True)
-                    return subdir
-
-                if _enable_profiler:
-                    pfer.export_chrome_trace(
-                        os.path.join(
-                            _get_subdir("trace"), f"{rpc.name}_r{dist.get_rank()}.json"
-                        )
-                    )
+                )
                 if self._dp_rank == 0 and self._is_dp_head:
                     blogger.info(
                         f"System metrics collected. Time consumption:"
