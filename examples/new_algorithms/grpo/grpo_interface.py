@@ -431,7 +431,7 @@ class GRPOInterface(model_api.ModelInterface):
             ids=list(range(input_.bs * self.group_size)),
         )
 
-        # Split mini-batches and run PPO training.
+        # Split mini-batches and run PPO training. Mini-batches have balanced sizes
         datas = data_.split(self.n_minibatches, min_size=data_.bs // self.n_minibatches)
         train_stats = collections.defaultdict(float)
         for data in datas:
