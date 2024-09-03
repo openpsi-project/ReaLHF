@@ -396,7 +396,7 @@ class PPOActorInterface(model_api.ModelInterface):
             min_size=(
                 constants.pipe_parallel_world_size() * 2 * n_mbs
                 if constants.pipe_parallel_world_size() > 1
-                else constants.pipe_parallel_world_size() * n_mbs
+                else n_mbs
             ),
         )
 
@@ -812,7 +812,7 @@ class PPOCriticInterface(model_api.ModelInterface):
             min_size=(
                 constants.pipe_parallel_world_size() * 2 * n_mbs
                 if constants.pipe_parallel_world_size() > 1
-                else constants.pipe_parallel_world_size() * n_mbs
+                else n_mbs
             ),
         )
 
