@@ -1,4 +1,6 @@
 import collections
+import itertools
+import re
 from typing import *
 
 import numpy as np
@@ -194,3 +196,17 @@ def resolve_rpc_hooks(
         ):
             rpc.add_post_hook(OffloadHook())
             logger.info(f"Add offload hook for rpc {rpc.name} for role {rpc.role}")
+
+
+def extract_symmetric_allocation(allocation_mode: str) -> Dict | None:
+    for x, y, z in itertools.permutations(["d", "m", "p"]):
+        pattern = rf"{x}(\d+){y}(\d+){z}(\d+)"
+        m = re.match(pattern, allocation_mode)
+        if not m:
+            continue
+        a, b, c = map(int, m.groups())
+        return {
+            "d": a,
+            "m": b,
+            "p": c,
+        }

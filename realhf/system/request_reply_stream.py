@@ -25,6 +25,10 @@ class NoMessage(Exception):
     pass
 
 
+class NoResponse:
+    pass
+
+
 @dataclasses.dataclass
 class Payload:
     handler: Union[system_api.ModelShardID, str]
