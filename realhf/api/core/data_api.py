@@ -161,9 +161,13 @@ class SequenceSample:
     keys: Set[str]
     trailing_shapes: Dict[str, torch.Size | Tuple | None]
     dtypes: Dict[str, torch.dtype | None]
+
     ids: List[Hashable]
+
     seqlens: Dict[str, List[List[int]]]
+
     data: Optional[Dict[str, torch.Tensor | None]] = None
+
     metadata: Dict[str, List[Any]] = Field(default_factory=dict)
 
     @field_validator("ids")

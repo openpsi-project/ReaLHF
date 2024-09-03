@@ -1347,7 +1347,6 @@ class MasterWorker(worker_base.Worker):
             global_step=self._global_step,
         )
 
-        # Logging.
         time_since_configure = time.perf_counter() - self._train_start_time
         time_per_step = time_since_configure / (self._global_step + 1)
         e2e_time = time.perf_counter() - execution_start
