@@ -389,9 +389,15 @@ class PPOActorInterface(model_api.ModelInterface):
         )
         # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.
+        if n_mbs is None:
+            n_mbs = 1
         datas = input_.split(
             self.n_minibatches,
-            min_size=constants.pipe_parallel_world_size() * 2,
+            min_size=(
+                constants.pipe_parallel_world_size() * 2 * n_mbs
+                if constants.pipe_parallel_world_size() > 1
+                else constants.pipe_parallel_world_size() * n_mbs
+            ),
         )
 
         ### Logging code starts. ###
@@ -799,9 +805,15 @@ class PPOCriticInterface(model_api.ModelInterface):
         )
         # NOTE: We cannot randomly shuffle data here because
         # data must have the same shape across different pipeline stages.
+        if n_mbs is None:
+            n_mbs = 1
         datas = input_.split(
             self.n_minibatches,
-            min_size=constants.pipe_parallel_world_size() * 2,
+            min_size=(
+                constants.pipe_parallel_world_size() * 2 * n_mbs
+                if constants.pipe_parallel_world_size() > 1
+                else constants.pipe_parallel_world_size() * n_mbs
+            ),
         )
 
         # Logging.
