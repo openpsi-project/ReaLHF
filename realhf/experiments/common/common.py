@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import itertools
 import pprint
-import re
 from collections import defaultdict
 from typing import *
 
