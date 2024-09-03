@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import dataclasses
 import enum
@@ -15,6 +16,7 @@ import psutil
 import pynvml
 import torch
 import tqdm
+import tqdm.asyncio
 
 import realhf.base.constants as constants
 import realhf.base.logging as logging
@@ -484,11 +486,14 @@ COMPUTE_KERNEL_KEYS = [
     "cutlass",
 ]
 
-COMM_KERNEL_KEYS = [
-    "c10d::",
-    "nccl::",
-    "ncclDevKernel",
-    "vllm::cross_device_reduce",
+P2P_COMM_KERNEL_KEYS = [
+    "ncclDevKernel_SendRecv",
+]
+
+COLL_COMM_KERNEL_KEYS = [
+    "ncclDevKernel_AllReduce",
+    "ncclDevKernel_ReduceScatter",
+    "ncclDevKernel_AllGather",
 ]
 
 MEM_KERNEL_KEYS = [
@@ -505,7 +510,8 @@ MISC_KERNEL_KEYS = [
 
 class CUDAKernelTimeCategory(enum.Enum):
     COMPUTE = "compute"
-    COMM = "communication"
+    P2P_COMM = "p2p_comm"
+    COLL_COMM = "coll_comm"
     MEM = "memoryIO"
     IDLE = "idle"
     MISC = "misc"
@@ -515,8 +521,10 @@ class CUDAKernelTimeCategory(enum.Enum):
         # Order may matter. MEM & COMM keys are easier to find out.
         if any(k in name for k in MEM_KERNEL_KEYS):
             return cls.MEM
-        if any(k in name for k in COMM_KERNEL_KEYS):
-            return cls.COMM
+        if any(k in name for k in P2P_COMM_KERNEL_KEYS):
+            return cls.P2P_COMM
+        if any(k in name for k in COLL_COMM_KERNEL_KEYS):
+            return cls.COLL_COMM
         if any(k in name for k in MISC_KERNEL_KEYS):
             return cls.MISC
         if any(k in name for k in COMPUTE_KERNEL_KEYS):
@@ -524,44 +532,40 @@ class CUDAKernelTimeCategory(enum.Enum):
         raise NotImplementedError(f"Unknown kernel type. Name is `{name}`")
 
 
-@dataclasses.dataclass
 class CUDAKernelTimeStat:  # in us
-    compute: int
-    communication: int
-    memoryIO: int
-    misc: int
-    idle: int
+
+    def __init__(self, world_size, **kwargs):
+        self.world_size = world_size
+        for k in CUDAKernelTimeCategory:
+            setattr(self, k.value, kwargs.get(k.value, 0))
 
     @property
     def total(self):
-        return self.compute + self.communication + self.memoryIO + self.misc + self.idle
+        return sum([getattr(self, k.value) for k in CUDAKernelTimeCategory])
 
     def percentage(self) -> Dict:
         return {
-            "compute": self.compute / self.total,
-            "comm": self.communication / self.total,
-            "mem": self.memoryIO / self.total,
-            "misc": self.misc / self.total,
-            "idle": self.idle / self.total,
+            k.value: getattr(self, k.value) / self.total for k in CUDAKernelTimeCategory
         }
 
     def __add__(self, other):
         return CUDAKernelTimeStat(
-            compute=self.compute + other.compute,
-            communication=self.communication + other.communication,
-            memoryIO=self.memoryIO + other.memoryIO,
-            misc=self.misc + other.misc,
-            idle=self.idle + other.idle,
+            world_size=self.world_size + other.world_size,
+            **{
+                k.value: getattr(self, k.value) + getattr(other, k.value)
+                for k in CUDAKernelTimeCategory
+            },
         )
 
     def __truediv__(self, x):
+        assert self.world_size % x == 0
         return CUDAKernelTimeStat(
-            compute=self.compute / x,
-            communication=self.communication / x,
-            memoryIO=self.memoryIO / x,
-            misc=self.misc / x,
-            idle=self.idle / x,
+            world_size=self.world_size // x,
+            **{k.value: getattr(self, k.value) / x for k in CUDAKernelTimeCategory},
         )
+
+    def gpu_average(self):
+        return self / self.world_size
 
     def __repr__(self):
         import tabulate
@@ -570,48 +574,78 @@ class CUDAKernelTimeStat:  # in us
             "",
             "Total",
             "Computation",
-            "Communication",
+            "P2P Comm",
+            "Collective Comm",
             "Memory IO",
-            "Misc",
             "Idle",
+            "Misc",
         ]
         line1 = [
             "Time (s)",
             self.total / 1e6,
-            self.compute / 1e6,
-            self.communication / 1e6,
-            self.memoryIO / 1e6,
-            self.misc / 1e6,
-            self.idle / 1e6,
+            *[getattr(self, k.value) / 1e6 for k in CUDAKernelTimeCategory],
         ]
         line1 = [f"{x:.2f}" if isinstance(x, float) else x for x in line1]
         line2 = [
             "Percentage (%)",
             "-",
-            *[f"{x:.2%}" for x in list(self.percentage().values())],
+            *[f"{self.percentage()[k.value]:.2%}" for k in CUDAKernelTimeCategory],
         ]
-        return tabulate.tabulate(
+        tab_str = tabulate.tabulate(
             [headers, line1, line2],
             headers="firstrow",
             tablefmt="fancy_grid",
             stralign="center",
+        )
+        return (
+            f" Number of GPUs: {self.world_size} ".center(
+                len(tab_str.split("\n")[0]), "="
+            )
+            + "\n"
+            + tab_str
         )
 
 
 @dataclasses.dataclass
 class KernelEventEntry:
     ts: int
+    tid: int
+    dur: int
+    category: CUDAKernelTimeCategory
+
+
+@dataclasses.dataclass
+class KernelEventBoundary:
+    ts: int
     is_start: bool
     category: CUDAKernelTimeCategory
 
 
-def kernelStatFromEvents(events: List[KernelEventEntry]):
+def kernelStatFromEvents(
+    entries: List[KernelEventEntry],
+    global_start_ts,
+    global_end_ts,
+):
+    events: List[KernelEventBoundary] = []
+    for entry in entries:
+        events.append(KernelEventBoundary(entry.ts, True, entry.category))
+        events.append(KernelEventBoundary(entry.ts + entry.dur, False, entry.category))
+    # A trick to count for idle time waiting other processes
+    events.append(
+        KernelEventBoundary(global_start_ts, True, CUDAKernelTimeCategory.IDLE)
+    )
+    events.append(
+        KernelEventBoundary(global_end_ts, False, CUDAKernelTimeCategory.IDLE)
+    )
+
+    events.sort(key=lambda x: x.ts)
+
     times = {k: 0 for k in CUDAKernelTimeCategory}
     active = {k: 0 for k in CUDAKernelTimeCategory}
 
     current_time = events[0].ts
 
-    for i in tqdm.trange(len(events), desc="Processing Kernel Times..."):
+    for i in range(len(events)):
         next_time = events[i].ts
 
         # Priority: compute > communication > memory > misc > idle
@@ -619,8 +653,10 @@ def kernelStatFromEvents(events: List[KernelEventEntry]):
             duration = next_time - current_time
             if active[CUDAKernelTimeCategory.COMPUTE] > 0:
                 times[CUDAKernelTimeCategory.COMPUTE] += duration
-            elif active[CUDAKernelTimeCategory.COMM] > 0:
-                times[CUDAKernelTimeCategory.COMM] += duration
+            elif active[CUDAKernelTimeCategory.COLL_COMM] > 0:
+                times[CUDAKernelTimeCategory.COLL_COMM] += duration
+            elif active[CUDAKernelTimeCategory.P2P_COMM] > 0:
+                times[CUDAKernelTimeCategory.P2P_COMM] += duration
             elif active[CUDAKernelTimeCategory.MEM] > 0:
                 times[CUDAKernelTimeCategory.MEM] += duration
             elif active[CUDAKernelTimeCategory.MISC] > 0:
@@ -631,21 +667,180 @@ def kernelStatFromEvents(events: List[KernelEventEntry]):
         current_time = next_time
 
     assert all(v == 0 for v in active.values()), active
-    return CUDAKernelTimeStat(**{k.value: v for k, v in times.items()})
+    return CUDAKernelTimeStat(world_size=1, **{k.value: v for k, v in times.items()})
 
 
-def kernelStatFromTrace(trace_path):
-    with open(trace_path, "r") as f:
-        data = json.load(f)
-    kernel_events = []
-    for ev in tqdm.tqdm(data["traceEvents"], desc="Loading JSON events"):
-        if "cat" not in ev:
+async def _load_events_async(file_path, semaphore) -> List[Dict]:
+    import aiofiles
+
+    async with semaphore:
+        pid = int(file_path.rstrip(".json").split("_r")[-1])
+        async with aiofiles.open(file_path, "r") as f:
+            content = await f.read()
+        events = json.loads(content)["traceEvents"]
+        events = list(
+            filter(
+                lambda x: "cat" in x and x["cat"] in ["gpu_user_annotation", "kernel"],
+                events,
+            )
+        )
+        # Replace with the actual process id, starting from 0 to #gpus-1
+        for ev in events:
+            ev["pid"] = pid
+    return events, pid
+
+
+async def _load_all_events(root_dir, mfc_name) -> List[Dict]:
+    trace_file_paths = []
+    for fn in os.listdir(root_dir):
+        if not fn.startswith(mfc_name):
             continue
-        if ev["cat"] != "kernel":
-            continue
-        assert ev["dur"] > 0, ev
-        cat = CUDAKernelTimeCategory.from_name(ev["name"])
-        kernel_events.append(KernelEventEntry(ev["ts"], True, cat))
-        kernel_events.append(KernelEventEntry(ev["ts"] + ev["dur"], False, cat))
-    kernel_events.sort(key=lambda x: x.ts)
-    return kernelStatFromEvents(kernel_events)
+        trace_file_paths.append(os.path.join(root_dir, fn))
+
+    # The JSON file can be large, up to 2GB. Load them concurrently.
+    semaphore = asyncio.Semaphore(8)
+    tasks = [_load_events_async(file_path, semaphore) for file_path in trace_file_paths]
+
+    all_events = {}
+    for coro in tqdm.asyncio.tqdm(
+        asyncio.as_completed(tasks), total=len(tasks), desc="Loading JSON files"
+    ):
+        try:
+            events, pid = await coro
+            all_events[pid] = events
+        except Exception as e:
+            print(f"Error loading JSON file: {e}")
+
+    return all_events
+
+
+def kernelStatFromTrace(root_dir: str, mfc_name: str):
+    cache_file = os.path.join(root_dir, f"_cached_{mfc_name}.json")
+    if os.path.exists(cache_file):
+        logger.info(f'Loading trace JSON files of MFC "{mfc_name}" from cache...')
+        with open(cache_file, "r") as f:
+            all_events = json.load(f)
+        all_events = {int(pid): v for pid, v in all_events.items()}
+    else:
+        if not any(fn.startswith(mfc_name) for fn in os.listdir(root_dir)):
+            raise RuntimeError(
+                f"No trace file found for the given MFC name: {mfc_name}."
+            )
+
+        load_json_tik = time.perf_counter()
+        logger.info(
+            f'Loading trace JSON files of MFC "{mfc_name}" concurrently from {root_dir}...'
+        )
+        all_events: Dict[int, List[Dict]] = asyncio.run(
+            _load_all_events(root_dir, mfc_name)
+        )
+        logger.info(
+            f"{len(all_events)} JSON file loaded. "
+            f"Time consumption: {time.perf_counter() - load_json_tik:.2f} secs. "
+            f"Processing..."
+        )
+
+        with open(cache_file, "w") as f:
+            json.dump(all_events, f)
+
+    # To remove the wait time from nccl send/recv, collect send/recv kernels annotations.
+    # These annotations look like "nccl:send 0->1". For each annotation, find the execution time
+    # of its pair. The actual execution time should the minimum of the two.
+    send_recv_annotations = {
+        pid: [
+            ev
+            for ev in events
+            if ev["cat"] == "gpu_user_annotation"
+            and ev["name"].startswith("nccl:recv")
+            or ev["name"].startswith("nccl:send")
+        ]
+        for pid, events in all_events.items()
+    }
+    for events in send_recv_annotations.values():
+        events.sort(key=lambda x: x["ts"])
+
+    send_recv_time = {pid: [] for pid, events in send_recv_annotations.items()}
+
+    def _matches_next_sr(type_, src, dst):
+        if type_ == "send":
+            annot = send_recv_annotations[dst][0]
+            m = re.match(r"nccl:recv (\d+)<-(\d+)", annot["name"])
+            if not m:
+                return False
+            peer_dst, peer_src = map(int, m.groups())
+            if peer_src != src or peer_dst != dst:
+                return False
+            return True
+        else:
+            assert type_ == "recv"
+            annot = send_recv_annotations[src][0]
+            m = re.match(r"nccl:send (\d+)->(\d+)", annot["name"])
+            if not m:
+                return False
+            peer_src, peer_dst = map(int, m.groups())
+            if peer_src != src or peer_dst != dst:
+                return False
+            return True
+
+    def resolve_next_sr_time(pid):
+        # Resolve send/recv time recursively, just like a Tetris game
+        annot = send_recv_annotations[pid][0]
+        if annot["name"].startswith("nccl:send"):
+            src, dst = map(
+                int, re.match(r"nccl:send (\d+)->(\d+)", annot["name"]).groups()
+            )
+            assert src == pid, (src, pid)
+            while not _matches_next_sr("send", src, dst):
+                resolve_next_sr_time(dst)
+        else:
+            assert annot["name"].startswith("nccl:recv")
+            dst, src = map(
+                int, re.match(r"nccl:recv (\d+)<-(\d+)", annot["name"]).groups()
+            )
+            assert dst == pid, (dst, pid)
+            while not _matches_next_sr("recv", src, dst):
+                resolve_next_sr_time(src)
+        ev1, ev2 = send_recv_annotations[src].pop(0), send_recv_annotations[dst].pop(0)
+        dur = min(ev1["dur"], ev2["dur"])
+        send_recv_time[src].append(dur)
+        send_recv_time[dst].append(dur)
+
+    for pid in tqdm.tqdm(all_events, desc="Resolving send/recv times"):
+        while len(send_recv_annotations[pid]) > 0:
+            resolve_next_sr_time(pid)
+
+    kernel_events: Dict[int, List[KernelEventEntry]] = defaultdict(list)
+    global_start = min(ev["ts"] for events in all_events.values() for ev in events)
+    global_end = max(ev["ts"] for events in all_events.values() for ev in events)
+    for pid in tqdm.tqdm(all_events, desc="Processing events"):
+        for ev in all_events[pid]:
+            if ev["cat"] != "kernel":
+                continue
+            assert ev["dur"] > 0, ev
+            cat = CUDAKernelTimeCategory.from_name(ev["name"])
+            if cat == CUDAKernelTimeCategory.P2P_COMM:
+                assert len(send_recv_time[pid]) > 0
+                ev["dur"] = send_recv_time[pid].pop(0)
+            kernel_events[pid].append(
+                KernelEventEntry(
+                    ts=ev["ts"], tid=ev["tid"], dur=ev["dur"], category=cat
+                )
+            )
+    assert all(len(times) == 0 for times in send_recv_time.values()), [
+        len(times) == 0 for times in send_recv_time.values()
+    ]
+    for events in kernel_events.values():
+        events.sort(key=lambda x: x.ts)
+
+    x = None
+    for events in tqdm.tqdm(
+        kernel_events.values(),
+        total=len(kernel_events),
+        desc="Gathering kernel time stats for all processes...",
+    ):
+        stats = kernelStatFromEvents(events, global_start, global_end)
+        if x is None:
+            x = stats
+        else:
+            x = x + stats
+    return x

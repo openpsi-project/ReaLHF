@@ -83,8 +83,11 @@ class NoRequestToHandle(Exception):
 
 
 class ModelWorker(worker_base.Worker):
+    _setup_counter = -1
 
     def _configure(self, cfg: system_api.ModelWorker):
+        self._setup_counter += 1
+
         self.config = cfg
         self.model_names = [s.id.model_name for s in cfg.shards]
         self.shard_indices = [
@@ -99,7 +102,6 @@ class ModelWorker(worker_base.Worker):
 
         self.data_consumers = self.config.model_rpcs[0].data_consumers
 
-        # NOTE: here worker_index is different from peer/ddp rank
         self.__worker_index = cfg.worker_info.worker_index
 
         torch.backends.cudnn.benchmark = cfg.cudnn_benchmark
@@ -107,8 +109,8 @@ class ModelWorker(worker_base.Worker):
 
         seeding.set_random_seed(cfg.seed)
 
-        # Reveal DDP identity of this worker to world.
-        gpu_utils.reveal_ddp_identity(
+        # Reveal process group identity of this worker to world.
+        gpu_utils.reveal_pg_identity(
             self.__experiment_name, self.__trial_name, self.__worker_index
         )
         self.__dist_env_resolved = False
@@ -676,6 +678,18 @@ class ModelWorker(worker_base.Worker):
         finally:
             # Dump profiler results.
             pfer.__exit__(None, None, None)
+
+            def _get_subdir(name):
+                subdir = os.path.join(
+                    constants.LOG_ROOT,
+                    constants.experiment_name(),
+                    constants.trial_name(),
+                    name,
+                    f"setup{self._setup_counter}",
+                )
+                os.makedirs(subdir, exist_ok=True)
+                return subdir
+
             if _enable_profiler:
                 if self._dp_rank == 0 and self._is_dp_head:
                     blogger.info(
@@ -687,29 +701,12 @@ class ModelWorker(worker_base.Worker):
                         f"Collecting system metrics from the profiler. "
                         "This may take for a while..."
                     )
-                parallel_str = (
-                    f"mb{rpc.n_mbs}d{self._dp_size}m{self._mp_size}p{self._pp_size}"
+
+                pfer.export_chrome_trace(
+                    os.path.join(
+                        _get_subdir("trace"), f"{rpc.name}_r{dist.get_rank()}.json"
+                    )
                 )
-                if constants.sequence_parallel():
-                    parallel_str += "sp"
-
-                def _get_subdir(name):
-                    subdir = os.path.join(
-                        constants.LOG_ROOT,
-                        constants.experiment_name(),
-                        constants.trial_name(),
-                        name,
-                        parallel_str,
-                    )
-                    os.makedirs(subdir, exist_ok=True)
-                    return subdir
-
-                if _enable_profiler:
-                    pfer.export_chrome_trace(
-                        os.path.join(
-                            _get_subdir("trace"), f"{rpc.name}_r{dist.get_rank()}.json"
-                        )
-                    )
                 if self._dp_rank == 0 and self._is_dp_head:
                     blogger.info(
                         f"System metrics collected. Time consumption:"

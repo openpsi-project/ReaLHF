@@ -19,20 +19,10 @@ from realhf.api.quickstart.device_mesh import MFCConfig
 from realhf.api.quickstart.entrypoint import register_quickstart_exp
 from realhf.api.quickstart.model import ModelTrainEvalConfig, ParallelismConfig
 from realhf.base import constants, logging
+from realhf.base.topology import decompose_to_three_factors
 from realhf.experiments.common.common import CommonExperimentConfig
 
 logger = logging.getLogger("Profiling Experiment", "system")
-
-
-def decompose_to_three_factors(n: int) -> List[Tuple[int, int, int]]:
-    factors = []
-    for i in range(1, int(n ** (1 / 2)) + 1):
-        if n % i == 0:
-            for j in range(i, int((n // i) ** (1 / 2)) + 1):
-                if (n // i) % j == 0:
-                    k = (n // i) // j
-                    factors += list(set(itertools.permutations([i, j, k])))
-    return factors
 
 
 def default_parallel_config(n_gpus: int) -> List[Dict[str, Any]]:
@@ -182,32 +172,34 @@ class ProfileConfig(CommonExperimentConfig):
     def initial_setup(self) -> List[ExperimentConfig]:
         self.allocation_mode = "manual"
         setups = []
-        allocation_log_path = os.path.join(
+        setup_log_path = os.path.join(
             constants.LOG_ROOT,
             self.experiment_name,
             self.trial_name,
-            "allocations.jsonl",
+            "setups.jsonl",
         )
         logger.info(
-            f"Allocaiton configurations of the profiling experiment will be saved to: {allocation_log_path}"
+            f"Experiment setup configurations of the profiling experiment "
+            f"will be saved to: {setup_log_path}"
         )
-        with open(allocation_log_path, "w") as f:
+        with open(setup_log_path, "w") as f:
+            # batch size in the most outer loop to delay the possible OOM error
             for (
+                bs,
                 pcfg,
                 n_mbs,
                 model_cfg,
                 dataset_cfg,
                 handle_name,
                 interface_cfg,
-                bs,
             ) in itertools.product(
+                self.batch_sizes,
                 self.parallel_kwargs,
                 self.n_mbs,
                 self.model_kwargs,
                 self.dataset_kwargs,
                 self.handle_names,
                 self.interface_kwargs,
-                self.batch_sizes,
             ):
                 if handle_name == "generate" and pcfg["use_sequence_parallel"]:
                     continue

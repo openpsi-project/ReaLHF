@@ -875,7 +875,7 @@ def make_real_model(
     tokenizer = model_api.load_hf_tokenizer(model_path)
     mconfig = getattr(ReaLModel, f"config_from_{hf_model_family}")(
         model_path=model_path,
-        is_critic=is_critic,
+        is_critic=is_critic or init_critic_from_actor,
     )
     m = ReaLModel(mconfig, dtype=dtype, device=device)
     m._instantiation_hooks.append(

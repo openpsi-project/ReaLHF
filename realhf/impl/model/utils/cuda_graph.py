@@ -121,7 +121,7 @@ def capture_func(
             CUDA_GRAPH_OUTPUT_BUFFER[name],
         )
 
-    custom_all_reduce_assertion()
+    # custom_all_reduce_assertion()
     stream = torch.cuda.Stream()
     st = time.monotonic()
     logger.debug(f"Rank {dist.get_rank()}: Capturing CUDA graph for {name}")

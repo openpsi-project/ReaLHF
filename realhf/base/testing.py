@@ -79,7 +79,7 @@ class StandaloneTestingProcess(mp.Process):
         self.barrier.wait()
 
         # init process group
-        gpu_utils.reveal_ddp_identity(self.expr_name, self.trial_name, self.rank)
+        gpu_utils.reveal_pg_identity(self.expr_name, self.trial_name, self.rank)
         self.barrier.wait()
         from realhf.impl.model.comm.global_comm import setup_global_comm
 

@@ -602,7 +602,7 @@ class DataBatchMeta:
 @dataclasses.dataclass
 class DatasetUtility:
     seed: int
-    ddp_rank: int
+    dp_rank: int
     world_size: int
     tokenizer: transformers.PreTrainedTokenizerFast
 
@@ -654,7 +654,7 @@ def load_shuffle_split_dataset(
         util.seed, datasize_per_rank * util.world_size
     )
     subset_indices = shuffle_indices[
-        util.ddp_rank * datasize_per_rank : (util.ddp_rank + 1) * datasize_per_rank
+        util.dp_rank * datasize_per_rank : (util.dp_rank + 1) * datasize_per_rank
     ]
     data: List[Dict[str, str]] = [data[i] for i in subset_indices]
 
@@ -673,7 +673,7 @@ def register_dataset(name, dataset_cls):
 def make_dataset(
     cfg: Union[str, config_api.DatasetAbstraction],
     seed: int,
-    ddp_rank: int,
+    dp_rank: int,
     world_size: int,
     tokenizer_or_tokenizer_name: Union[transformers.PreTrainedTokenizerFast, str],
     experiment_name: str,
@@ -691,7 +691,7 @@ def make_dataset(
         tokenizer = tokenizer_or_tokenizer_name
     util = DatasetUtility(
         seed,
-        ddp_rank,
+        dp_rank,
         world_size,
         tokenizer,
     )
@@ -717,7 +717,7 @@ def make_dataset(
         cfg.type_,
         f"seed{seed}",
         f"world_size{world_size}",
-        f"rank{ddp_rank}",
+        f"rank{dp_rank}",
     )
     os.makedirs(output_path, exist_ok=True)
 
@@ -726,11 +726,11 @@ def make_dataset(
 
     tik = time.perf_counter()
     if not cache_found:
-        logger.info(f"No data cache found for rank {ddp_rank}. Create it from scratch.")
-        dataset = ALL_DATASET_CLASSES[cfg.type_](seed, ddp_rank, world_size, **cfg.args)
+        logger.info(f"No data cache found for rank {dp_rank}. Create it from scratch.")
+        dataset = ALL_DATASET_CLASSES[cfg.type_](seed, dp_rank, world_size, **cfg.args)
         torch.save(dataset, os.path.join(output_path, fname))
     else:
-        logger.info(f"Rank {ddp_rank} find existing data cache, load it.")
+        logger.info(f"Rank {dp_rank} find existing data cache, load it.")
         dataset = torch.load(os.path.join(output_path, fname))
     logger.info(f"Dataset creation/loading time: {time.perf_counter() - tik:.3f}s")
 

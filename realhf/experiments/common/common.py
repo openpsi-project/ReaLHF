@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import pprint
+import re
 from collections import defaultdict
 from typing import *
 
@@ -146,6 +147,9 @@ class CommonExperimentConfig(Experiment):
     :type nodelist: str or None
     :param seed: The random seed.
     :type seed: int
+    :param cache_clear_freq: The cache of data transfer will be cleared after each ``cache_clear_freq`` steps.
+        If None, will not clear the cache. Set to a small number, e.g., 1, if OOM or CUDA OOM occurs.
+    :type cache_clear_freq: int or None
     :param exp_ctrl: The control for saving and evaluating the experiment.
     :type exp_ctrl: ExperimentSaveEvalControl
     """
@@ -168,6 +172,7 @@ class CommonExperimentConfig(Experiment):
     n_gpus_per_node: int = 8
     nodelist: Optional[str] = None
     seed: int = 1
+    cache_clear_freq: Optional[int] = 10
     exp_ctrl: ExperimentSaveEvalControl = dataclasses.field(
         default_factory=ExperimentSaveEvalControl
     )
@@ -319,6 +324,7 @@ class CommonExperimentConfig(Experiment):
 
         self.__check_legal_allocation_options()
 
+        para3d_pattern = r"d(\d+)p(\d+)m(\d+)"
         rpcs = self.rpcs
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"
@@ -409,8 +415,8 @@ class CommonExperimentConfig(Experiment):
                 seed=self.seed,
                 shards=[],
                 datasets=self.datasets,
-                cuda_cache_cleanliness=False,
-                cuda_cache_clear_freq=10,
+                cuda_cache_cleanliness=self.cache_clear_freq is not None,
+                cuda_cache_clear_freq=self.cache_clear_freq,
                 tokenizer_name_or_path=self.tokenizer_name_or_path,
             )
 

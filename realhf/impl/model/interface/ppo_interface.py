@@ -236,21 +236,18 @@ class PPOActorInterface(model_api.ModelInterface):
         )
 
         seqlens = [[s] for s in seq_lengths.cpu().numpy().tolist()]
+        data = dict(
+            seq_no_eos_mask=seq_no_eos_mask,
+            packed_input_ids=packed_input_ids,
+            packed_logprobs=packed_logprobs,
+            prompt_mask=prompt_mask,
+        )
+        if not self.gconfig.force_no_logits_mask:
+            data["packed_logits_mask"] = packed_logits_mask.bool()
         res = SequenceSample.from_default(
             ids=input_.ids,
             seqlens=seqlens,
-            data=dict(
-                seq_no_eos_mask=seq_no_eos_mask,
-                packed_input_ids=packed_input_ids,
-                packed_logprobs=packed_logprobs,
-                packed_logits_mask=(
-                    packed_logits_mask.bool()
-                    if not self.gconfig.force_no_logits_mask
-                    and packed_logits_mask is not None
-                    else None
-                ),
-                prompt_mask=prompt_mask,
-            ),
+            data=data,
         )
         return res
 
@@ -694,6 +691,7 @@ class PPOCriticInterface(model_api.ModelInterface):
         input_: SequenceSample,
         n_mbs=None,
     ) -> SequenceSample:
+        assert model.module.module.config.is_critic
         module = model.module
         module.eval()
 
@@ -711,6 +709,7 @@ class PPOCriticInterface(model_api.ModelInterface):
     def train_step(
         self, model: model_api.Model, input_: SequenceSample, n_mbs=None
     ) -> Dict:
+        assert model.module.module.config.is_critic
         module = model.module
         tokenizer = model.tokenizer
         # We call module.eval() because dropout causes the computation of incorrect of log probs.

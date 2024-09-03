@@ -86,7 +86,7 @@ def _validate_dataset(cfg: config_api.DatasetAbstraction, tokenizer):
     dataset = data_api.make_dataset(
         cfg,
         seed=1,
-        ddp_rank=0,
+        dp_rank=0,
         world_size=1,
         tokenizer_or_tokenizer_name=tokenizer,
         experiment_name=uuid.uuid4(),
