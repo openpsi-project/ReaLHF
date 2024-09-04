@@ -1,0 +1,671 @@
+
+
+<!DOCTYPE html>
+<html class="no-js" lang="en">
+  <head>
+    <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="docsearch:name" content="ReaL" />
+    <meta name="docsearch:package_type" content="" />
+    <meta name="docsearch:release" content="0.1.0" />
+    <meta name="docsearch:version" content="" />
+    
+      <title>Implementation Details &mdash; ReaL 0.1.0 documentation</title>
+    
+    <link rel="stylesheet" href="_static/bootstrap-icons.css" type="text/css" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments.css', priority=200, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8e8a900e" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/custom.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/custom.css?v=97da1bf0" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/colorsets/sphinx-nefertiti-default-0.4.1.min.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/colorsets/sphinx-nefertiti-default-0.4.1.min.css" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/fonts/nunito/stylesheet.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/fonts/nunito/stylesheet.css" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/fonts/red-hat-mono/stylesheet.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/fonts/red-hat-mono/stylesheet.css" />
+          <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments_dark.css', priority=500, rel='stylesheet', type='text/css')" -->
+          <link rel="stylesheet" type="text/css" href="_static/pygments_dark.css" />
+        <link rel="index" title="Index" href="genindex.html" />
+        <link rel="search" title="Search" href="search.html" />
+        <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
+        <link rel="next" title="Code Architecture" href="arch.html" />
+        <link rel="prev" title="Customization" href="customization.html" />
+    <style>
+      :root {
+        --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
+        --nftt-font-monospace: "Red Hat Mono", var(--nftt-font-family-monospace) !important;
+        --nftt-project-name-font: var(--nftt-body-font-family);
+        --nftt-documentation-font: var(--nftt-body-font-family);
+        --nftt-doc-headers-font: "Georgia", var(--nftt-documentation-font);}
+      h1 *, h2 *, h3 *, h4 *, h5 *, h6 * { font-size: inherit; }
+    </style>
+  </head>
+  <body>
+    <header class="navbar navbar-expand-xl navbar-dark nftt-navbar flex-column fixed-top">
+      <div class="skip-links container-fluid visually-hidden-focusable overflow-hidden justify-content-start flex-grow-1">
+        <div class="border-bottom mb-2 pb-2 w-100">
+          <a class="d-none d-md-inline-flex p-2 m-1" href="#sidebar-filter">Skip to docs navigation</a>
+          <a class="d-inline-flex p-2 m-1" href="#content">Skip to main content</a>
+        </div>
+      </div>
+      <nav class="container-xxl nftt-gutter flex-wrap flex-xl-nowrap" aria-label="Main navigation">
+        <div class="nftt-navbar-toggler">
+          <button class="navbar-toggler p-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar" aria-label="Toggle documentation navigation">
+            <i class="bi bi-list"></i>
+          </button>
+        </div>
+          <a href="index.html"
+              
+              class="navbar-brand p-0 me-0 md-lg-2"
+          ><span class="brand-text">ReaL</span></a>
+        
+        <div class="d-flex d-xl-none">
+          <button class="navbar-toggler p-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#nfttSearch" aria-controls="nfttSearch" aria-label="Search">
+            <i class="bi bi-search"></i>
+          </button>
+          <button class="navbar-toggler p-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#nfttNavbar" aria-controls="nfttNavbar" aria-label="Toggle navigation">
+            <i class="bi bi-three-dots"></i>
+          </button>
+        </div>
+        
+<div class="offcanvas-xl offcanvas-end flex-grow-1" tabindex="-1" id="nfttSearch" aria-labelledby="nfttSearchOffcanvasLabel" data-bs-scroll="true">
+  <div class="offcanvas-header px-4 pb-0">
+    <h5 class="offcanvas-title fw-bold" id="nfttSearchOffcanvasLabel">Search the documentation</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close" data-bs-target="#nfttSearch"></button>
+  </div>
+  <div class="offcanvas-body p-4 pt-0 p-xl-0 px-xl-3">
+    <hr class="d-xl-none text-white-50">
+    <ul class="navbar-nav flex-row align-items-center flex-wrap ms-md-auto">
+      <li class="nav-item col-12 col-xl-auto">
+        <form id="nftt-search-form" action="search.html" method="get">
+          <div class="input-group">
+            <input type="text" name="q" class="form-control" placeholder="Search docs" aria-label="Search" aria-describedby="button-search">
+            <input type="hidden" name="check_keywords" value="yes" />
+            <input type="hidden" name="area" value="default" />
+            <button class="btn btn-primary" type="submit" id="button-search" aria-label="Search"><i class="bi bi-search"></i></button>
+          </div>
+        </form>
+      </li>
+    </ul>
+  </div>
+</div>
+
+        <div class="offcanvas-xl offcanvas-end" tabindex="-1" id="nfttNavbar" aria-labelledby="nfttNavbarOffcanvasLabel" data-bs-scroll="true">
+          <div class="offcanvas-header px-4 pb-0">
+            <div class="offcanvas-title navbar-brand" id="nfttNavbarOffcanvasLabel"><span class="brand-text">Nefertiti for Sphinx</span></div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close" data-bs-target="#nfttNavbar"></button>
+          </div>
+          <div class="offcanvas-body p-4 pt-0 p-xl-0 px-xl-3">
+            <hr class="d-xl-none text-white-50">
+            <ul class="navbar-nav flex-row align-items-center flex-wrap ms-lg-auto">
+              
+              <!-- version_dropdown.html -->
+
+              
+              <!-- colorscheme_dropdown.html -->
+<li class="nav-item dropdown">
+  <a class="nav-link d-flex py-2 px-0 px-xl-2 dropdown-toggle align-items-center" id="snftt-luz" href="#" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false" aria-label="Toggle light/dark">
+    <i class="bi bi-circle-half" data-snftt-luz-icon-active></i>
+    <span id="snftt-luz-text" class="d-xl-none small ms-2">Toggle light/dark</span>
+  </a>
+  <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="snftt-luz-text">
+    <li>
+      <h6 class="dropdown-header">Light/dark</h6>
+    </li>
+    <li>
+      <a class="dropdown-item d-flex align-items-center" data-snftt-luz="light" href="#" aria-pressed="false">
+        <span class="small">
+          <i class="bi bi-sun" data-snftt-luz-icon="light"></i>
+        </span>
+        <span class="small ms-3">Light</span>
+        <i class="bi bi-check ms-auto"></i>
+      </a>
+    </li>
+    <li>
+      <a class="dropdown-item d-flex align-items-center" data-snftt-luz="dark" href="#" aria-pressed="false">
+        <span class="small">
+          <i class="bi bi-moon-stars" data-snftt-luz-icon="dark"></i>
+        </span>
+        <span class="small ms-3">Dark</span>
+        <i class="bi bi-check ms-auto"></i>
+      </a>
+    </li>
+    <li>
+      <a class="dropdown-item current d-flex align-items-center" data-snftt-luz="default" href="#" aria-pressed="false">
+        <span class="small">
+          <i class="bi bi-circle-half" data-snftt-luz-icon="default"></i>
+        </span>
+        <span class="small ms-3">Default</span>
+        <i class="bi bi-check ms-auto"></i>
+      </a>
+    </li>
+  </ul>
+</li>
+            </ul>
+          </div>
+        </div>
+      </nav>
+    </header>
+
+    <div class="container-fluid flex-grow-1">
+      <div class="nftt-gutter nftt-page">
+        <aside class="nftt-sidebar ">
+          <div class="nftt-sidebar-content">
+            
+            <div class="title d-none d-xl-block">
+              <i class="bi bi-book"></i>&nbsp;&nbsp;<span>Index</span>
+            </div>
+            <div id="sidebar" tabindex="-1" class="offcanvas-xl offcanvas-start" aria-labelledby="nfttSidebarOffcanvasLabel">
+                <!-- danirus sidebartemplate: "globaltoc.html" --><div class="offcanvas-header border-bottom">
+  <h5 class="offcanvas-title fw-bold" id="nfttSidebarOffcanvasLabel">
+    Table of contents
+  </h5>
+  <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close" data-bs-target="#sidebar"></button>
+</div>
+
+<div class="offcanvas-body">
+  <nav class="toc" aria-label="Main menu">
+    <div class="mb-3 p-1 pt-3 pb-4 border-bottom">
+      <input id="sidebar-filter" type="text" name="filter" class="form-control form-control-sm" placeholder="filter" aria-label="filter">
+    </div>
+    <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="intro.html">Introduction</a></li>
+<li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Implementation Details</a></li>
+<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
+</ul>
+
+  </nav>
+  <template data-toggle-item-template>
+    <button class="btn btn-sm btn-link toctree-expand" type="button">
+      <i class="bi bi-caret-right"></i>
+      <span class="visually-hidden">Toggle menu contents</span>
+    </button>
+  </template>
+</div>
+            </div>
+            
+          </div>
+        </aside>
+        <article id="content" class="nftt-content" role="main">
+    <section id="implementation-details">
+<h1>Implementation Details<a class="headerlink" href="#implementation-details" title="Link to this heading">¶</a></h1>
+<section id="algorithm-representation">
+<h2>Algorithm Representation<a class="headerlink" href="#algorithm-representation" title="Link to this heading">¶</a></h2>
+<p>An algorithm in ReaL is represented as a <em>dataflow graph</em> (DFG), where
+each node is a <em>model function call</em> (MFC, e.g., generate, inference, or
+<code class="docutils literal notranslate"><span class="pre">train_step</span></code> called on an LLM), and each edge specifies the data or
+parameter version dependency between nodes.</p>
+<p>The dataflow graph of PPO looks like this:</p>
+<figure class="align-center" id="id3">
+<img alt="ppodfg" src="_images/ppo.svg" /><figcaption>
+<p><span class="caption-text">The dataflow graph of PPO.</span><a class="headerlink" href="#id3" title="Link to this image">¶</a></p>
+</figcaption>
+</figure>
+<p>Below, we show another example of the <a class="reference external" href="https://arxiv.org/abs/2310.10505">ReMax</a>, also known as the REINFORCE
+algorithm:</p>
+<figure class="align-center" id="id4">
+<img alt="reinforcedfg" src="_images/reinforce.svg" /><figcaption>
+<p><span class="caption-text">The dataflow graph of ReMax, or REINFORCE.</span><a class="headerlink" href="#id4" title="Link to this image">¶</a></p>
+</figcaption>
+</figure>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In this representation, the dataflow graph of pre-training, SFT, or
+reward modeling simplifies to a single <code class="docutils literal notranslate"><span class="pre">train_step</span></code> node.</p>
+</div>
+<p>More examples can be found in the <code class="docutils literal notranslate"><span class="pre">docs/images/dfg</span></code> folder. Only data
+dependencies are shown in the figures above. Parameter version
+dependencies are enforced so that the first call to a model X at step i
+is always preceded by the last call to X at step i-1.</p>
+<p>These figures are generated by a standalone script,
+<code class="docutils literal notranslate"><span class="pre">examples/visualize_dfg.py</span></code>. For a given algorithm, such as PPO, we
+decompose the entire dataflow into individual MFCs, each represented by
+a <a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> object. The input and output keys of each model
+function call specify their data dependencies. A list of
+<a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> objects is passed into the <code class="docutils literal notranslate"><span class="pre">build_graph</span></code>
+function to construct a dataflow graph, which is an instance of
+<code class="docutils literal notranslate"><span class="pre">networkx.DiGraph</span></code>.</p>
+<p>A device mesh D is the unit used for executing an individual function
+call. It is defined as a two-dimensional grid of GPUs located in the
+cluster. The shape of D is denoted as (N, M), where it covers N nodes
+equipped with M devices. Note that device meshes with the same shape
+could have different locations.</p>
+<p>The i-th MFC node will be executed on the device mesh <span class="math notranslate nohighlight">\(D_i\)</span>.
+<strong>This mesh can either be disjoint from or overlap with the device
+meshes of other MFCs.</strong></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>We assume that <span class="math notranslate nohighlight">\(D_i\)</span> either covers several entire hosts or a
+consecutive portion capable of dividing the number of devices on one
+host, e.g., (1, 1), (1, 2), (1, 4), (1, 8), (2, 8), …, (N, 8) in a
+cluster of (N, 8).</p>
+</div>
+<p>For example, this <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/ppo_manual.sh">PPO training script</a>
+manually allocates all six MFCs to different device meshes with
+different parallel strategies. In particular, we have a (1, 8) global
+device mesh. We denote GPUs as g0, g1, …, g7.</p>
+<ul class="simple">
+<li><p>Actor generation will run on all 8 GPUs, with a parallel strategy of
+(DP=4, TP=1, PP=2).</p></li>
+<li><p>Critic inference will run on [g0, g1], with a parallel strategy of
+(DP=2, TP=1, PP=1).</p></li>
+<li><p>Reward inference will run on [g2, g3], with a parallel strategy of
+(DP=1, TP=1, PP=2).</p></li>
+<li><p>Reference inference will run on [g4, g5, g6, g7], with a parallel
+strategy of (DP=1, TP=1, PP=4).</p></li>
+<li><p>Critic training will run on [g4, g5, g6, g7], with a parallel
+strategy of (DP=2, TP=1, PP=2).</p></li>
+<li><p>Actor training will run on [g0, g1, g2, g3], with a parallel strategy
+of (DP=2, TP=1, PP=2).</p></li>
+</ul>
+<p>Under this allocation, inference and training can be executed
+concurrently on disjoint device meshes, while generation uses the whole
+device mesh to maximize throughput.</p>
+<p>From the perspective of GPUs,</p>
+<ul class="simple">
+<li><p>g0 and g1 hold the first half layers of the actor for training.
+Besides, the critic model will be reallocated from CPU to g0 upon
+inference.</p></li>
+<li><p>g2 holds the second half layers of the actor for training. Besides,
+the first half layers of the actor will be reallocated upon
+generation, and the first half layers of the reward model will be
+reallocated upon inference.</p></li>
+<li><p>g3 holds the second half layers of the actor for training. Besides,
+the first half layers of the actor will be reallocated upon
+generation, and the second half layers of the reward model will be
+reallocated upon inference.</p></li>
+<li><p>g4 holds the first half layers of the critic for training. Besides,
+the first quarter layers of the reference model will be reallocated
+upon inference, and the second half layers of the actor will be
+reallocated upon generation.</p></li>
+<li><p>g5 holds the first half layers of the critic for training. Besides,
+the second quarter layers of the reference model will be reallocated
+upon inference, and the second half layers of the actor will be
+reallocated upon generation.</p></li>
+<li><p>g6 holds the second half layers of the critic for training. Besides,
+the third quarter layers of the reference model will be reallocated
+upon inference, and the second half layers of the actor will be
+reallocated upon generation.</p></li>
+<li><p>g7 holds the second half layers of the critic for training. Besides,
+the last quarter layers of the reference model will be reallocated
+upon inference, and the second half layers of the actor will be
+reallocated upon generation.</p></li>
+</ul>
+<p>The graph building is performed in <code class="docutils literal notranslate"><span class="pre">realhf/api/core/system_api.py</span></code>
+during the post-initialization of experiment configurations. The
+concrete definitions of MFCs in different experiments can be found in
+files under <code class="docutils literal notranslate"><span class="pre">realhf/experiments/common/</span></code>. All experiment
+configurations define an <code class="docutils literal notranslate"><span class="pre">rpcs</span></code> property, which is first processed by
+the <code class="docutils literal notranslate"><span class="pre">initial_setup</span></code> method in <code class="docutils literal notranslate"><span class="pre">realhf/experiments/common/common.py</span></code>
+and then passed to the <code class="docutils literal notranslate"><span class="pre">ExperimentConfig</span></code> object to build the graph.</p>
+</section>
+<section id="parallelism-strategy">
+<h2>Parallelism Strategy<a class="headerlink" href="#parallelism-strategy" title="Link to this heading">¶</a></h2>
+<p>Suppose we have a cluster with the dimensions (N, M), where N is the
+number of nodes and M is the number of GPUs per node. ReaL will launch N
+* M model worker processes, each exclusively occupying a GPU. These
+processes will share a global PyTorch process group, and each MFC will
+create sub-groups on their respective device meshes. Furthermore, the
+data, tensor, and pipeline parallel groups are created within each
+sub-group, similar to Megatron-LM. These groups will be kept in
+<a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py">constants.py</a>
+as per-process global constants.</p>
+<p>When different MFCs are executed on the same GPU (i.e., their device
+meshes are overlapped), ReaL switches the process group by using a
+<code class="docutils literal notranslate"><span class="pre">model_scope</span></code> context defined in <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py">constants.py</a>.
+The model name is provided by the MFC. Within the scope, the 3D
+parallelism groups specifically refer to the groups of this MFC.
+Otherwise, the DP/TP/PP parallelism group could not be accessed.</p>
+<p>There are three levels of process groups in ReaL. The innermost level is
+the data/tensor/pipeline parallel group for a specific MFC. The
+intermediate level is each MFC’s sub-group. The outermost level is the
+global PyTorch global group created by <code class="docutils literal notranslate"><span class="pre">dist.init_process_group</span></code>.</p>
+<p>The conversion from the innermost level to the intermediate level is
+handled by the <code class="docutils literal notranslate"><span class="pre">ProcessTopology</span></code> class in <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/topology.py">topology.py</a>,
+and the conversion from the intermediate level to the outermost level is
+managed by the <code class="docutils literal notranslate"><span class="pre">rank_mapping</span></code> dictionary in <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py">constants.py</a>.</p>
+<p>For example, suppose we have a 2x8 device mesh two MFCs. MFC#1 occupies
+the last 1x8 GPUs, aka the second node, and MFC#2 occupies all 2x8 GPUs.
+MFC#1 has a parallel strategy of (DP=2,TP=2,PP=2), and MFC#2 has a
+parallel strategy of (DP=4,TP=4,PP=1). Denote the GPUs on the first node
+as [g0, …, g7] and the GPUs on the second node as [g8, …, g15]. The
+following process groups will be created:</p>
+<ul class="simple">
+<li><p>The global group: [g0, g1, g2, …, g15], aka all GPUs.</p></li>
+<li><p>MFC#1’s sub-group: [g8, g9, g10, g11, g12, g13, g14, g15], aka the
+second node.</p></li>
+<li><p>MFC#2’s sub-group: [g0, g1, g2, …, g15], aka all GPUs. This is a
+virtual group and ReaL will just use the global group when we use it.</p></li>
+<li><p>MFC#1’s 4 pipeline parallel groups: [g8, g12], [g9, g13], [g10, g14],
+[g11, g15].</p></li>
+<li><p>MFC#1’s 4 tensor parallel groups: [g8, g9], [g10, g11], [g12, g13],
+[g14, g15].</p></li>
+<li><p>MFC#1’s 4 data parallel groups: [g8, g10], [g9, g11], [g12, g14],
+[g13, g15].</p></li>
+<li><p>MFC#2’s pipeline parallel group: [g0, g1, …, g15]. This is also a
+virual group.</p></li>
+<li><p>MFC#2’s 4 tensor parallel groups: [g0, g1, g2, g3], [g4, g5, g6, g7],
+[g8, g9, g10, g11], [g12, g13, g14, g15].</p></li>
+<li><p>MFC#2’s 4 data parallel groups: [g0, g4, g8, g12], [g1, g5, g9, g13],
+[g2, g6, g10, g14], [g3, g7, g11, g15].</p></li>
+</ul>
+<p>The rank mapping from MFC1 to the global group is</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="mi">0</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">1</span><span class="p">:</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="mi">11</span><span class="p">,</span> <span class="mi">4</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span> <span class="mi">5</span><span class="p">:</span> <span class="mi">13</span><span class="p">,</span> <span class="mi">6</span><span class="p">:</span> <span class="mi">14</span><span class="p">,</span> <span class="mi">7</span><span class="p">:</span> <span class="mi">15</span><span class="p">}</span>
+</pre></div>
+</div>
+<p>and the rank mapping of MFC2 is an identical mapping.</p>
+</section>
+<section id="runtime-infrastructure">
+<h2>Runtime Infrastructure<a class="headerlink" href="#runtime-infrastructure" title="Link to this heading">¶</a></h2>
+<p>ReaL implements a worker-based runtime, consisting of a single
+MasterWorker (MasW) on the CPU and multiple ModelWorkers (ModW), each
+occupying a separate GPU. For example, in a cluster of (N, 8), there
+will be one MasW and N * 8 ModWs.</p>
+<section id="overview">
+<h3>Overview<a class="headerlink" href="#overview" title="Link to this heading">¶</a></h3>
+<p>Recall that MFCs can have independent (either disjoint or overlapping)
+device meshes. From the perspective of a ModW or a GPU, it can host one
+or more MFCs. The MasW will execute the DFG and send requests to the
+corresponding handlers. Each request contains the handler name (e.g.,
+Actor or Critic), the interface type (e.g., <code class="docutils literal notranslate"><span class="pre">generate</span></code> or
+<code class="docutils literal notranslate"><span class="pre">train_step</span></code>), and some metadata (e.g., the input and output keys).
+Upon receiving the request, the ModW will get the corresponding model,
+run the computation, and return the results to the MasW to update the
+dependency.</p>
+<p>Inherited from the base Worker class, both MasW and ModW run the
+<code class="docutils literal notranslate"><span class="pre">_poll</span></code> method inside a while-loop. The <code class="docutils literal notranslate"><span class="pre">_poll</span></code> method is their main
+task. Outside of the <code class="docutils literal notranslate"><span class="pre">_poll</span></code> method, they listen to the controller and
+update their internal worker states, allowing them to be paused,
+resumed, or stopped by the controller.</p>
+</section>
+<section id="the-procedure-of-launching-an-experiment">
+<h3>The Procedure of Launching an Experiment<a class="headerlink" href="#the-procedure-of-launching-an-experiment" title="Link to this heading">¶</a></h3>
+<p>This section introduces how ReaL launches experiments using local
+subprocesses, Ray, or SLURM. Conceptually, the launcher provides similar
+functionality to <code class="docutils literal notranslate"><span class="pre">torchrun</span></code>, but we didn’t use <code class="docutils literal notranslate"><span class="pre">torchrun</span></code> because
+ReaL’s code is inherited from the previous SRL project. The scheduler in
+SRL can run heterogeneous CPU and GPU tasks, which is difficult to
+achieve with <code class="docutils literal notranslate"><span class="pre">torchrun</span></code>.</p>
+<figure class="align-default" id="id5">
+<img alt="exp_workflow" src="_images/experiment_workflow.svg" /><figcaption>
+<p><span class="caption-text">The execution workflow when launching an experiment with ReaL.</span><a class="headerlink" href="#id5" title="Link to this image">¶</a></p>
+</figcaption>
+</figure>
+<p>ReaL has two levels of configuration. The outer level is based on the
+Hydra structured configuration, as illustrated in the <a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a>
+section. This level abstracts an experiment into several configurable
+fields, allowing the user to conveniently change hyperparameters such as
+the parallelism strategy, learning rate, and batch size.</p>
+<p>Next, ReaL translates the Hydra configuration into a worker-based
+configuration. This includes the dataset, model, interface, and backend
+configurations for each ModW. For concrete examples, please refer to
+<code class="docutils literal notranslate"><span class="pre">realhf/api/core/config.py</span></code>. The core translation code is written in
+the <code class="docutils literal notranslate"><span class="pre">_get_model_worker_configs</span></code> method in
+<code class="docutils literal notranslate"><span class="pre">realhf/experiments/common/common.py</span></code>. This configuration level
+retains maximum flexibility. For instance, if we need to run CPU-heavy
+tasks like a reward function, we can implement a customized worker to
+execute the task on CPUs.</p>
+<p>The worker configuration is registered as an “experiment” with a unique
+name in <code class="docutils literal notranslate"><span class="pre">realhf/api/quickstart/entrypoint.py</span></code>. It is then launched by
+<code class="docutils literal notranslate"><span class="pre">realhf.apps.main</span></code>. The launcher finds the experiment by its name,
+loads the worker configurations, and submits them to the scheduler
+(either SLURM or local subprocesses). The scheduler runs a worker
+controller to manage the lifetime of other workers. Workers continuously
+check for new messages from the controller and change their internal
+state (e.g., running, pausing, or stopping) accordingly. Once the
+controller determines that all ModWs and the MasW are ready, it sends a
+signal to all workers to start the experiment. If the scheduler detects
+that a worker is no longer alive, such as after the experiment is
+completed or if an unexpected error occurs, it will shut down the
+controller and all workers, and exit <code class="docutils literal notranslate"><span class="pre">realhf.apps.main</span></code>.</p>
+</section>
+<section id="model-model-interface-and-model-backend">
+<h3>Model, Model Interface, and Model Backend<a class="headerlink" href="#model-model-interface-and-model-backend" title="Link to this heading">¶</a></h3>
+<p>A <a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.Model"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.Model</span></code></a> is a collection that includes a
+transformer-based neural network, a HuggingFace tokenizer, and some
+metadata, all associated with a unique name. The <code class="docutils literal notranslate"><span class="pre">module</span></code> attribute is
+usually a <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code> before backend initialization, and it becomes a
+<a class="reference internal" href="expconfig.html#realhf.PipelinableEngine" title="realhf.PipelinableEngine"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PipelinableEngine</span></code></a> after backend initialization. The
+<code class="docutils literal notranslate"><span class="pre">module</span></code> can be a shard of parameters or even an empty placeholder
+when offloading or parameter reallocation is enabled.</p>
+<p>A <a class="reference internal" href="expconfig.html#realhf.ModelInterface" title="realhf.ModelInterface"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelInterface</span></code></a> is a collection of concrete
+implementations for generation, inference, and training. When the MasW
+requests a specific MFC, the ModW will find the correct
+<a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.Model"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.Model</span></code></a> and pass it into the configured algorithm
+interface for execution. The results returned by the interface are then
+sent back to the MasW. This is implemented in the
+<code class="docutils literal notranslate"><span class="pre">__handle_model_function_calls</span></code> method in
+<code class="docutils literal notranslate"><span class="pre">realhf/system/model_worker.py</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Even though the computational workloads can be categorized into these
+main types, different algorithms often have unique side-effects. For
+example, PPO requires computing the GAE during training, while DPO
+does not. Therefore, we implement interfaces for each algorithm to
+facilitate easier customization.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>It doesn’t need to implement all interface types; for example, an
+interface for SFT only needs to implement the <code class="docutils literal notranslate"><span class="pre">train_step</span></code> method.</p>
+</div>
+<p>A <a class="reference internal" href="expconfig.html#realhf.ModelBackend" title="realhf.ModelBackend"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelBackend</span></code></a> is a functor that wraps the
+<a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.Model"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.Model</span></code></a> to provide additional functionalities like
+pipelined inference and ZeRO optimizer. It changes the <code class="docutils literal notranslate"><span class="pre">module</span></code>
+attribute of the <a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.Model"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.Model</span></code></a> to a
+<a class="reference internal" href="expconfig.html#realhf.PipelinableEngine" title="realhf.PipelinableEngine"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PipelinableEngine</span></code></a> object. All interface implementations
+use the APIs of <a class="reference internal" href="expconfig.html#realhf.PipelinableEngine" title="realhf.PipelinableEngine"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PipelinableEngine</span></code></a> to run the main
+computation. See <code class="docutils literal notranslate"><span class="pre">realhf/impl/model/interface</span></code> for concrete examples.</p>
+<p>Once launched, the ModW will set up all configured models, interfaces,
+and backends (see the <code class="docutils literal notranslate"><span class="pre">__lazy_setup</span></code> method in
+<code class="docutils literal notranslate"><span class="pre">realhf/system/model_worker.py</span></code>). They are indexed by the unique names
+of the <a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.Model"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.Model</span></code></a>. In the ModW, a <a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a>, a
+<a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.Model"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.Model</span></code></a>, a <a class="reference internal" href="expconfig.html#realhf.ModelInterface" title="realhf.ModelInterface"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelInterface</span></code></a>, and a
+<a class="reference internal" href="expconfig.html#realhf.ModelBackend" title="realhf.ModelBackend"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelBackend</span></code></a> are bound togather to handle a specific
+MFC, either <code class="docutils literal notranslate"><span class="pre">generate</span></code>, <code class="docutils literal notranslate"><span class="pre">inference</span></code>, or <code class="docutils literal notranslate"><span class="pre">train_step</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Algorithm customization typically involves implementing a new
+interface. For example, a customized reward interface is shown in
+<code class="docutils literal notranslate"><span class="pre">examples/customized_exp/ppo_sentiment.py</span></code>.</p>
+</div>
+</section>
+<section id="masw-modw-communication">
+<h3>MasW-ModW Communication<a class="headerlink" href="#masw-modw-communication" title="Link to this heading">¶</a></h3>
+<p>The request-reply communication between the MasW and ModWs is managed
+through ZMQ sockets. We abstract the communication pattern in
+<code class="docutils literal notranslate"><span class="pre">realhf/system/request_reply_stream.py</span></code>. The communication channel is
+set up in the <code class="docutils literal notranslate"><span class="pre">__lazy_setup</span></code> method in both types of workers. The
+communication is lightweight, as we only transfer metadata between them,
+such as the keys and IDs of the input and output tensors.</p>
+<p>We adopt a TCP-like protocol to ensure that all involved ModWs receive
+the request simultaneously. Requests are pushed into a queue in the ModW
+and handled sequentially. In addition to MFCs, requests can also include
+initialization, data fetching, saving, evaluation, etc. For more
+details, see the <code class="docutils literal notranslate"><span class="pre">model_poll_step</span></code> and <code class="docutils literal notranslate"><span class="pre">_poll</span></code> methods in
+<code class="docutils literal notranslate"><span class="pre">realhf/system/model_worker.py</span></code>.</p>
+</section>
+<section id="data-transfer">
+<h3>Data Transfer<a class="headerlink" href="#data-transfer" title="Link to this heading">¶</a></h3>
+<p>The dataset resides on the ModWs responsible for handling the source MFC
+in the DFG. For example, in PPO, the dataset is stored in the ModWs that
+handle actor generation. The dataset is sharded across different data
+parallel ranks. See the <code class="docutils literal notranslate"><span class="pre">__lazy_setup</span></code> function in ModW for details.</p>
+<p>At the start of each epoch, the MasW will continuously send data
+fetching requests to the ModWs until the dataset has been fully
+iterated. The ModWs will step through the dataloader and return metadata
+(e.g., sequence length, keys in the dataset, IDs, etc.) to the MasW. The
+MasW will fill an internal buffer with this metadata.</p>
+<p>MasW’s buffer tracks how many times each piece of data has been used in
+the DFG, and which keys have been produced by MFCs. Once the dependency
+of an MFC is satisfied—i.e., the required input keys are all available
+in the buffer— the MasW will send a request to the corresponding ModWs
+to run the MFC. If the MFC produces new keys, the resulting GPU tensors
+will be stored locally, and the ModWs will send metadata back to the
+MasW to update the buffer. After a piece of data has been used by all
+nodes in the DFG, it will be removed.</p>
+<p>If the buffer size is insufficient for subsequent operations, the MasW
+will send data fetching requests to the ModWs for the next epoch. These
+behaviors are implemented in the <code class="docutils literal notranslate"><span class="pre">load_data_func</span></code> in MasW, the
+<code class="docutils literal notranslate"><span class="pre">prefetch_from_dataset</span></code> and <code class="docutils literal notranslate"><span class="pre">model_poll_step</span></code> methods in ModW, and
+<code class="docutils literal notranslate"><span class="pre">realhf/system/buffer.py</span></code>.</p>
+<p>Data is replicated across tensor and pipeline parallel dimensions and
+sharded across the data parallel dimension. Since different MFCs may
+have different device meshes and parallel strategies, we need to
+transfer data from the owner (or producer) to the consumer before MFC
+computation. This is implemented as <strong>hooks</strong> in requests. Since the
+MasW maintains global information, it can append the source and
+destination of the required data in the pre-hooks and send them to the
+relevant ModWs. The ModW will then use this information to trigger
+GPU-GPU data transfer, which is based on NCCL broadcast. This is
+implemented in the <code class="docutils literal notranslate"><span class="pre">__handle_one_rpc_hook</span></code> method in ModW.</p>
+</section>
+<section id="parameter-reallocation">
+<h3>Parameter Reallocation<a class="headerlink" href="#parameter-reallocation" title="Link to this heading">¶</a></h3>
+<p>ReaL automatically reallocates model parameters to peer GPUs or CPU
+memory to reduce GPU memory usage and the communication volume caused by
+parallelization. However, there is an implementation-specific detail to
+note: if a model is being trained, its parameter memory cannot be
+released after reallocation. This is because the PyTorch optimizer
+(e.g., Adam) keeps model parameters as dictionary keys, and GPU tensor
+handles remain active.</p>
+<p>Due to this limitation, we must categorize models as either trainable or
+non-trainable. If any MFC involves training the model, the model is
+categorized as trainable. For example, in PPO, the actor and critic are
+trainable, while the reward and reference models are not.</p>
+<p>For non-trainable models, we can safely reallocate their parameters to
+CPU memory (i.e., offloading). The parameters will be asynchronously
+transferred back (i.e., overlapping computation and communication) to
+GPU memory during the next forward pass. When multiple inference
+requests are made for the same role, each request will have its own copy
+of the parameters and will be offloaded independently. Offloading is
+implemented in the <code class="docutils literal notranslate"><span class="pre">async_offload</span></code> method in <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code>, which is
+called in the <code class="docutils literal notranslate"><span class="pre">__handle_one_rpc_hook</span></code> method in ModW.</p>
+<p>For trainable models, if there is also an inference or generate MFC
+called upon this role (e.g., Actor and Critic in PPO), we can adopt
+different parallel strategies for different MFCs and dynamically
+reallocate parameters to reduce communication overhead. The training MFC
+holds its own parameters in GPU memory, while non-training MFCs only
+hold empty placeholders. When a non-training MFC is requested, the MasW
+will append a pre-hook to the request containing all the information for
+reallocating the parameters, and a post-hook to revert this operation.
+The reallocation is implemented in the <code class="docutils literal notranslate"><span class="pre">__handle_one_rpc_hook</span></code> method
+in ModW. Note that since the trainable parameters cannot be released,
+the reverse reallocation essentially drops the parameters used for
+inference or generation.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The above limitation of PyTorch is not an intrinsic problem. We could
+re-implement the optimizer and use parameter names as keys. However,
+this would require modifying Megatron and DeepSpeed correspondingly,
+which is not a trivial task.</p>
+</div>
+</section>
+</section>
+</section>
+
+</article>
+        <aside class="nftt-toc my-3">
+          
+          <div class="my-sm-1 my-lg-0 ps-xl-3 text-muted">
+            <button class="btn btn-link link-dark p-lg-0 mb-2 mb-lg-0 text-decoration-none nftt-toc-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#tocContents" aria-expanded="false" aria-controls="tocContents"
+            >On this page <i class="ms-2 bi bi-chevron-expand"></i></button>
+            <div class="title d-none d-lg-block">
+              <i class="bi bi-file-earmark-text"></i>&nbsp;&nbsp;<span class="small">On this page</span>
+            </div>
+            <div class="collapse nftt-toc-collapse" id="tocContents">
+              <nav id="TableOfContents">
+                <ul>
+<li><a class="reference internal" href="#">Implementation Details</a><ul>
+<li><a class="reference internal" href="#algorithm-representation">Algorithm Representation</a></li>
+<li><a class="reference internal" href="#parallelism-strategy">Parallelism Strategy</a></li>
+<li><a class="reference internal" href="#runtime-infrastructure">Runtime Infrastructure</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#the-procedure-of-launching-an-experiment">The Procedure of Launching an Experiment</a></li>
+<li><a class="reference internal" href="#model-model-interface-and-model-backend">Model, Model Interface, and Model Backend</a></li>
+<li><a class="reference internal" href="#masw-modw-communication">MasW-ModW Communication</a></li>
+<li><a class="reference internal" href="#data-transfer">Data Transfer</a></li>
+<li><a class="reference internal" href="#parameter-reallocation">Parameter Reallocation</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+              </nav>
+            </div>
+          </div>
+          
+        </aside>
+      </div>
+    </div>
+
+    <footer class="nftt-footer">
+      <nav id="paginator" class="py-4" aria-label="Documentation navigation">
+    <div class="container">
+      <ul class="pagination justify-content-between mb-0"><li class="d-flex page-item">
+            <a href="customization.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Customization">
+              <span class="prev-page"><i class="bi bi-caret-left"></i></span>
+              <div class="d-none d-sm-flex flex-column">
+                <span class="text-small text-start text-muted">Previous</span>
+                <span class="underline">Customization</span>
+              </div>
+            </a>
+          </li>
+        <li class="d-flex page-item ms-auto">
+            <a href="arch.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Code Architecture">
+              <div class="d-flex flex-column">
+                <span class="text-small text-end text-start text-muted">Next</span>
+                <span class="underline">Code Architecture</span>
+              </div>
+              <span class="next-page"><i class="bi bi-caret-right"></i></span>
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </nav>
+
+      <div class="py-5 px-4 px-md-3">
+  <div class="container">
+    
+
+    <div class="row">
+      <div class="col-lg-12 text-center">
+        <a class="brand-text d-inline-flex align-items-center mb-2 text-decoration-none" href="/" aria-label="Nefertiti-for-Sphinx">
+          <span class="fs-6 fw-bold">ReaL</span>
+        </a>
+        
+          <ul class="list-unstyled small text-muted">
+            <li>2024, Wei Fu & Zhiyu Mei</li>
+          </ul>
+        
+        
+        <div class="built-with pt-2">
+          Built with <a href="http://sphinx-doc.org">Sphinx 7.3.7</a> and <a href="https://github.com/danirus/sphinx-nefertiti">Nefertiti 0.4.1</a>
+        </div>
+        
+      </div>
+    </div>
+  </div>
+</div>
+    </footer>
+    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script async="async" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <script type="text/javascript" src="_static/sphinx-nefertiti-0.4.1.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap.bundle-0.4.1.min.js"></script>
+    
+    <script type="text/javascript" src="_static/doc_versions.js"></script>
+  </body>
+</html>

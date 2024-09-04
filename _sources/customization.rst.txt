@@ -168,8 +168,8 @@ For efficiency reasons, ReaL does not support every transformer model
 from the HuggingFace model hub. In ReaL, we implement the
 :class:`realhf.impl.model.nn.real_llm_api.ReaLModel` class that wraps
 the HuggingFace model and provides micro-batched pipelining, offload,
-and parameter reallocation functionalities. It's a decoder-only
-dense or Mixture-of-Expert (MoE) transformer model.
+and parameter reallocation functionalities. It's a decoder-only dense or
+Mixture-of-Expert (MoE) transformer model.
 
 There are helper functions in the model API used to convert HuggingFace
 models back and forth, such as ``from_llama`` and ``to_llama``. These
@@ -214,10 +214,10 @@ Overview
 ========
 
 In ReaL, algorithms are represented as dataflow graphs. Each node in the
-graph corresponds to a model function call (MFC), which can be one of the
-generate, inference, or train requests applied to a specific model (e.g.,
-Actor or Critic). The edges in the graph indicate data or parameter
-version dependencies between nodes.
+graph corresponds to a model function call (MFC), which can be one of
+the generate, inference, or train requests applied to a specific model
+(e.g., Actor or Critic). The edges in the graph indicate data or
+parameter version dependencies between nodes.
 
 The following figure illustrates the dataflow graph of PPO:
 
@@ -234,6 +234,7 @@ model interface.
 The interface class has the following signature:
 
 .. autoclass:: realhf.ModelInterface
+   :no-index:
    :members:
    :undoc-members:
 

@@ -30,7 +30,7 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
-        <link rel="next" title="Contributing" href="contributing.html" />
+        <link rel="next" title="Implementation Details" href="impl.html" />
         <link rel="prev" title="Setting Up Distributed Experiments" href="distributed.html" />
     <style>
       :root {
@@ -177,6 +177,8 @@
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Customization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="impl.html">Implementation Details</a></li>
+<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 
@@ -335,8 +337,8 @@ in the <code class="docutils literal notranslate"><span class="pre">DatasetAbstr
 from the HuggingFace model hub. In ReaL, we implement the
 <code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.impl.model.nn.real_llm_api.ReaLModel</span></code> class that wraps
 the HuggingFace model and provides micro-batched pipelining, offload,
-and parameter reallocation functionalities. It’s a decoder-only
-dense or Mixture-of-Expert (MoE) transformer model.</p>
+and parameter reallocation functionalities. It’s a decoder-only dense or
+Mixture-of-Expert (MoE) transformer model.</p>
 <p>There are helper functions in the model API used to convert HuggingFace
 models back and forth, such as <code class="docutils literal notranslate"><span class="pre">from_llama</span></code> and <code class="docutils literal notranslate"><span class="pre">to_llama</span></code>. These
 helper functions are generated automatically by registering conversion
@@ -377,10 +379,10 @@ parallelism.</p></li>
 <section id="id2">
 <h3>Overview<a class="headerlink" href="#id2" title="Link to this heading">¶</a></h3>
 <p>In ReaL, algorithms are represented as dataflow graphs. Each node in the
-graph corresponds to a model function call (MFC), which can be one of the
-generate, inference, or train requests applied to a specific model (e.g.,
-Actor or Critic). The edges in the graph indicate data or parameter
-version dependencies between nodes.</p>
+graph corresponds to a model function call (MFC), which can be one of
+the generate, inference, or train requests applied to a specific model
+(e.g., Actor or Critic). The edges in the graph indicate data or
+parameter version dependencies between nodes.</p>
 <p>The following figure illustrates the dataflow graph of PPO:</p>
 <img alt="Dataflow graph of RLHF." class="align-center" src="_images/rlhf_dfg.svg" /><p>A node is represented by a <a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> object. Each node has
 a <code class="docutils literal notranslate"><span class="pre">model_name</span></code> field and an <code class="docutils literal notranslate"><span class="pre">interface_type</span></code> field, which specify
@@ -389,37 +391,49 @@ what the node should conceptually do during execution. The
 model interface.</p>
 <p>The interface class has the following signature:</p>
 <dl class="py class">
-<dt class="sig sig-object py" id="realhf.ModelInterface">
-<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">ModelInterface</span></span><a class="headerlink" href="#realhf.ModelInterface" title="Link to this definition">¶</a></dt>
-<dd><p>Interface for model training, evaluation, inference and generation.</p>
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">realhf.</span></span><span class="sig-name descname"><span class="pre">ModelInterface</span></span></dt>
+<dd><p>An interface for model training, evaluation, inference, and generation.</p>
+<p>This interface is designed to follow the dependency injection pattern.
+We pass the model to the interface and call its methods, ensuring that model APIs
+and algorithms are fully decoupled. For example, REINFORCE and PPO can exhibit
+different behaviors during training. Separate interfaces can be written for these
+algorithms while using the same model that provides basic forward-backward-update
+functionality (i.e., <a class="reference internal" href="expconfig.html#realhf.PipelinableEngine" title="realhf.PipelinableEngine"><code class="xref py py-class docutils literal notranslate"><span class="pre">PipelinableEngine</span></code></a>).</p>
+<p>During runtime, the master worker requests model workers to execute a specific
+interface type (e.g., generate) on a specific model. The model worker locates
+the corresponding model, passes it into the requested interface, performs the
+computation, and returns the result.</p>
+<p>Users can easily create new interfaces to support customized usage.
+See <a class="reference internal" href="#"><span class="doc">Customization</span></a> for more details.</p>
 <dl class="py method">
-<dt class="sig sig-object py" id="realhf.ModelInterface.evaluate">
-<span class="sig-name descname"><span class="pre">evaluate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eval_dataloader</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DataLoader</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span></span></span><a class="headerlink" href="#realhf.ModelInterface.evaluate" title="Link to this definition">¶</a></dt>
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">evaluate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.api.core.model_api.Model"><span class="pre">Model</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">eval_dataloader</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DataLoader</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span></span></span></dt>
 <dd></dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="realhf.ModelInterface.generate">
-<span class="sig-name descname"><span class="pre">generate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_mbs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></span><a class="headerlink" href="#realhf.ModelInterface.generate" title="Link to this definition">¶</a></dt>
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">generate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.api.core.model_api.Model"><span class="pre">Model</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_mbs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></span></dt>
 <dd></dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="realhf.ModelInterface.inference">
-<span class="sig-name descname"><span class="pre">inference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_mbs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></span><a class="headerlink" href="#realhf.ModelInterface.inference" title="Link to this definition">¶</a></dt>
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">inference</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.api.core.model_api.Model"><span class="pre">Model</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_mbs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></span></dt>
 <dd></dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="realhf.ModelInterface.mock">
-<span class="sig-name descname"><span class="pre">mock</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type_</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></span><a class="headerlink" href="#realhf.ModelInterface.mock" title="Link to this definition">¶</a></dt>
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">mock</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type_</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.api.core.model_api.Model"><span class="pre">Model</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></span></dt>
 <dd></dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="realhf.ModelInterface.save">
-<span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#realhf.ModelInterface.save" title="Link to this definition">¶</a></dt>
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.api.core.model_api.Model"><span class="pre">Model</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span></dt>
 <dd></dd></dl>
 
 <dl class="py method">
-<dt class="sig sig-object py" id="realhf.ModelInterface.train_step">
-<span class="sig-name descname"><span class="pre">train_step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_mbs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span></span></span><a class="headerlink" href="#realhf.ModelInterface.train_step" title="Link to this definition">¶</a></dt>
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">train_step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.api.core.model_api.Model"><span class="pre">Model</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.api.core.data_api.SequenceSample"><span class="pre">SequenceSample</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_mbs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span></span></span></dt>
 <dd></dd></dl>
 
 </dd></dl>
@@ -584,18 +598,7 @@ automatic evaluations.</p>
 </ul>
 </li>
 <li><a class="reference internal" href="#customizing-algorithms">Customizing Algorithms</a><ul>
-<li><a class="reference internal" href="#id2">Overview</a><ul>
-<li><a class="reference internal" href="#realhf.ModelInterface"><code class="docutils literal notranslate"><span class="pre">ModelInterface</span></code></a><ul>
-<li><a class="reference internal" href="#realhf.ModelInterface.evaluate"><code class="docutils literal notranslate"><span class="pre">ModelInterface.evaluate()</span></code></a></li>
-<li><a class="reference internal" href="#realhf.ModelInterface.generate"><code class="docutils literal notranslate"><span class="pre">ModelInterface.generate()</span></code></a></li>
-<li><a class="reference internal" href="#realhf.ModelInterface.inference"><code class="docutils literal notranslate"><span class="pre">ModelInterface.inference()</span></code></a></li>
-<li><a class="reference internal" href="#realhf.ModelInterface.mock"><code class="docutils literal notranslate"><span class="pre">ModelInterface.mock()</span></code></a></li>
-<li><a class="reference internal" href="#realhf.ModelInterface.save"><code class="docutils literal notranslate"><span class="pre">ModelInterface.save()</span></code></a></li>
-<li><a class="reference internal" href="#realhf.ModelInterface.train_step"><code class="docutils literal notranslate"><span class="pre">ModelInterface.train_step()</span></code></a></li>
-</ul>
-</li>
-</ul>
-</li>
+<li><a class="reference internal" href="#id2">Overview</a></li>
 <li><a class="reference internal" href="#example-a-customized-reward-function-for-ppo">Example: A Customized Reward Function for PPO</a></li>
 </ul>
 </li>
@@ -624,10 +627,10 @@ automatic evaluations.</p>
             </a>
           </li>
         <li class="d-flex page-item ms-auto">
-            <a href="contributing.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Contributing">
+            <a href="impl.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Implementation Details">
               <div class="d-flex flex-column">
                 <span class="text-small text-end text-start text-muted">Next</span>
-                <span class="underline">Contributing</span>
+                <span class="underline">Implementation Details</span>
               </div>
               <span class="next-page"><i class="bi bi-caret-right"></i></span>
             </a>

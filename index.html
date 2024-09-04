@@ -176,6 +176,8 @@
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="impl.html">Implementation Details</a></li>
+<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 
@@ -209,7 +211,10 @@ This requires an understanding of how an algorithm and its experiment
 configuration are defined in ReaL (i.e., as a dataflow graph), but
 understanding the system-wide implementation (e.g., model workers) is
 not mandatory.</p>
-<p>Besides these tutorials, we present the reference manual of various
+<p>For potential developers, please refer to the <a class="reference internal" href="impl.html"><span class="doc">Implementation Details</span></a> and the
+<a class="reference internal" href="arch.html"><span class="doc">Code Architecture</span></a> sections for a deeper understanding of the system
+architecture.</p>
+<p>Besides these illustrations, we present the reference manual of various
 configuration objects in the <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a> section, and a brief
 overview of the system architecture in the <a class="reference internal" href="intro.html"><span class="doc">Introduction</span></a> section.</p>
 </section>
@@ -263,6 +268,16 @@ overview of the system architecture in the <a class="reference internal" href="i
 <li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.MFCDef"><code class="docutils literal notranslate"><span class="pre">MFCDef</span></code></a></li>
 </ul>
 </li>
+<li class="toctree-l2"><a class="reference internal" href="expconfig.html#system-level-configurations">System-Level Configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ModelShardID"><code class="docutils literal notranslate"><span class="pre">ModelShardID</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ModelName"><code class="docutils literal notranslate"><span class="pre">ModelName</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ModelVersion"><code class="docutils literal notranslate"><span class="pre">ModelVersion</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.Model"><code class="docutils literal notranslate"><span class="pre">Model</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ModelBackend"><code class="docutils literal notranslate"><span class="pre">ModelBackend</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.PipelinableEngine"><code class="docutils literal notranslate"><span class="pre">PipelinableEngine</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="expconfig.html#realhf.ModelInterface"><code class="docutils literal notranslate"><span class="pre">ModelInterface</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a><ul>
@@ -307,7 +322,56 @@ overview of the system architecture in the <a class="reference internal" href="i
 </li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
+<li class="toctree-l1"><a class="reference internal" href="impl.html">Implementation Details</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="impl.html#algorithm-representation">Algorithm Representation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="impl.html#parallelism-strategy">Parallelism Strategy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="impl.html#runtime-infrastructure">Runtime Infrastructure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="impl.html#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="impl.html#the-procedure-of-launching-an-experiment">The Procedure of Launching an Experiment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="impl.html#model-model-interface-and-model-backend">Model, Model Interface, and Model Backend</a></li>
+<li class="toctree-l3"><a class="reference internal" href="impl.html#masw-modw-communication">MasW-ModW Communication</a></li>
+<li class="toctree-l3"><a class="reference internal" href="impl.html#data-transfer">Data Transfer</a></li>
+<li class="toctree-l3"><a class="reference internal" href="impl.html#parameter-reallocation">Parameter Reallocation</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="arch.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="arch.html#id1">Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#standalone-scripts">Standalone Scripts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#scripts-for-running-existing-experiments">Scripts for Running Existing Experiments</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#customized-experiments">Customized Experiments</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="arch.html#apis">APIs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#core-apis">Core APIs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#huggingface-model-conversion">HuggingFace Model Conversion</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#quickstart-apis">Quickstart APIs</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="arch.html#base-modules">Base Modules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#parallelism-strategy">Parallelism Strategy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#data-packing">Data Packing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#names-and-name-resolving">Names and Name Resolving</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="arch.html#dataset-and-model-implementations">Dataset and Model Implementations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#datasets">Datasets</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#models">Models</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#model-backends">Model Backends</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#model-interfaces">Model Interfaces</a></li>
+<li class="toctree-l3"><a class="reference internal" href="arch.html#communication">Communication</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#documentation">Documentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#formatting">Formatting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#testing">Testing</a></li>
+</ul>
+</li>
 </ul>
 </div>
 </section>
@@ -384,6 +448,7 @@ overview of the system architecture in the <a class="reference internal" href="i
     <script src="_static/documentation_options.js?v=01f34227"></script>
     <script src="_static/doctools.js?v=9a2dae69"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script async="async" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 
     <script type="text/javascript" src="_static/sphinx-nefertiti-0.4.1.min.js"></script>
     <script type="text/javascript" src="_static/bootstrap.bundle-0.4.1.min.js"></script>

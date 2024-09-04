@@ -30,7 +30,7 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
-        <link rel="prev" title="Customization" href="customization.html" />
+        <link rel="prev" title="Code Architecture" href="arch.html" />
     <style>
       :root {
         --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
@@ -176,6 +176,8 @@
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="impl.html">Implementation Details</a></li>
+<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Contributing</a></li>
 </ul>
 
@@ -200,10 +202,65 @@ We will do our best to assist you. Currently, there is no template for
 issues or pull requests.</p>
 <p>We hope the open-source community can help improve this repository and
 enable RLHF technology to truly empower the applications of LLM.</p>
+<section id="documentation">
+<h2>Documentation<a class="headerlink" href="#documentation" title="Link to this heading">¶</a></h2>
+<p>The source code is documented using Sphinx in the <code class="docutils literal notranslate"><span class="pre">docs</span></code> folder. On a
+node with docker-compose installed, run</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>make<span class="w"> </span>docs
+</pre></div>
+</div>
+<p>Then the documentation will be available at <code class="docutils literal notranslate"><span class="pre">http://localhost:7780</span></code>.</p>
+<p>Every time the documentation files are changed, you should run the above
+command to update the documentation.</p>
+<p>The GitHub Pages will be updated automatically after the PR is merged.</p>
+</section>
+<section id="formatting">
+<h2>Formatting<a class="headerlink" href="#formatting" title="Link to this heading">¶</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># For .py files</span>
+docformatter<span class="w"> </span>-i<span class="w"> </span><span class="si">${</span><span class="nv">FILE</span><span class="si">}</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>isort<span class="w"> </span><span class="si">${</span><span class="nv">FILE</span><span class="si">}</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>black<span class="w"> </span>-q<span class="w"> </span><span class="si">${</span><span class="nv">FILE</span><span class="si">}</span>
+<span class="c1"># For C/C++ files</span>
+clang-format<span class="w"> </span>-i<span class="w"> </span><span class="si">${</span><span class="nv">FILE</span><span class="si">}</span>
+<span class="c1"># For documentation</span>
+rstfmt<span class="w"> </span>docs
+</pre></div>
+</div>
+</section>
+<section id="testing">
+<h2>Testing<a class="headerlink" href="#testing" title="Link to this heading">¶</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Run CPU tests</span>
+pytest<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not gpu&quot;</span>
+<span class="c1"># Run CPU tests and GPU tests that require a single GPU</span>
+pytest<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not distributed&quot;</span>
+<span class="c1"># On a node with multiple GPUs, run all tests</span>
+pytest
+</pre></div>
+</div>
+</section>
 </section>
 
 </article>
         <aside class="nftt-toc my-3">
+          
+          <div class="my-sm-1 my-lg-0 ps-xl-3 text-muted">
+            <button class="btn btn-link link-dark p-lg-0 mb-2 mb-lg-0 text-decoration-none nftt-toc-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#tocContents" aria-expanded="false" aria-controls="tocContents"
+            >On this page <i class="ms-2 bi bi-chevron-expand"></i></button>
+            <div class="title d-none d-lg-block">
+              <i class="bi bi-file-earmark-text"></i>&nbsp;&nbsp;<span class="small">On this page</span>
+            </div>
+            <div class="collapse nftt-toc-collapse" id="tocContents">
+              <nav id="TableOfContents">
+                <ul>
+<li><a class="reference internal" href="#">Contributing</a><ul>
+<li><a class="reference internal" href="#documentation">Documentation</a></li>
+<li><a class="reference internal" href="#formatting">Formatting</a></li>
+<li><a class="reference internal" href="#testing">Testing</a></li>
+</ul>
+</li>
+</ul>
+
+              </nav>
+            </div>
+          </div>
           
         </aside>
       </div>
@@ -213,11 +270,11 @@ enable RLHF technology to truly empower the applications of LLM.</p>
       <nav id="paginator" class="py-4" aria-label="Documentation navigation">
     <div class="container">
       <ul class="pagination justify-content-between mb-0"><li class="d-flex page-item">
-            <a href="customization.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Customization">
+            <a href="arch.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Code Architecture">
               <span class="prev-page"><i class="bi bi-caret-left"></i></span>
               <div class="d-none d-sm-flex flex-column">
                 <span class="text-small text-start text-muted">Previous</span>
-                <span class="underline">Customization</span>
+                <span class="underline">Code Architecture</span>
               </div>
             </a>
           </li>

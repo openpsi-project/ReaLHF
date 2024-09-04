@@ -173,6 +173,8 @@
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="impl.html">Implementation Details</a></li>
+<li class="toctree-l1"><a class="reference internal" href="arch.html">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 
@@ -246,12 +248,15 @@
                     <td>
                         <ul>
                                 <li>
-                                    <a href="expconfig.html#realhf.SequenceSample.disable_validation">disable_validation() (realhf.SequenceSample class method)</a>
+                                    <a href="expconfig.html#realhf.ModelBackend.destroy">destroy() (realhf.ModelBackend method)</a>
 </li>
                         </ul>
                     </td>
                     <td>
                         <ul>
+                                <li>
+                                    <a href="expconfig.html#realhf.SequenceSample.disable_validation">disable_validation() (realhf.SequenceSample class method)</a>
+</li>
                                 <li>
                                     <a href="expconfig.html#realhf.DPOConfig">DPOConfig (class in realhf)</a>
 </li>
@@ -266,12 +271,15 @@
                     <td>
                         <ul>
                                 <li>
-                                    <a href="customization.html#realhf.ModelInterface.evaluate">evaluate() (realhf.ModelInterface method)</a>
+                                    <a href="expconfig.html#realhf.PipelinableEngine.eval_batch">eval_batch() (realhf.PipelinableEngine method)</a>
 </li>
                         </ul>
                     </td>
                     <td>
                         <ul>
+                                <li>
+                                    <a href="expconfig.html#realhf.ModelInterface.evaluate">evaluate() (realhf.ModelInterface method)</a>
+</li>
                                 <li>
                                     <a href="expconfig.html#realhf.ExperimentSaveEvalControl">ExperimentSaveEvalControl (class in realhf)</a>
 </li>
@@ -283,6 +291,13 @@
         <h2 id="F">F</h2>
         <table class="indextable genindextable">
             <tr>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="expconfig.html#realhf.PipelinableEngine.forward">forward() (realhf.PipelinableEngine method)</a>
+</li>
+                        </ul>
+                    </td>
                     <td>
                         <ul>
                                 <li>
@@ -302,8 +317,12 @@
                                     <a href="expconfig.html#realhf.SequenceSample.gather">gather() (realhf.SequenceSample class method)</a>
 </li>
                                 <li>
-                                    <a href="customization.html#realhf.ModelInterface.generate">generate() (realhf.ModelInterface method)</a>
+                                    <a href="expconfig.html#realhf.ModelInterface.generate">generate() (realhf.ModelInterface method)</a>
+
+                                        <ul>
+                                                <li><a href="expconfig.html#realhf.PipelinableEngine.generate">(realhf.PipelinableEngine method)</a>
 </li>
+                                        </ul></li>
                         </ul>
                     </td>
                     <td>
@@ -328,7 +347,14 @@
                     <td>
                         <ul>
                                 <li>
-                                    <a href="customization.html#realhf.ModelInterface.inference">inference() (realhf.ModelInterface method)</a>
+                                    <a href="expconfig.html#realhf.ModelInterface.inference">inference() (realhf.ModelInterface method)</a>
+</li>
+                        </ul>
+                    </td>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="expconfig.html#realhf.ModelBackend.initialize">initialize() (realhf.ModelBackend method)</a>
 </li>
                         </ul>
                     </td>
@@ -349,21 +375,36 @@
                                 <li>
                                     <a href="expconfig.html#realhf.MFCDef">MFCDef (class in realhf)</a>
 </li>
+                                <li>
+                                    <a href="expconfig.html#realhf.ModelInterface.mock">mock() (realhf.ModelInterface method)</a>
+</li>
+                                <li>
+                                    <a href="expconfig.html#realhf.Model">Model (class in realhf)</a>
+</li>
+                                <li>
+                                    <a href="expconfig.html#realhf.ModelBackend">ModelBackend (class in realhf)</a>
+</li>
                         </ul>
                     </td>
                     <td>
                         <ul>
                                 <li>
-                                    <a href="customization.html#realhf.ModelInterface.mock">mock() (realhf.ModelInterface method)</a>
-</li>
-                                <li>
                                     <a href="expconfig.html#realhf.ModelFamily">ModelFamily (class in realhf)</a>
 </li>
                                 <li>
-                                    <a href="customization.html#realhf.ModelInterface">ModelInterface (class in realhf)</a>
+                                    <a href="expconfig.html#realhf.ModelInterface">ModelInterface (class in realhf)</a>
+</li>
+                                <li>
+                                    <a href="expconfig.html#realhf.ModelName">ModelName (class in realhf)</a>
+</li>
+                                <li>
+                                    <a href="expconfig.html#realhf.ModelShardID">ModelShardID (class in realhf)</a>
 </li>
                                 <li>
                                     <a href="expconfig.html#realhf.ModelTrainEvalConfig">ModelTrainEvalConfig (class in realhf)</a>
+</li>
+                                <li>
+                                    <a href="expconfig.html#realhf.ModelVersion">ModelVersion (class in realhf)</a>
 </li>
                         </ul>
                     </td>
@@ -395,12 +436,15 @@
                                     <a href="expconfig.html#realhf.ParallelismConfig">ParallelismConfig (class in realhf)</a>
 </li>
                                 <li>
-                                    <a href="expconfig.html#realhf.PPOConfig">PPOConfig (class in realhf)</a>
+                                    <a href="expconfig.html#realhf.PipelinableEngine">PipelinableEngine (class in realhf)</a>
 </li>
                         </ul>
                     </td>
                     <td>
                         <ul>
+                                <li>
+                                    <a href="expconfig.html#realhf.PPOConfig">PPOConfig (class in realhf)</a>
+</li>
                                 <li>
                                     <a href="expconfig.html#realhf.PPOHyperparameters">PPOHyperparameters (class in realhf)</a>
 </li>
@@ -444,7 +488,7 @@
                     <td>
                         <ul>
                                 <li>
-                                    <a href="customization.html#realhf.ModelInterface.save">save() (realhf.ModelInterface method)</a>
+                                    <a href="expconfig.html#realhf.ModelInterface.save">save() (realhf.ModelInterface method)</a>
 </li>
                                 <li>
                                     <a href="expconfig.html#realhf.SequenceSample">SequenceSample (class in realhf)</a>
@@ -473,7 +517,14 @@
                     <td>
                         <ul>
                                 <li>
-                                    <a href="customization.html#realhf.ModelInterface.train_step">train_step() (realhf.ModelInterface method)</a>
+                                    <a href="expconfig.html#realhf.PipelinableEngine.train_batch">train_batch() (realhf.PipelinableEngine method)</a>
+</li>
+                        </ul>
+                    </td>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="expconfig.html#realhf.ModelInterface.train_step">train_step() (realhf.ModelInterface method)</a>
 </li>
                         </ul>
                     </td>

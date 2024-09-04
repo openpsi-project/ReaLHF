@@ -30,6 +30,8 @@
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
+        <link rel="next" title="Contributing" href="contributing.html" />
+        <link rel="prev" title="Implementation Details" href="impl.html" />
     <style>
       :root {
         --nftt-body-font-family: "Nunito", var(--nftt-font-sans-serif) !important;
@@ -168,13 +170,15 @@
     <div class="mb-3 p-1 pt-3 pb-4 border-bottom">
       <input id="sidebar-filter" type="text" name="filter" class="form-control form-control-sm" placeholder="filter" aria-label="filter">
     </div>
-    <ul>
+    <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="intro.html">Introduction</a></li>
 <li class="toctree-l1"><a class="reference internal" href="install.html">Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="expconfig.html">Configurations</a></li>
 <li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
 <li class="toctree-l1"><a class="reference internal" href="distributed.html">Setting Up Distributed Experiments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="customization.html">Customization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="impl.html">Implementation Details</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Code Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 
@@ -193,18 +197,567 @@
         <article id="content" class="nftt-content" role="main">
     <section id="code-architecture">
 <h1>Code Architecture<a class="headerlink" href="#code-architecture" title="Link to this heading">¶</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api">realhf/api/</a></p></li>
+</ul>
+<p>Definitions of the dataflow graph, data and model APIs, configuration
+objects, and the implementation of transforming HuggingFace models to
+ReaL.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/apps">realhf/apps/</a></p></li>
+</ul>
+<p>Entry points for launching experiments. The primary function to launch
+experiments is <code class="docutils literal notranslate"><span class="pre">main_start</span></code> in <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/apps/main.py">main.py</a>.
+This function sets up the scheduler, which runs remote processes via
+<code class="docutils literal notranslate"><span class="pre">python3</span> <span class="pre">-m</span> <span class="pre">realhf.apps.remote</span></code>. Specifically, the training command
+runs <code class="docutils literal notranslate"><span class="pre">apps.main</span></code> (likely on a CPU node), which then starts and waits
+for all worker processes launched by <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/apps/remote.py">remote.py</a>
+to finish.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base">realhf/base/</a></p></li>
+</ul>
+<p>Basic utilities imported and used by system or algorithm modules.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/experiments">realhf/experiments/</a></p></li>
+</ul>
+<p>Experiment configurations and registries. These objects are configured
+through Hydra command-line arguments, as exemplified in the
+<a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a>.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl">realhf/impl/</a></p></li>
+</ul>
+<p>Implementation of datasets, models, model interfaces, and model
+backends. Please refer to <a class="reference internal" href="impl.html"><span class="doc">Implementation Details</span></a> for definitions of these terms.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/scheduler">realhf/scheduler</a></p></li>
+</ul>
+<p>The scheduler used to launch and monitor experiments. It provides
+functionality similar to <code class="docutils literal notranslate"><span class="pre">torchrun</span></code>, but with greater flexibility. The
+scheduler is independent of other ReaL concepts or implementation
+details, such as parameter reallocation. It’s purely an infrastructure
+utility.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/search_engine">realhf/search_engine</a></p></li>
+</ul>
+<p>The search engine used to find the best configuration for an experiment.
+It is currently non-functional. 🙇🏻🙇🏻🙇🏻</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/system">realhf/system</a></p></li>
+</ul>
+<p>Definitions of workers, including the base worker, the model worker, and
+the master worker.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/tests">tests</a></p></li>
+</ul>
+<p>Unit tests for the codebase. Tests not marked with <code class="docutils literal notranslate"><span class="pre">pytest.mark.gpu</span></code>
+or <code class="docutils literal notranslate"><span class="pre">pytest.mark.distributed</span></code> will run upon each PR to the main branch.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples">examples</a></p></li>
+</ul>
+<p>Example scripts and customized experiments. Please see the detailed
+descriptions below.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/csrc">csrc</a></p></li>
+</ul>
+<p>C++ and CUDA extensions, including CUDA kernels for computing GAE, CUDA
+kernels used for reading and writing parameters during parameter
+reallocation, and the C++ search engine. The <code class="docutils literal notranslate"><span class="pre">custom_all_reduce</span></code>
+kernel is adopted from vLLM but is not used by ReaL. It is kept here as
+legacy.</p>
+</section>
+<section id="id1">
+<h2>Examples<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h2>
+<section id="standalone-scripts">
+<h3>Standalone Scripts<a class="headerlink" href="#standalone-scripts" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/visualize_dfg.py">visualize_dfg.py</a></p></li>
+</ul>
+<p>This script is used to visualize the dataflow graph given a list of
+<a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> objects. It is useful for understanding the
+algorithm’s representation or when developing a new dataflow graph.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/load_and_eval_rw.py">load_and_eval_rw.py</a></p></li>
+</ul>
+<p>The critic model created by ReaL cannot be directly loaded by
+HuggingFace or vLLM. This script provides an example of how to load the
+trained reward model and evaluate it on some validation data.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The checkpoints of actor models can be directly loaded by HuggingFace
+or vLLM.</p>
+</div>
+</section>
+<section id="scripts-for-running-existing-experiments">
+<h3>Scripts for Running Existing Experiments<a class="headerlink" href="#scripts-for-running-existing-experiments" title="Link to this heading">¶</a></h3>
+<p>The corresponding subfolder contains examples using different scheduler
+backends, including local subprocesses, SLURM, or Ray. They differ in
+the <code class="docutils literal notranslate"><span class="pre">mode</span></code> argument in the command line. Please refer to
+<a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a> and <a class="reference internal" href="distributed.html"><span class="doc">Setting Up Distributed Experiments</span></a> for more details.</p>
+<p>The meanings of the command-line arguments for SFT, reward modeling,
+DPO, and PPO can be found in <a class="reference internal" href="quickstart.html"><span class="doc">Quickstart</span></a> and <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a>.
+Below, we provide additional explanations for some specific scripts.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/scripts/local/gen.sh">local/gen.sh</a></p></li>
+</ul>
+<p>This script loads trained checkpoints and runs local generation using
+ReaL. While users may be more familiar with HuggingFace’s or vLLM’s
+generation pipelines, ReaL also offers an original generation pipeline
+that achieves throughput on par with vLLM. The advantage of using ReaL’s
+generation pipeline is its scalability to larger models, multiple GPUs,
+and nodes. However, the generation options are more limited compared to
+vLLM (e.g., ReaL does not support beam search). This script runs the
+generate method in <code class="docutils literal notranslate"><span class="pre">realhf/impl/model/interface/gen_interface.py</span></code>.
+Users should modify this file to properly detokenize and save the
+generated results.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/scripts/local/ppo_manual.sh">local/ppo_manual.sh</a>
+and <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/scripts/local/ppo.sh">local/ppo.sh</a></p></li>
+</ul>
+<p>The former script uses manual allocations for all MFCs, while the latter
+uses a heuristic allocation mode provided by ReaL. If users wish to make
+manual allocations for distributed experiments, they can refer to
+<a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/scripts/local/ppo_manual.sh">local/ppo_manual.sh</a>
+to properly set device mesh strings.</p>
+<p>Customized algorithms typically involve implementing a new interface
+file and a new experiment configuration file so that the experiment can
+be launched using the Hydra command-line API.</p>
+<p>Beyond correct implementation, it is crucial to register the interface
+and experiment configuration at the end of the script. This allows users
+to launch the customized experiment through ReaL’s quickstart entry
+point, just like the built-in algorithms. For an example, see the end of
+<a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/grpo/grpo_exp.py">grpo_exp.py</a>.</p>
+<p>The bash scripts provided in each algorithm folder are used to launch
+the experiments.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/grpo/">GRPO</a>
+(<a class="reference external" href="https://arxiv.org/pdf/2402.03300">GRPO paper</a>)</p></li>
+</ul>
+<p>GRPO differs from PPO in that it generates a group of answers for each
+prompt, omits the critic model, and normalizes the advantage within each
+group. We repeat the prompts in the generation method of the interface
+and package each group of answers as a single piece of data (see
+<a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a> for details). We also modify the
+<a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> and the dataflow graph in the <code class="docutils literal notranslate"><span class="pre">rpcs</span></code> method of
+the experiment configuration.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/reinforce/">ReMax</a>
+(<a class="reference external" href="https://arxiv.org/abs/2310.10505">ReMax paper</a>)</p></li>
+</ul>
+<p>ReMax is a REINFORCE algorithm that uses the rewards of greedy
+generations as the baseline. It omits the reference and the critic
+model. The main changes compared to PPO are: (1) the loss function is
+modified from PPO to REINFORCE, (2) mini-batch updates are removed
+because REINFORCE is purely on-policy, and (3) the dataflow graph is
+altered to call generation and reward inference twice for sampled and
+greedy generations, respectively.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The modified dataflow graphs can be visualized using
+<a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/visualize_dfg.py">visualize_dfg.py</a>.</p>
+</div>
+</section>
+<section id="customized-experiments">
+<h3>Customized Experiments<a class="headerlink" href="#customized-experiments" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/cuxtomized_exp/ppo_sentiment.py">ppo_sentiment.py</a></p></li>
+</ul>
+<p>Implements a new reward interface that uses a pre-trained HuggingFace
+model to score the sentiment of generated content, instead of a BT
+reward model. It also modifies PPO’s configuration object to use the
+“null” model and model backend for reward inference in the MFC.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/examples/cuxtomized_exp/ppo_ref_ema.py">ppo_ref_ema.py</a></p></li>
+</ul>
+<dl class="simple">
+<dt>PPO with gradual updates to the reference model using an exponential moving average,</dt><dd><p>as proposed in <a class="reference external" href="https://arxiv.org/pdf/2404.10719">this paper</a>. It
+adds a unidirectional parameter reallocation hook from the MFC
+“actor_train” to “ref_inf”. This hook is triggered after the
+“actor_train” MFC is completed.</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="apis">
+<h2>APIs<a class="headerlink" href="#apis" title="Link to this heading">¶</a></h2>
+<section id="core-apis">
+<h3>Core APIs<a class="headerlink" href="#core-apis" title="Link to this heading">¶</a></h3>
+<p>The core APIs directly configure workers and operate at a lower level
+than the Quickstart APIs.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/core/config.py">config.py</a></p></li>
+</ul>
+<p>Basic concepts include <a class="reference internal" href="expconfig.html#realhf.ModelName" title="realhf.ModelName"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelName</span></code></a>,
+<a class="reference internal" href="expconfig.html#realhf.ModelShardID" title="realhf.ModelShardID"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelShardID</span></code></a>, and <a class="reference internal" href="expconfig.html#realhf.ModelFamily" title="realhf.ModelFamily"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelFamily</span></code></a>, which
+serve as worker-level configurations. The configuration objects
+typically have a <code class="docutils literal notranslate"><span class="pre">type_</span></code> field and an <code class="docutils literal notranslate"><span class="pre">args</span></code> field. The worker will
+locate the registered class using the name in <code class="docutils literal notranslate"><span class="pre">type_</span></code> and initialize
+it with the <code class="docutils literal notranslate"><span class="pre">args</span></code> field. For example, see the registration of
+datasets under <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/dataset">realhf/impl/dataset/</a>
+and the corresponding instantiation (e.g., <code class="docutils literal notranslate"><span class="pre">data_api.make_dataset</span></code>) in
+<a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/system/model_worker.py">realhf/system/model_worker.py</a>.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/core/data_api.py">data_api.py</a></p></li>
+</ul>
+<p>Defines the basic data structure <a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a>, along
+with utility functions for data processing and system-level
+configuration APIs, such as <code class="docutils literal notranslate"><span class="pre">register_dataset</span></code> and <code class="docutils literal notranslate"><span class="pre">make_dataset</span></code>.
+<code class="docutils literal notranslate"><span class="pre">register_dataset</span></code> is called when importing dataset implementations,
+and <code class="docutils literal notranslate"><span class="pre">make_dataset</span></code> is invoked by workers using the configuration
+objects defined in <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/core/config.py">config.py</a>.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/core/dfg.py">dfg.py</a></p></li>
+</ul>
+<p>Defines the dataflow graph.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/core/model_api.py">model_api.py</a></p></li>
+</ul>
+<p>Provides the system-level APIs for <a class="reference internal" href="expconfig.html#realhf.Model" title="realhf.Model"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.Model</span></code></a>,
+<a class="reference internal" href="expconfig.html#realhf.ModelInterface" title="realhf.ModelInterface"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelInterface</span></code></a>, and <a class="reference internal" href="expconfig.html#realhf.ModelBackend" title="realhf.ModelBackend"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelBackend</span></code></a>, along
+with transformer configurations. It also defines the APIs to convert a
+HuggingFace model into a <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code>.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/core/system_api.py">system_api.py</a></p></li>
+</ul>
+<p>Defines the scheduling and worker-level configuration APIs.</p>
+</section>
+<section id="huggingface-model-conversion">
+<h3>HuggingFace Model Conversion<a class="headerlink" href="#huggingface-model-conversion" title="Link to this heading">¶</a></h3>
+<p>Model conversion utilities for various models are defined under
+<a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/from_hf/">realhf/api/from_hf/</a>.
+To add a new model, you must define functions to convert the model’s
+config and state_dict back and forth. Please refer to
+<a class="reference internal" href="customization.html"><span class="doc">Customization</span></a> for detailed guides.</p>
+</section>
+<section id="quickstart-apis">
+<h3>Quickstart APIs<a class="headerlink" href="#quickstart-apis" title="Link to this heading">¶</a></h3>
+<p>Quickstart APIs simplify worker-level configuration by exposing several
+commonly used options to Hydra, such as learning rate, batch size, etc.
+These configurable objects are documented in <a class="reference internal" href="expconfig.html"><span class="doc">Configurations</span></a>.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/quickstart/dataset.py">dataset.py</a></p></li>
+</ul>
+<p>Configuration for three types of datasets.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/quickstart/device_mesh.py">device_mesh.py</a></p></li>
+</ul>
+<p>Defines the device mesh and MFC allocations.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/quickstart/model.py">model.py</a></p></li>
+</ul>
+<p>Configurations for the model, optimizer, and parallelism strategy.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/quickstart/entrypoint.py">entrypoint.py</a></p></li>
+</ul>
+<p>The registry and entrypoint for quickstart experiments. Quickstart will
+locate the experiment runner from the Hydra configuration store.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/api/quickstart/search.py">search.py</a></p></li>
+</ul>
+<p>APIs for the <code class="docutils literal notranslate"><span class="pre">search</span></code> allocation mode. Currently not functional.
+🙇🏻🙇🏻🙇🏻</p>
+</section>
+</section>
+<section id="base-modules">
+<h2>Base Modules<a class="headerlink" href="#base-modules" title="Link to this heading">¶</a></h2>
+<section id="parallelism-strategy">
+<h3>Parallelism Strategy<a class="headerlink" href="#parallelism-strategy" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py">constants.py</a></p>
+<p>Contains the per-process global constants for the parallelism
+strategy, environment variables, and default file paths for logging
+and checkpoints.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/topology.py">topology.py</a></p>
+<p>Defines the 3D topology of the device mesh, modified from DeepSpeed.
+The most useful object in this file is <code class="docutils literal notranslate"><span class="pre">ProcessTopology</span></code>, which can
+conveniently obtain the scalar sub-group rank given 3D parallelism
+ranks, or vice versa. <code class="docutils literal notranslate"><span class="pre">PipeModelDataParallelTopology</span></code> is retained
+for compatibility with DeepSpeed.</p>
+</li>
+</ul>
+</section>
+<section id="data-packing">
+<h3>Data Packing<a class="headerlink" href="#data-packing" title="Link to this heading">¶</a></h3>
+<p>ReaL does not pad sequences by default. All sequences with variable
+lengths are concatenated together into a single 1D tensor and input to
+the model, following the API of flash attention. While it’s easy to
+split padded sequences into mini-batches (i.e., slicing the batch
+dimension), splitting concatenated sequences is not as straightforward.
+Partitioning by the number of sequences can result in unbalanced
+mini-batches.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>While packed sequences may reduce GPU memory usage, they can increase
+memory fragmentation. We are unsure about the trade-off between the
+two.</p>
+</div>
+<p>To address this issue, ReaL implements a balanced partitioning algorithm
+in <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/datapacking.py">datapacking.py</a>.
+The algorithm ensures that the maximum length difference among different
+mini-batches is minimized. It is invoked in the <code class="docutils literal notranslate"><span class="pre">split</span></code> method of
+<a class="reference internal" href="expconfig.html#realhf.SequenceSample" title="realhf.SequenceSample"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.SequenceSample</span></code></a>.</p>
+<p>There is also a <code class="docutils literal notranslate"><span class="pre">reorder_to_balanced_batches</span></code> function that reorders
+the loaded data from the dataset such that (1) longer sequences appear
+in earlier batches to detect out-of-memory (OOM) issues, and (2) each
+batch has a nearly equal number of tokens. Since the optimal reordering
+is NP-hard, the function uses a greedy algorithm to approximate the
+optimal solution.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>For PPO, dataset reordering does not help detect OOM issues because
+the output length is determined by the Actor model.</p>
+</div>
+</section>
+<section id="names-and-name-resolving">
+<h3>Names and Name Resolving<a class="headerlink" href="#names-and-name-resolving" title="Link to this heading">¶</a></h3>
+<p>The launched workers require a synchronization mechanism to communicate
+with each other. This is achieved by writing and reading values in a
+distributed object store. All workers will wait until the required keys
+are written before proceeding. This can be implemented using Redis or
+simply a shared directory on the filesystem. <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/names.py">names.py</a>
+defines the keys to be written, and <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/name_resolve.py">name_resolve.py</a>
+defines the APIs to read and write values. When such an object store is
+not available, undefined behavior may occur.</p>
+<p>Name resolving is used when setting up communication channels between
+the master worker and model workers (e.g., when initializing the
+request-reply stream based on ZMQ sockets) and when initializing PyTorch
+process groups.</p>
+<ul>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/names.py">names.py</a></p>
+<p>Defines the keys to be written in the object store. These keys are
+specific to experiments and trials. Undefined behavior may occur if
+different trials use the same name and are launched simultaneously.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/gpu_utils.py">gpu_utils.py</a></p>
+<p>Provides utilities for isolating GPUs using name resolving. Each
+process will reveal its own identity on the cluster and will be
+assigned a unique GPU. The <code class="docutils literal notranslate"><span class="pre">CUDA_VISIBLE_DEVICES</span></code> environment
+variable will be set accordingly, ensuring that only a single GPU is
+visible to this process.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/name_resolve.py">name_resolve.py</a></p>
+<p>Defines the APIs for reading and writing values in the object store.
+The object store can be Redis or a shared directory on the
+filesystem.</p>
+</li>
+</ul>
+</section>
+</section>
+<section id="dataset-and-model-implementations">
+<h2>Dataset and Model Implementations<a class="headerlink" href="#dataset-and-model-implementations" title="Link to this heading">¶</a></h2>
+<section id="datasets">
+<h3>Datasets<a class="headerlink" href="#datasets" title="Link to this heading">¶</a></h3>
+<p>In ReaL, datasets are created directly from JSON or JSONL files. There
+is no prompt template in the code, so users must inject them manually.</p>
+<p>Additionally, ReaL requires that each piece of data has a unique entry
+called “id,” which is used to index data in the buffer of the master
+worker. This “id” can be any hashable object, such as a UUID, integer
+index, or string.</p>
+<p>For more details, please refer to the <a class="reference internal" href="customization.html"><span class="doc">Customization</span></a> guide.</p>
+<ul>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/dataset/prompt_answer_dataset.py">prompt_answer_dataset.py</a></p>
+<p>Used for SFT, where each piece of data should have a key “prompt” and
+the corresponding “answer.”</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/dataset/prompt_dataset.py">prompt_dataset.py</a></p>
+<p>Used for PPO, where each piece of data should have a key “prompt.”</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/dataset/rw_paired_dataset.py">rw_paired_dataset.py</a></p>
+<p>Used for reward modeling, where each piece of data should have a key
+“prompt,” a list of “pos_answers,” and a list of “neg_answers.”
+Positive and negative answers should be paired. Each prompt can have
+a different number of comparison pairs.</p>
+</li>
+</ul>
+</section>
+<section id="models">
+<h3>Models<a class="headerlink" href="#models" title="Link to this heading">¶</a></h3>
+<p>To optimize the performance of transformer models and support 3D
+parallelism, we have implemented a class called <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code> in
+<a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/nn/real_model_api.py">real_model_api.py</a>.
+It is more efficient than the implementations provided by HuggingFace
+Transformers and additionally supports parameter reallocation.</p>
+<ul>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/nn/">nn</a></p>
+<p>Contains the code for implementing <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code>. This module also
+flattens the parameters to support the parameter reallocation
+functionality.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/modules/">modules</a></p>
+<p>Includes the neural network components of <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code>.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/parallelism/">parallelism</a></p>
+<p>Provides model/tensor and pipeline parallelism support for
+<code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code>. The tensor parallelism modules are copied and modified
+from Megatron-LM.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/conversion/">conversion</a></p>
+<p>Contains utilities for converting HuggingFace models. Once
+registered, <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code> will have several new methods defined in
+<a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/__init__.py">realhf/impl/model/__init__.py</a>.
+For example, if a model family called “llama” is registered,
+<code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code> will support methods like “from_llama”, “to_llama”,
+“config_from_llama”, and “config_to_llama”, which convert checkpoints
+and configurations back and forth. If <code class="docutils literal notranslate"><span class="pre">ReaLModel</span></code> has loaded an HF
+checkpoint using “from_llama”, it will be able to save to the loaded
+model family using “save_to_hf”. ReaL enables distributed saving and
+loading with 3D parallelism, and the saved checkpoint is fully
+compatible with commonly used libraries such as Transformers and
+vLLM.</p>
+</li>
+</ul>
+</section>
+<section id="model-backends">
+<h3>Model Backends<a class="headerlink" href="#model-backends" title="Link to this heading">¶</a></h3>
+<p>All backends share the same signature, <a class="reference internal" href="expconfig.html#realhf.ModelBackend" title="realhf.ModelBackend"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.ModelBackend</span></code></a>, and
+produce an engine with the signature <a class="reference internal" href="expconfig.html#realhf.PipelinableEngine" title="realhf.PipelinableEngine"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.PipelinableEngine</span></code></a>.
+This engine will be used by all interface implementations.</p>
+<ul>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/backend/pipe_runner.py">pipe_runner.py</a></p>
+<p>Implements functions to run pipelined generation, inference, and
+training instructions. It is not a backend itself but is used by the
+model backends to execute the model.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/backend/inference.py">inference.py</a></p>
+<p>The inference backend, which supports only inference and generation.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/backend/deepspeed.py">deepspeed.py</a></p>
+<p>The training backend based on DeepSpeed. Internally, it also uses the
+inference engine for inference and generation. For training, it
+employs the DeepSpeed ZeRO optimizer. This is the only dependency on
+DeepSpeed.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The ZeRO optimizer in DeepSpeed holds a copy of the model
+parameters. Due to the complexity of the DeepSpeed code,
+integrating it with ReaL’s parameter flattening mechanism is
+challenging. As a result, parameter reallocation with the
+DeepSpeed backend may not correctly reallocate the <em>updated</em>
+parameters for other MFCs. Users might observe that the model does
+not learn as expected.</p>
+<p>ReaL will raise errors if parameter reallocation is attempted with
+the DeepSpeed backend.</p>
+</div>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/backend/megatron.py">megatron.py</a></p>
+<p>The training backend based on Megatron. Internally, it also uses the
+inference engine for inference and generation. For training, it uses
+the DDP module and the distributed optimizer from Megatron. This is
+the only dependency on Megatron. Only the Megatron backend supports
+parameter reallocation.</p>
+</li>
+</ul>
+</section>
+<section id="model-interfaces">
+<h3>Model Interfaces<a class="headerlink" href="#model-interfaces" title="Link to this heading">¶</a></h3>
+<p>An interface is a set of methods that will be called on a model. It is
+algorithmically specific. An algorithm, represented as a dataflow graph
+composed of MFCs, will subsequently find the configured interface
+implementation in <a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> and call the methods defined by
+the interface type (e.g., generate or inference).</p>
+<p>Please refer to <a class="reference internal" href="expconfig.html#realhf.MFCDef" title="realhf.MFCDef"><code class="xref py py-class docutils literal notranslate"><span class="pre">realhf.MFCDef</span></code></a> and <a class="reference internal" href="impl.html"><span class="doc">Implementation Details</span></a> for more details.</p>
+</section>
+<section id="communication">
+<h3>Communication<a class="headerlink" href="#communication" title="Link to this heading">¶</a></h3>
+<p>The initialization of process groups and the communication algorithm for
+data transfer and parameter reallocation are implemented in the <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/comm">comm</a>
+folder. All communications between GPUs are based on NCCL.</p>
+<ul>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/comm/global_comm.py">global_comm.py</a></p>
+<p>Initializes the global process group and sub-groups for different
+MFCs.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/comm/data_transfer.py">data_transfer.py</a></p>
+<p>Implements the data transfer algorithm based on NCCL broadcast.</p>
+</li>
+<li><p><a class="reference external" href="https://github.com/openpsi-project/ReaLHF/tree/main/realhf/impl/model/comm/param_realloc.py">param_realloc.py</a></p>
+<p>Implements the parameter reallocation algorithm based on NCCL
+broadcast.</p>
+</li>
+</ul>
+</section>
+</section>
 </section>
 
 </article>
         <aside class="nftt-toc my-3">
+          
+          <div class="my-sm-1 my-lg-0 ps-xl-3 text-muted">
+            <button class="btn btn-link link-dark p-lg-0 mb-2 mb-lg-0 text-decoration-none nftt-toc-toggle d-lg-none" type="button" data-bs-toggle="collapse" data-bs-target="#tocContents" aria-expanded="false" aria-controls="tocContents"
+            >On this page <i class="ms-2 bi bi-chevron-expand"></i></button>
+            <div class="title d-none d-lg-block">
+              <i class="bi bi-file-earmark-text"></i>&nbsp;&nbsp;<span class="small">On this page</span>
+            </div>
+            <div class="collapse nftt-toc-collapse" id="tocContents">
+              <nav id="TableOfContents">
+                <ul>
+<li><a class="reference internal" href="#">Code Architecture</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#id1">Examples</a><ul>
+<li><a class="reference internal" href="#standalone-scripts">Standalone Scripts</a></li>
+<li><a class="reference internal" href="#scripts-for-running-existing-experiments">Scripts for Running Existing Experiments</a></li>
+<li><a class="reference internal" href="#customized-experiments">Customized Experiments</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#apis">APIs</a><ul>
+<li><a class="reference internal" href="#core-apis">Core APIs</a></li>
+<li><a class="reference internal" href="#huggingface-model-conversion">HuggingFace Model Conversion</a></li>
+<li><a class="reference internal" href="#quickstart-apis">Quickstart APIs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#base-modules">Base Modules</a><ul>
+<li><a class="reference internal" href="#parallelism-strategy">Parallelism Strategy</a></li>
+<li><a class="reference internal" href="#data-packing">Data Packing</a></li>
+<li><a class="reference internal" href="#names-and-name-resolving">Names and Name Resolving</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#dataset-and-model-implementations">Dataset and Model Implementations</a><ul>
+<li><a class="reference internal" href="#datasets">Datasets</a></li>
+<li><a class="reference internal" href="#models">Models</a></li>
+<li><a class="reference internal" href="#model-backends">Model Backends</a></li>
+<li><a class="reference internal" href="#model-interfaces">Model Interfaces</a></li>
+<li><a class="reference internal" href="#communication">Communication</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+              </nav>
+            </div>
+          </div>
           
         </aside>
       </div>
     </div>
 
     <footer class="nftt-footer">
-      
-<nav id="paginator"></nav>
+      <nav id="paginator" class="py-4" aria-label="Documentation navigation">
+    <div class="container">
+      <ul class="pagination justify-content-between mb-0"><li class="d-flex page-item">
+            <a href="impl.html" class="d-flex px-5 align-items-end" rel="prev" aria-label="Previous page: Implementation Details">
+              <span class="prev-page"><i class="bi bi-caret-left"></i></span>
+              <div class="d-none d-sm-flex flex-column">
+                <span class="text-small text-start text-muted">Previous</span>
+                <span class="underline">Implementation Details</span>
+              </div>
+            </a>
+          </li>
+        <li class="d-flex page-item ms-auto">
+            <a href="contributing.html" class="d-flex px-5 align-items-end" rel="next" aria-label="Next page: Contributing">
+              <div class="d-flex flex-column">
+                <span class="text-small text-end text-start text-muted">Next</span>
+                <span class="underline">Contributing</span>
+              </div>
+              <span class="next-page"><i class="bi bi-caret-right"></i></span>
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </nav>
 
       <div class="py-5 px-4 px-md-3">
   <div class="container">
