@@ -8,7 +8,7 @@
 
 An algorithm in ReaL is represented as a *dataflow graph* (DFG), where
 each node is a *model function call* (MFC, e.g., generate, inference, or
-train_step called on an LLM), and each edge specifies the data or
+``train_step`` called on an LLM), and each edge specifies the data or
 parameter version dependency between nodes.
 
 The dataflow graph of PPO looks like this:
@@ -32,7 +32,7 @@ algorithm:
 .. note::
 
    In this representation, the dataflow graph of pre-training, SFT, or
-   reward modeling simplifies to a single train_step node.
+   reward modeling simplifies to a single ``train_step`` node.
 
 More examples can be found in the ``docs/images/dfg`` folder. Only data
 dependencies are shown in the figures above. Parameter version
@@ -47,12 +47,6 @@ function call specify their data dependencies. A list of
 :class:`realhf.MFCDef` objects is passed into the ``build_graph``
 function to construct a dataflow graph, which is an instance of
 ``networkx.DiGraph``.
-
-ReaL can efficiently parallelize both intra-node and inter-node
-computation across multiple GPUs. Intra-node parallelization is achieved
-using the well-known 3D parallelism strategy, commonly employed in
-pre-training. Inter-node parallelization involves overlapping or
-concurrently executing different nodes on different *device meshes*.
 
 A device mesh D is the unit used for executing an individual function
 call. It is defined as a two-dimensional grid of GPUs located in the
@@ -70,6 +64,65 @@ meshes of other MFCs.**
    consecutive portion capable of dividing the number of devices on one
    host, e.g., (1, 1), (1, 2), (1, 4), (1, 8), (2, 8), ..., (N, 8) in a
    cluster of (N, 8).
+
+For example, this `PPO training script
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/ppo_manual.sh>`_
+manually allocates all six MFCs to different device meshes with
+different parallel strategies. In particular, we have a (1, 8) global
+device mesh. We denote GPUs as g0, g1, ..., g7.
+
+-  Actor generation will run on all 8 GPUs, with a parallel strategy of
+   (DP=4, TP=1, PP=2).
+-  Critic inference will run on [g0, g1], with a parallel strategy of
+   (DP=2, TP=1, PP=1).
+-  Reward inference will run on [g2, g3], with a parallel strategy of
+   (DP=1, TP=1, PP=2).
+-  Reference inference will run on [g4, g5, g6, g7], with a parallel
+   strategy of (DP=1, TP=1, PP=4).
+-  Critic training will run on [g4, g5, g6, g7], with a parallel
+   strategy of (DP=2, TP=1, PP=2).
+-  Actor training will run on [g0, g1, g2, g3], with a parallel strategy
+   of (DP=2, TP=1, PP=2).
+
+Under this allocation, inference and training can be executed
+concurrently on disjoint device meshes, while generation uses the whole
+device mesh to maximize throughput.
+
+From the perspective of GPUs,
+
+-  g0 and g1 hold the first half layers of the actor for training.
+   Besides, the critic model will be reallocated from CPU to g0 upon
+   inference.
+
+-  g2 holds the second half layers of the actor for training. Besides,
+   the first half layers of the actor will be reallocated upon
+   generation, and the first half layers of the reward model will be
+   reallocated upon inference.
+
+-  g3 holds the second half layers of the actor for training. Besides,
+   the first half layers of the actor will be reallocated upon
+   generation, and the second half layers of the reward model will be
+   reallocated upon inference.
+
+-  g4 holds the first half layers of the critic for training. Besides,
+   the first quarter layers of the reference model will be reallocated
+   upon inference, and the second half layers of the actor will be
+   reallocated upon generation.
+
+-  g5 holds the first half layers of the critic for training. Besides,
+   the second quarter layers of the reference model will be reallocated
+   upon inference, and the second half layers of the actor will be
+   reallocated upon generation.
+
+-  g6 holds the second half layers of the critic for training. Besides,
+   the third quarter layers of the reference model will be reallocated
+   upon inference, and the second half layers of the actor will be
+   reallocated upon generation.
+
+-  g7 holds the second half layers of the critic for training. Besides,
+   the last quarter layers of the reference model will be reallocated
+   upon inference, and the second half layers of the actor will be
+   reallocated upon generation.
 
 The graph building is performed in ``realhf/api/core/system_api.py``
 during the post-initialization of experiment configurations. The
@@ -100,14 +153,15 @@ meshes are overlapped), ReaL switches the process group by using a
 <https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/constants.py>`_.
 The model name is provided by the MFC. Within the scope, the 3D
 parallelism groups specifically refer to the groups of this MFC.
+Otherwise, the DP/TP/PP parallelism group could not be accessed.
 
-In summary, there are three levels of process groups in ReaL. The
-innermost level is the data/tensor/pipeline parallel group for a
-specific MFC. The intermediate level is each MFC's sub-group. The
-outermost level is the global PyTorch global group created by
-``dist.init_process_group``. The conversion from the innermost level to
-the intermediate level is handled by the ``ProcessTopology`` class in
-`topology.py
+There are three levels of process groups in ReaL. The innermost level is
+the data/tensor/pipeline parallel group for a specific MFC. The
+intermediate level is each MFC's sub-group. The outermost level is the
+global PyTorch global group created by ``dist.init_process_group``.
+
+The conversion from the innermost level to the intermediate level is
+handled by the ``ProcessTopology`` class in `topology.py
 <https://github.com/openpsi-project/ReaLHF/tree/main/realhf/base/topology.py>`_,
 and the conversion from the intermediate level to the outermost level is
 managed by the ``rank_mapping`` dictionary in `constants.py
@@ -121,29 +175,20 @@ as [g0, ..., g7] and the GPUs on the second node as [g8, ..., g15]. The
 following process groups will be created:
 
 -  The global group: [g0, g1, g2, ..., g15], aka all GPUs.
-
 -  MFC#1's sub-group: [g8, g9, g10, g11, g12, g13, g14, g15], aka the
    second node.
-
 -  MFC#2's sub-group: [g0, g1, g2, ..., g15], aka all GPUs. This is a
-   virtual group and ReaL will just use the global group when we have
-   some operations on this sub-group.
-
+   virtual group and ReaL will just use the global group when we use it.
 -  MFC#1's 4 pipeline parallel groups: [g8, g12], [g9, g13], [g10, g14],
    [g11, g15].
-
 -  MFC#1's 4 tensor parallel groups: [g8, g9], [g10, g11], [g12, g13],
    [g14, g15].
-
 -  MFC#1's 4 data parallel groups: [g8, g10], [g9, g11], [g12, g14],
    [g13, g15].
-
 -  MFC#2's pipeline parallel group: [g0, g1, ..., g15]. This is also a
    virual group.
-
 -  MFC#2's 4 tensor parallel groups: [g0, g1, g2, g3], [g4, g5, g6, g7],
    [g8, g9, g10, g11], [g12, g13, g14, g15].
-
 -  MFC#2's 4 data parallel groups: [g0, g4, g8, g12], [g1, g5, g9, g13],
    [g2, g6, g10, g14], [g3, g7, g11, g15].
 
@@ -171,17 +216,17 @@ Recall that MFCs can have independent (either disjoint or overlapping)
 device meshes. From the perspective of a ModW or a GPU, it can host one
 or more MFCs. The MasW will execute the DFG and send requests to the
 corresponding handlers. Each request contains the handler name (e.g.,
-Actor or Critic), the interface type (e.g., generate or train_step), and
-some metadata (e.g., the input and output keys). Upon receiving the
-request, the ModW will locate the corresponding model, run the
-computation, and return the results to the MasW to update the
+Actor or Critic), the interface type (e.g., ``generate`` or
+``train_step``), and some metadata (e.g., the input and output keys).
+Upon receiving the request, the ModW will get the corresponding model,
+run the computation, and return the results to the MasW to update the
 dependency.
 
 Inherited from the base Worker class, both MasW and ModW run the
 ``_poll`` method inside a while-loop. The ``_poll`` method is their main
 task. Outside of the ``_poll`` method, they listen to the controller and
-update their internal states, allowing them to be paused, resumed, or
-stopped by the controller.
+update their internal worker states, allowing them to be paused,
+resumed, or stopped by the controller.
 
 The Procedure of Launching an Experiment
 ========================================
@@ -259,7 +304,7 @@ sent back to the MasW. This is implemented in the
 .. note::
 
    It doesn't need to implement all interface types; for example, an
-   interface for SFT only needs to implement the train_step method.
+   interface for SFT only needs to implement the ``train_step`` method.
 
 A :class:`realhf.ModelBackend` is a functor that wraps the
 :class:`realhf.Model` to provide additional functionalities like
@@ -275,7 +320,7 @@ and backends (see the ``__lazy_setup`` method in
 of the :class:`realhf.Model`. In the ModW, a :class:`realhf.MFCDef`, a
 :class:`realhf.Model`, a :class:`realhf.ModelInterface`, and a
 :class:`realhf.ModelBackend` are bound togather to handle a specific
-MFC, either generate, inference, or train_step.
+MFC, either ``generate``, ``inference``, or ``train_step``.
 
 .. note::
 
@@ -336,9 +381,9 @@ transfer data from the owner (or producer) to the consumer before MFC
 computation. This is implemented as **hooks** in requests. Since the
 MasW maintains global information, it can append the source and
 destination of the required data in the pre-hooks and send them to the
-relevant ModWs. The ModW will then trigger GPU-GPU data transfer via a
-broadcast-based algorithm to properly retrieve all the required data.
-This is implemented in the ``__handle_one_rpc_hook`` method in ModW.
+relevant ModWs. The ModW will then use this information to trigger
+GPU-GPU data transfer, which is based on NCCL broadcast. This is
+implemented in the ``__handle_one_rpc_hook`` method in ModW.
 
 Parameter Reallocation
 ======================
