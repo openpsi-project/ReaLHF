@@ -55,10 +55,6 @@ class DPOConfig(CommonExperimentConfig):
     :type dataset: PairedComparisonDatasetConfig
     :param beta: KL regularization coefficient.
     :type beta: float
-    :param actor_train_n_mbs: Number of microbatches for training the primary LLM.
-    :type actor_train_n_mbs: int
-    :param ref_inf_n_mbs: Number of microbatches for inference on the reference LLM.
-    :type ref_inf_n_mbs: int
     """
 
     is_sft_lora: bool = False

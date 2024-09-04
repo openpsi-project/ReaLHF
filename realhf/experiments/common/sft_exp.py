@@ -28,8 +28,6 @@ class SFTConfig(CommonExperimentConfig):
     :type allocation: MFCConfig
     :param dataset: Dataset configuration
     :type dataset: PromptAnswerDatasetConfig
-    :param n_mbs: Number of microbatches.
-    :type n_mbs: int
     """
 
     model: ModelTrainEvalConfig = dataclasses.field(

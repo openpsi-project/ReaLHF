@@ -37,8 +37,6 @@ class RWConfig(CommonExperimentConfig):
     :type allocation: MFCConfig
     :param dataset: Dataset configuration.
     :type dataset: PairedComparisonDatasetConfig
-    :param n_mbs: Number of microbatches.
-    :type n_mbs: int
     """
 
     is_sft_lora: bool = False
