@@ -171,18 +171,6 @@ class PPOConfig(CommonExperimentConfig):
     :type dataset: PromptOnlyDatasetConfig
     :param ppo: Configuration for the PPO algorithm.
     :type ppo: PPOHyperparameters
-    :param actor_train_n_mbs: Number of minibatches for TrainActor.
-    :type actor_train_n_mbs: int
-    :param critic_train_n_mbs: Number of minibatches for TrainCritic.
-    :type critic_train_n_mbs: int
-    :param actor_gen_n_mbs: Number of minibatches for Rollout.
-    :type actor_gen_n_mbs: int
-    :param critic_inf_n_mbs: Number of minibatches for InfValues.
-    :type critic_inf_n_mbs: int
-    :param rew_inf_n_mbs: Number of minibatches for InfReward.
-    :type rew_inf_n_mbs: int
-    :param ref_inf_n_mbs: Number of minibatches for InfRef.
-    :type ref_inf_n_mbs: int
     """
 
     is_sft_lora: bool = False

@@ -365,7 +365,7 @@ class ModelWorker(worker_base.Worker):
                     eval_dataloader = None
                 self.__eval_dataloaders[s.id.model_name] = eval_dataloader
 
-        self.__request_cache = []
+        self.__request_cache = {}
         self.__ack_cache = {}
 
         self.__request_queue = queue.Queue(maxsize=8)
@@ -607,6 +607,7 @@ class ModelWorker(worker_base.Worker):
                             del self.__data_sent_worker_indices[_id]
                         if _id in self.__data_received_worker_indices:
                             del self.__data_received_worker_indices[_id]
+                    gc.collect()
                     if (
                         self.config.cuda_cache_cleanliness
                         and self.__clear_cache_frequency.check()
@@ -852,24 +853,19 @@ class ModelWorker(worker_base.Worker):
                         handle_name="syn",
                     ),
                 )
-                self.__request_cache.append(r)
+                self.__request_cache[r.ack_reply_id] = r
         except request_reply_stream.NoMessage:
             return
 
     @cuda_tmark("receive_request", CUDATimeMarkType.misc)
     def maybe_receive_requests(self):
-        for _ in range(16):
-            self.__maybe_receive_one_request()
-
-        while len(self.__request_cache) > 0:
-            request: request_reply_stream.Payload = self.__request_cache[0]
-            while request.ack_reply_id not in self.__ack_cache:
-                self.__maybe_receive_one_request()
-
-            self.__ack_cache.pop(request.ack_reply_id)
-            self.__request_cache.pop(0)
-
-            self.__request_queue.put_nowait((request, request.data, False, None))
+        self.__maybe_receive_one_request()
+        cur_ack_ids = list(self.__ack_cache.keys())
+        for ack_id in cur_ack_ids:
+            if ack_id in self.__request_cache:
+                self.__ack_cache.pop(ack_id)
+                req = self.__request_cache.pop(ack_id)
+                self.__request_queue.put_nowait((req, req.data, False, None))
 
     def _poll(self):
         if not self.__dist_env_resolved:

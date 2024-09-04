@@ -93,7 +93,9 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
         if num_micro_batches is None:
             num_micro_batches = 1
         outputs = []
-        for mb_input in input_.split(num_micro_batches):
+        for mb_input in input_.split(
+            num_micro_batches, min_size=constants.pipe_parallel_world_size()
+        ):
             if constants.pipe_parallel_world_size() > 1:
                 model_output = self.pipe_runner.forward(
                     input_=mb_input,
@@ -138,7 +140,9 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
         if num_micro_batches is None:
             num_micro_batches = 1
         sequences, scores, logits_mask = [], [], []
-        for mb_input in input_.split(num_micro_batches):
+        for mb_input in input_.split(
+            num_micro_batches, min_size=constants.pipe_parallel_world_size()
+        ):
             if constants.pipe_parallel_world_size() > 1:
                 res = self.pipe_runner.generate(
                     input_=mb_input,

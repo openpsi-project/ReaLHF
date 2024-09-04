@@ -367,7 +367,7 @@ def _attach_payloads_with_hooks(
     return payloads, mwids
 
 
-async def _request_model_function_call(
+def _request_model_function_call(
     rpc: dfg.MFCDef,
     stream: request_reply_stream.NameResolvingRequestClient,
     msid2mwid: Dict[config_pkg.ModelShardID, int],
@@ -438,14 +438,10 @@ async def _request_model_function_call(
     )
     req_ids = [stream.post(p) for h, p in payloads.items() if h in handlers]
     other_req_ids = [stream.post(p) for h, p in payloads.items() if h not in handlers]
-    await asyncio.gather(
-        *[
-            _awaitable_response(
-                stream, pattern=create_exact_match_pattern([p.syn_reply_id])
-            )
-            for p in payloads.values()
-        ]
-    )
+    [
+        stream.poll(block=True, pattern=create_exact_match_pattern([p.syn_reply_id]))
+        for p in payloads.values()
+    ]
     [
         stream.post(
             request_reply_stream.Payload(
@@ -585,7 +581,7 @@ async def model_rpc_request_func(
             producer_mappings[names[0], k] = producer_mapping
 
         # send partitioned data to model workers
-        req_ids, other_req_ids = await _request_model_function_call(
+        req_ids, other_req_ids = _request_model_function_call(
             rpc=rpc,
             stream=stream,
             msid2mwid=msid2mwid,
@@ -984,9 +980,17 @@ class MasterWorker(worker_base.Worker):
 
         # Build some data required for subsequent model function calls.
         self.__all_model_handlers: List[config_pkg.ModelShardID] = []
+        self.__all_mw_handlers: List[config_pkg.ModelShardID] = []
+        _covered_mws = set()
         self.__dp0_model_handlers: List[config_pkg.ModelShardID] = []
         self.__trainable_model_handlers: List[config_pkg.ModelShardID] = []
         for model_name, topo in self.config.model_topos.items():
+            for j in range(topo.world_size()):
+                h = config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
+                _mw_id = self.config.msid2mwid[h]
+                if _mw_id not in _covered_mws:
+                    _covered_mws.add(_mw_id)
+                    self.__all_mw_handlers.append(h)
             num_dp = topo.get_dim("data")
             self.__all_model_handlers += [
                 config_pkg.ModelShardID.from_parallelism_rank(model_name, topo, j)
@@ -1487,9 +1491,9 @@ class MasterWorker(worker_base.Worker):
     def _clear_gpu_cache(self):
         request_all(
             self.__stream,
-            [vs[0] for vs in self.__mwid2msids.values()],
+            self.__all_mw_handlers,
             "clear_data_cache",
-            [self.__rpc_ctrl.ids_to_clear for _ in self.__all_model_handlers],
+            [self.__rpc_ctrl.ids_to_clear for _ in self.__all_mw_handlers],
         )
         self.__rpc_ctrl.ids_to_clear.clear()
 
@@ -1515,9 +1519,9 @@ class MasterWorker(worker_base.Worker):
         # Model workers will not respond to this message.
         request_all(
             self.__stream,
-            handlers=self.__all_model_handlers,
+            handlers=self.__all_mw_handlers,
             handle_type="reset",
-            datas=[None for _ in self.__all_model_handlers],
+            datas=[None for _ in self.__all_mw_handlers],
         )
         self.__stream.close()
         constants.reset_run()
