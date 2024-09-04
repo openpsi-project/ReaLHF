@@ -17,19 +17,17 @@ from realhf.experiments.common.common import CommonExperimentConfig
 
 @dataclasses.dataclass
 class SFTConfig(CommonExperimentConfig):
-    """SFT experiment configuration.
+    """Configuration for SFT experiments.
 
-    It is a subclass of :class:`CommonExperimentConfig`,
-    so all CLI options in the base class are available.
+    This class is a subclass of :class:`CommonExperimentConfig`,
+    so all CLI options from the base class are available.
 
-    :param model: Model runtime configuration.
+    :param model: Configuration for model runtime.
     :type model: ModelTrainEvalConfig
-    :param allocation: Device allocation and parallelism configuration.
+    :param allocation: Configuration for device allocation and parallelism.
     :type allocation: MFCConfig
-    :param dataset: Dataset configuration
+    :param dataset: Configuration for the dataset.
     :type dataset: PromptAnswerDatasetConfig
-    :param n_mbs: Number of microbatches.
-    :type n_mbs: int
     """
 
     model: ModelTrainEvalConfig = dataclasses.field(

@@ -55,106 +55,102 @@ logger = logging.getLogger("CommonExperimentConfig", "colored")
 
 @dataclasses.dataclass
 class CommonExperimentConfig(Experiment):
-    """The common config for quickstart experiments.
+    """Configuration for quickstart experiments.
 
-    All members can be changed by the user in the command line,
-    e.g.,
+    All members can be modified via the command line. For example,
 
     .. code-block:: shell
 
         $ python3 -m realhf.apps.quickstart sft trial_name=my_trial seed=42 exp_ctrl.save_freq_steps=10 ...
 
-    The above command changes the ``trial_name``, the ``seed`` attribute,
-    and the ``save_freq_steps`` attribute of the ``exp_ctrl`` attribute
-    of this class.
+    This command changes the ``trial_name``, ``seed``, and the ``save_freq_steps`` attribute
+    of the ``exp_ctrl`` attribute in this class.
 
-    ``recover_mode`` is one of the followings\:
+    ``recover_mode`` can be one of the following\:
 
-    - ``auto``\: automatically recover the last failed run.
+    - ``auto``\: Automatically recover the last failed run.
 
-    - ``save``\: save recover states if any error occurs.
+    - ``save``\: Save recovery states if an error occurs.
 
-    - ``resume``\: resume from saved recover states and save states if fail again.
+    - ``resume``\: Resume from saved recovery states and save states if a failure occurs again.
 
-    - ``disabled``\: do nothing but raise error when error occurs.
+    - ``disabled``\: Do nothing but raise an error if one occurs.
 
-    If you don't know how ReaL's recovery works, set it to be ``disabled``.
-    Normal checkpointing is usually sufficient for most cases.
+    If you are not familiar with ReaL's recovery mechanism, set this to ``disabled``.
+    Normal checkpointing is usually sufficient in most cases.
 
-    ``allocation_mode`` is one of the followings\:
+    ``allocation_mode`` can be one of the following\:
 
-    - ``manual``\: manually allocate resources with given commandline options.
+    - ``manual``\: Manually allocate resources using the specified command-line options.
 
-    - ``search``\: allocate resources and configure parallel strategies with the search engine.
+    - ``search``\: Allocate resources and configure parallel strategies using the search engine.
 
-    - ``heuristic``\: allocate resources and configure parallel strategies with heuristic strategies previously obtained by search.
+    - ``heuristic``\: Allocate resources and configure parallel strategies using heuristic strategies obtained from a search.
 
-    - ``pipe_data``\: identical parallelization (like DSChat) with pipe+data parallelism for all MFCs. A world size under 8 will use data parallelism only.
+    - ``pipe_data``\: Identical parallelization (like DSChat) with pipe+data parallelism. For a world size under 8, only data parallelism will be used.
 
-    - ``pipe_model``\: identical parallelization (like DSChat) with pipe+model parallelism for all MFCs. A world size under 8 will use tensor-model parallelism only.
+    - ``pipe_model``\: Identical parallelization (like DSChat) with pipe+model parallelism. For a world size under 8, only tensor-model parallelism will be used.
 
-    - A regex pattern like ``d${DP}p${PP}m${TP}``\: identical parallelization for all MFCs with ${DP}-way data parallelism, ${PP}-way pipeline parallelism, and ${TP}-way model parallelism.
+    - A regex pattern like ``d${DP}p${PP}m${TP}``\: Identical parallelization for all MFCs with ${DP}-way data parallelism, ${PP}-way pipeline parallelism, and ${TP}-way model parallelism.
 
-    :param experiment_name: Name of the experiment.
-        Arbitrary string without "_" and "/", e.g., ``ultra-chat-llama``.
-        Must be provided.
+    :param experiment_name: The name of the experiment.
+        An arbitrary string without "_" and "/", e.g., ``ultra-chat-llama``.
+        This parameter is required.
     :type experiment_name: str
-    :param trial_name: Name of the trial.
-        Arbitrary string without "-" and "/", e.g., ``lr1e-3wd0.05``.
-        Must be provided.
+    :param trial_name: The name of the trial.
+        An arbitrary string without "-" and "/", e.g., ``lr1e-3wd0.05``.
+        This parameter is required.
     :type trial_name: str
-    :param mode: Experiment launching mode. "local", "ray", or "slurm" are supported.
-        "ray" mode requires launching the ray cluster with CLI.
-        "slurm" mode requires the pyxis plugin with enroot container enabled.
-        The "local" mode implies ``n_nodes=1``.
+    :param mode: The experiment launching mode. Supported values are "local", "ray", or "slurm".
+        "ray" mode requires launching the Ray cluster via CLI.
+        "slurm" mode requires the Pyxis plugin with the Enroot container enabled.
+        "local" mode implies ``n_nodes=1``.
     :type mode: str
-    :param debug: Whether to run in the debug mode.
-        Setting to `False` will disable all assertions, which will be unsafe but faster.
+    :param debug: Whether to run in debug mode.
+        Setting this to `False` will disable all assertions, which will be faster but less safe.
     :type debug: bool
-    :param partition: The slurm partition to run the experiment.
+    :param partition: The SLURM partition for running the experiment.
     :type partition: str
-    :param wandb_mode: The mode of wandb. Currently the wandb logging is not supported.
+    :param wandb_mode: The mode for WandB. Currently, WandB logging is not supported.
     :type wandb_mode: str
-    :param image_name: The name of the docker image used by the controller.
-        Only used in the slurm mode.
+    :param image_name: The name of the Docker image used by the controller.
+        This parameter is only used in SLURM mode.
     :type image_name: str or None
-    :param recover_mode: The recover mode. See above.
+    :param recover_mode: The recovery mode. See above for details.
     :type recover_mode: str
     :param recover_retries: The number of retries for recovery.
-        Only effective when recover_mode is "auto".
+        Effective only when ``recover_mode`` is set to "auto".
     :type recover_retries: int
     :param ignore_worker_error: Whether to ignore errors raised by
-        workers during runtime. Please do not set it to be True unless
-        the user is sure that some error is ignorable.
-        Only effective when recover_mode is "disabled".
+        workers during runtime. Only set this to `True` if you are certain that the error can be ignored.
+        Effective only when ``recover_mode`` is set to "disabled".
     :type ignore_worker_error: bool
-    :param allocation_mode: Mode of GPU parallel strategy allocation. See above.
+    :param allocation_mode: The mode for GPU parallel strategy allocation. See above for details.
     :type allocation_mode: str
     :param allocation_use_cache: Whether to use cache in allocation search.
-        Only effective when allocation_mode=="search"
-        and cache is available in the log dir of current experiment
+        Effective only when ``allocation_mode`` is set to "search" and a cache is available in the log directory of the current experiment
         name and trial.
     :type allocation_use_cache: bool
-    :param n_nodes: Number of nodes to run the experiment.
+    :param n_nodes: The number of nodes to run the experiment.
     :type n_nodes: int
-    :param n_gpus_per_node: Number of GPUs per node.
+    :param n_gpus_per_node: The number of GPUs per node.
         Thus, the total number of GPUs will be ``n_nodes * n_gpus_per_node``.
         ReaL supports a world size of 1, 2, 4, 8, ... within a single node,
         or multiple nodes with the same number of GPUs.
     :type n_gpus_per_node: int
     :param nodelist: Nodelist for the distributed setting in SLURM nodelist format.
         Required for the ``manual`` allocation mode.
-        For several GPUs on a single node, it should be like "NODE01:0,1,2,3",
-        meaning that using the first 4 GPUs on the ``NODE01`` node.
-        For several complete nodes, it should be like "NODE[01-02,03,07],COM08",
-        meaning that using all GPUs for these nodes: [NODE01, NODE02, NODE03, NODE07, COM08].
+        For multiple GPUs on a single node, it should be formatted as "NODE01:0,1,2,3",
+        indicating the use of the first 4 GPUs on ``NODE01``.
+        For multiple complete nodes, it should be formatted as "NODE[01-02,03,07],COM08",
+        indicating the use of all GPUs on these nodes: [NODE01, NODE02, NODE03, NODE07, COM08].
     :type nodelist: str or None
-    :param seed: Random seed.
+    :param seed: The random seed.
     :type seed: int
     :param cache_clear_freq: The cache of data transfer will be cleared after each ``cache_clear_freq`` steps.
         If None, will not clear the cache. Set to a small number, e.g., 1, if OOM or CUDA OOM occurs.
     :type cache_clear_freq: int or None
-    :param exp_ctrl: The save and evaluation control of the experiment.
+    :param exp_ctrl: The control for saving and evaluating the experiment.
     :type exp_ctrl: ExperimentSaveEvalControl
     """
 

@@ -23,12 +23,21 @@ class OffloadHook:
 
 @dataclasses.dataclass
 class ParamReallocHook:
-    """Weights will be sent from source to target.
+    """Hook for reallocating weights between source and target.
 
-    Only one of source and target should be given. The other is the model name
-    of the hooked MFC.
+    Weights are transferred from the source model to the target model.
+    Only one of `source` or `target` should be provided; the other should be
+    the model name of the hooked MFC.
 
-    Weights will be updated as `target = eta * source + (1 - eta) * target`.
+    The weights are updated using the formula: `target = eta * source + (1 - eta) * target`.
+
+    :param source: The model name of the source from which weights are transferred.
+    :type source: Optional[ModelName]
+    :param target: The model name of the target to which weights are transferred.
+    :type target: Optional[ModelName]
+    :param eta: The weight for the source in the update formula. The default is 1.0,
+        meaning that the target will be completely overwritten by the source.
+    :type eta: float
     """
 
     source: Optional[ModelName] = None
@@ -43,61 +52,52 @@ RPCHook = Union[OffloadHook, ParamReallocHook]
 class MFCDef:
     """A model function call (MFC) object used by the workers.
 
-    MFC is the abbreviation of Model Function Call.
-    This object serves as the user interface for developing
-    new algorithms.
-    This object will be inserted in a nx.DiGraph as nodes.
-    Edges will be automatically resolved by input/output keys.
+    MFC stands for Model Function Call. This object serves as the interface for
+    developing new algorithms and will be inserted into an `nx.DiGraph` as nodes.
+    Edges will be automatically resolved based on input/output keys.
 
-    Fields starting with an underscore will be filled automatically.
+    Fields starting with an underscore are filled automatically.
 
-    NOTE: in implementation of ReaL, term RPC also refers to MFC.
+    **Note:** In the ReaL implementation, the term RPC also refers to MFC.
 
-    :param name: The unique identifier of this model function call.
+    :param name: The unique identifier for this model function call.
     :type name: str
     :param n_seqs: The number of sequences to be processed in a batch.
     :type n_seqs: int
-    :param interface_type: The interface type to be used
-        by the node (e.g., generate, train_step).
+    :param interface_type: The type of interface used by the node (e.g., generate, train_step).
     :type interface_type: ModelInterfaceType
-    :param interface_impl: The actual interface implementation
-        when running the this node.
+    :param interface_impl: The actual implementation of the interface when running this node.
     :type interface_impl: ModelInterface
-    :param model_name: The model identifier to be used by the node,
-        corresponding to an unique LLM. The user-provided model name
-        can just be a string. The replica ID will be resolved in ReaL.
+    :param model_name: The model identifier used by the node, corresponding to a unique LLM.
+        The user-provided model name can be a string; the replica ID will be resolved in ReaL.
     :type model_name: str or ModelName
-    :param input_keys: Input data keys, used to resolve dependencies.
+    :param input_keys: Input data keys used to resolve dependencies.
     :type input_keys: Tuple
-    :param output_keys: Output data keys, used to resolve dependencies.
+    :param output_keys: Output data keys used to resolve dependencies.
     :type output_keys: Tuple
-    :param input_key_remap: Remap input keys to let the interface implementation
-        recognize them. Keys are ``input_keys`` and values are the identifiers known to the
-        interface. We use remap to keep our interface code clean.
+    :param input_key_remap: Remap input keys to identifiers recognized by the interface implementation.
+        Keys are from `input_keys` and values are identifiers known to the interface.
     :type input_key_remap: Dict[str, str]
-    :param output_key_remap: Remap output keys to let MFC recognize them.
-        Keys are identifiers known to the interface and values are ``output_keys``.
+    :param output_key_remap: Remap output keys to identifiers recognized by MFC.
+        Keys are identifiers known to the interface, and values are from `output_keys`.
     :type output_key_remap: Dict[str, str]
-    :param n_mbs: Number of micro batches when executing this MFC.
-        If None, defaults to 1 if pipeline parallelism is disabled,
-        defaults to 2 * pp_size for train_step and pp_size for generate/inference
-        if pipeline parallelism is enabled.
-    :type n_mbs: int
-    :param balanced_dp: Whether to balance the data parallelism such that
-        each DP rank will get exactly n_seqs // dp_size sequences.
-        If set to False, ReaL will do partition according to the number of tokens.
-        If the lengths of sequences are not uniform, it may lead to unbalanced
-        sequence numbers, but balanced memory usage.
+    :param n_mbs: The number of micro-batches when executing this MFC. Defaults to 1 if
+        pipeline parallelism is disabled, or to 2 * pp_size for `train_step` and pp_size
+        for `generate`/`inference` if pipeline parallelism is enabled.
+    :type n_mbs: Optional[int]
+    :param balanced_dp: Whether to balance data parallelism so that each DP rank receives
+        exactly `n_seqs // dp_size` sequences. If False, ReaL will partition according to
+        the number of tokens. This may lead to unbalanced sequence numbers if sequence lengths
+        are not uniform, but ensures balanced memory usage.
     :type balanced_dp: bool
     :param log_return_value: Whether to log the return value of the interface implementation.
     :type log_return_value: bool
-    :param model_type: The specification of the LLM, e.g., LLaMA-7B.
-        Used by the profiler and search engine to produce an optimal execution plan.
-        Can be omited if the search engine is not used.
+    :param model_type: The specification of the LLM, e.g., LLaMA-7B. Used by the profiler and
+        search engine to produce an optimal execution plan. Can be omitted if the search engine
+        is not used.
     :type model_type: Optional[ModelFamily]
-    :param model_path: The path to the model file. Used to get the config
-        for the search engine.
-        Can be omited if the search engine is not used.
+    :param model_path: The path to the model file. Used to get the config for the search engine.
+        Can be omitted if the search engine is not used.
     :type model_path: Optional[str]
     """
 

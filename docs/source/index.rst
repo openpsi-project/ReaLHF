@@ -27,7 +27,11 @@ configuration are defined in ReaL (i.e., as a dataflow graph), but
 understanding the system-wide implementation (e.g., model workers) is
 not mandatory.
 
-Besides these tutorials, we present the reference manual of various
+For potential developers, please refer to the :doc:`impl` and the
+:doc:`arch` sections for a deeper understanding of the system
+architecture.
+
+Besides these illustrations, we present the reference manual of various
 configuration objects in the :doc:`expconfig` section, and a brief
 overview of the system architecture in the :doc:`intro` section.
 
@@ -44,6 +48,7 @@ overview of the system architecture in the :doc:`intro` section.
    quickstart
    distributed
    customization
-   .. arch
+   impl
+   arch
 
    contributing

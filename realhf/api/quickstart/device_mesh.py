@@ -291,23 +291,23 @@ class RPCAllocation:
 
 @dataclasses.dataclass
 class MFCConfig:
-    """Configuration for one MFC.
+    """Configuration for a single MFC.
 
-    :param n_mbs: Number of micro batches when executing this MFC. See
-        MFCDef for details.
+    :param n_mbs: Number of micro-batches when executing this MFC. Refer
+        to MFCDef for details.
     :type n_mbs: Optional[int]
-    :param parallel: Parallelism strategy configuration. Only used for
-        manual allocation.
+    :param parallel: Configuration for the parallelism strategy. This is
+        used only for manual allocation.
     :type parallel: ParallelismConfig
-    :param device_mesh: String representation for device mesh. If it is
-        composed of multiple nodes, it should be in the form of slurm
-        nodelist, e.g., node[01-02] or node01,node02. If it is a slice
-        on a single node, we restrict it occupies 1, 2, 4, or 8
-        contiguous GPUs in the node. In this case, the string
-        representation is similar to the MPI hostfile, e.g.,
-        "node01:0,1,2,3" for the first 4 GPUs on node01. Only used for
-        manual allocation.
-    :type device_mesh: str
+    :param device_mesh: String representation of the device mesh. If it
+        consists of multiple nodes, it should be formatted as a SLURM
+        nodelist, e.g., node[01-02] or node01,node02. If it represents a
+        slice on a single node, it should occupy 1, 2, 4, or 8
+        contiguous GPUs on the node. In this case, the string
+        representation is similar to an MPI hostfile, e.g.,
+        "node01:0,1,2,3" for the first 4 GPUs on node01. This is used
+        only for manual allocation.
+    :type device_mesh: Optional[str]
     """
 
     n_mbs: Optional[int] = None

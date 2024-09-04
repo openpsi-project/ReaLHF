@@ -13,18 +13,18 @@ logger = logging.getLogger("Quickstart Model Config")
 
 @dataclasses.dataclass(unsafe_hash=True)
 class ParallelismConfig:
-    """Model 3D parallelism configuration.
+    """Configuration for 3D parallelism.
 
-    :param model_parallel_size: Tensor-model parallelism size.
+    :param model_parallel_size: Size of tensor-model parallelism.
     :type model_parallel_size: int
-    :param pipeline_parallel_size: The number of pipeline parallelism
+    :param pipeline_parallel_size: Number of pipeline parallelism
         stages.
     :type pipeline_parallel_size: int
     :param data_parallel_size: Data parallelism size for ZeRO
         optimization.
     :type data_parallel_size: int
     :param use_sequence_parallel: Whether to use sequence parallelism in
-        Megatron combined with tensor-model parallelism.
+        Megatron in combination with tensor-model parallelism.
     :type use_sequence_parallel: bool
     """
 
@@ -71,34 +71,35 @@ class LoRAConfig:
 
 @dataclasses.dataclass
 class OptimizerConfig:
-    """Optimizer configuration.
+    """Configuration for the optimizer.
 
-    For models that will not be trained, its type should be "empty".
+    For models that will not be trained, the optimizer type should be
+    set to "empty".
 
-    :param type: Optimizer type. Currently only adam and empty optimizer
-        are supported.
+    :param type: Type of optimizer. Currently, only "adam" and "empty"
+        optimizers are supported.
     :type type: str
     :param lr: Learning rate.
     :type lr: float
     :param weight_decay: Weight decay.
     :type weight_decay: float
-    :param beta1: Adam beta1.
+    :param beta1: Adam beta1 parameter.
     :type beta1: float
-    :param beta2: Adam beta2.
+    :param beta2: Adam beta2 parameter.
     :type beta2: float
-    :param eps: Adam epsilon in the denominator.
+    :param eps: Adam epsilon parameter in the denominator.
     :type eps: float
     :param min_lr_ratio: Minimum learning rate ratio after learning rate
-        annealing. Should be in the interval of [0.0, 1.0].
+        annealing. Should be in the interval [0.0, 1.0].
     :type min_lr_ratio: float
-    :param lr_scheduler_type: Learning rate scheduler type. One of
-        "linear", "cosine", "constant".
+    :param lr_scheduler_type: Type of learning rate scheduler. One of
+        "linear", "cosine", or "constant".
     :type lr_scheduler_type: str
     :param warmup_steps_proportion: Proportion of total training steps
-        to warm up. Should be in the interval of [0.0, 1.0].
+        allocated for warming up. Should be in the interval [0.0, 1.0].
     :type warmup_steps_proportion: float
-    :param offload: Whether to offload optimizer to CPU. Only valid for
-        the deepspeed backend.
+    :param offload: Whether to offload the optimizer to CPU. Only valid
+        for the DeepSpeed backend.
     :type offload: bool
     """
 
@@ -130,50 +131,45 @@ class OptimizerConfig:
 
 @dataclasses.dataclass
 class ModelTrainEvalConfig:
-    """Model (or LLM) runtime configuration in ReaL.
+    """Runtime configuration for models (or LLMs) in ReaL.
 
-    We use a customized model class instead of HuggingFace's.
-    Our customized model has the following highlights:
+    We use a customized model class instead of HuggingFace's. This customized model has
+    the following highlights:
 
-    1. Support 3D parallelism and sequence parallelism.
+    1. Support for 3D parallelism and sequence parallelism.
 
-    2. Support flash attention for both training and generation.
+    2. Support for flash attention during both training and generation.
 
     3. Input sequences are packed into a single 1D tensor to save GPU memory and improve efficiency.
 
-    The price is that we need to convert each HuggingFace model
-    of interest to this customized model manually.
-    Implemented models can be found in the ``realhf/api/from_hf/`` directory.
+    Consequently, each HuggingFace model of interest needs to be manually converted to this
+    customized model. Implemented models can be found in the ``realhf/api/from_hf/`` directory.
 
     :param type: Model family type, e.g., llama, qwen2, etc.
     :type type: ModelFamily
-    :param backend: Backend for training.
-        Currently only "megatron" and "deepspeed" are supported.
-        For offloading parameters or optimizer states, use "deepspeed".
-        For parameter reallocation, use "megatron".
+    :param backend: Backend for training. Currently, only "megatron" and "deepspeed" are supported.
+        Use "deepspeed" for offloading parameters or optimizer states, and "megatron" for
+        parameter reallocation.
     :type backend: str
     :param path: Path or identifier of the HuggingFace checkpoint.
     :type path: str
-    :param lora: Whether to use LoRA.
-    :type lora: LoraConfig
-    :param gradient_checkpointing: Whether to use gradient checkpointing.
+    :param lora: Whether to use LoRA (Low-Rank Adaptation).
+    :type lora: Optional[LoRAConfig]
+    :param gradient_checkpointing: Whether to use gradient checkpointing to save memory.
     :type gradient_checkpointing: bool
-    :param enable_fp16: Whether to use fp16.
+    :param enable_fp16: Whether to use fp16 precision.
     :type enable_fp16: bool
-    :param enable_bf16: Whether to use bf16. Mutual exclusive with fp16.
+    :param enable_bf16: Whether to use bf16 precision. Mutually exclusive with fp16.
     :type enable_bf16: bool
-    :param offload: Whether to offload model parameters to CPU.
-        Only valid for the deepspeed backend.
+    :param offload: Whether to offload model parameters to CPU. Only valid for the DeepSpeed backend.
     :type offload: bool
-    :param parallel: Parallelism configuration.
+    :param parallel: Configuration for parallelism.
     :type parallel: ParallelismConfig
-    :param zero_stage: Stage of ZeRO optimization.
-        Should be one of 0, 1, 2, 3.
+    :param zero_stage: Stage of ZeRO optimization. Should be one of 0, 1, 2, or 3.
     :type zero_stage: int
-    :param optimizer: Optimizer configuration.
-    :type optimizer: OptimizerConfig
-    :param init_critic_from_actor: Whether to initialize a
-        critic/reward model from a saved LM checkpoint.
+    :param optimizer: Configuration for the optimizer.
+    :type optimizer: Optional[OptimizerConfig]
+    :param init_critic_from_actor: Whether to initialize a critic/reward model from a saved LM checkpoint.
     :type init_critic_from_actor: bool
     """
 

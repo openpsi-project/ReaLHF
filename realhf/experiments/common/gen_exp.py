@@ -20,18 +20,18 @@ from realhf.experiments.common.common import CommonExperimentConfig
 
 @dataclasses.dataclass
 class GenerationConfig(CommonExperimentConfig):
-    """Generation experiment configuration.
+    """Configuration for generation experiments.
 
-    It is a subclass of :class:`CommonExperimentConfig`,
-    so all CLI options in the base class are available.
+    This class is a subclass of :class:`CommonExperimentConfig`,
+    so all CLI options from the base class are available.
 
-    :param model: Model runtime configuration.
+    :param model: Runtime configuration for the model.
     :type model: ModelTrainEvalConfig
-    :param gen_params: Generation hyperparameters.
+    :param gen_params: Hyperparameters for generation.
     :type gen_params: GenerationHyperparameters
-    :param dataset: Dataset configuration
+    :param dataset: Configuration for the dataset.
     :type dataset: PromptOnlyDatasetConfig
-    :param allocation: Device allocation and parallelism configuration.
+    :param allocation: Configuration for device allocation and parallelism.
     :type allocation: MFCConfig
     """
 

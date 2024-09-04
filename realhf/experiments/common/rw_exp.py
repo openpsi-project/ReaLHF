@@ -18,27 +18,24 @@ from realhf.experiments.common.common import CommonExperimentConfig
 
 @dataclasses.dataclass
 class RWConfig(CommonExperimentConfig):
-    """Pairwise reward modeling experiment configuration.
+    """Configuration for pairwise reward modeling experiments.
 
-    It is a subclass of :class:`CommonExperimentConfig`,
-    so all CLI options in the base class are available.
+    This class is a subclass of :class:`CommonExperimentConfig`,
+    so all CLI options from the base class are available.
 
     :param is_sft_lora: Whether LoRA was used for SFT.
-        If so, the saved SFT model should only contain LoRA parameters.
-        Since LoRA is currently not supported for SFT,
-        this option is not used for now.
+        If LoRA was used, the saved SFT model should only contain LoRA parameters.
+        Since LoRA is currently not supported for SFT, this option is not utilized at present.
     :type is_sft_lora: bool
     :param sft_lora_path: Path to the LoRA model for SFT.
-        Since LoRA is currently not supported for SFT,
-        this option is not used for now.
-    :param model: Model runtime configuration.
+        Since LoRA is currently not supported for SFT, this option is not utilized at present.
+    :type sft_lora_path: str or None
+    :param model: Configuration for model runtime.
     :type model: ModelTrainEvalConfig
-    :param allocation: Device allocation and parallelism configuration.
+    :param allocation: Configuration for device allocation and parallelism.
     :type allocation: MFCConfig
-    :param dataset: Dataset configuration.
+    :param dataset: Configuration for the dataset.
     :type dataset: PairedComparisonDatasetConfig
-    :param n_mbs: Number of microbatches.
-    :type n_mbs: int
     """
 
     is_sft_lora: bool = False

@@ -20,45 +20,37 @@ logger = logging.getLogger("DPO Experiment")
 
 @dataclasses.dataclass
 class DPOConfig(CommonExperimentConfig):
-    """Direct Preference Optimization (DPO) experiment configuration.
+    """Configuration for Direct Preference Optimization (DPO) experiments.
 
-    It is a subclass of :class:`CommonExperimentConfig`,
-    so all CLI options in the base class are available.
+    This class is a subclass of :class:`CommonExperimentConfig`,
+    so all CLI options from the base class are available.
 
-    We don't implement runtime evaluation for DPO.
+    Note that runtime evaluation is not implemented for DPO.
 
     :param is_sft_lora: Whether LoRA was used for SFT.
-        If so, the saved SFT model should only contain LoRA parameters.
-        Since LoRA is currently not supported for SFT,
-        this option is not used for now.
+        If LoRA was used, the saved SFT model should only contain LoRA parameters.
+        Since LoRA is currently not supported for SFT, this option is not utilized at present.
     :type is_sft_lora: bool
     :param sft_lora_path: Path to the LoRA model for SFT.
-        Since LoRA is currently not supported for SFT,
-        this option is not used for now.
-    :param actor: Runtime configuration of the primary LLM.
+        Since LoRA is currently not supported for SFT, this option is not utilized at present.
+    :type sft_lora_path: str or None
+    :param actor: Runtime configuration for the primary LLM.
     :type actor: ModelTrainEvalConfig
-    :param ref: Runtime configuration of the reference LLM.
-        This model is only used for inference to provide KL regularization.
-        In ReaL, this model is automatically offloaded to CPU.
-        As a result, training DPO is as efficient as training a single LLM.
+    :param ref: Runtime configuration for the reference LLM.
+        This model is used only for inference to provide KL regularization.
+        In ReaL, this model is automatically offloaded to CPU,
+        making DPO training as efficient as training a single LLM.
     :type ref: ModelTrainEvalConfig
-    :param actor_train: Device allocation and parallelism configuration for
-        running training on the primary LLM.
+    :param actor_train: Device allocation and parallelism configuration for training on the primary LLM.
     :type actor_train: MFCConfig
-    :param ref_inf: Device allocation and parallelism configuration for
-        running inference on the reference LLM.
-        This can be different from the training allocation.
-        A large data parallel degree with additional pipelining
-        can be faster for inference.
+    :param ref_inf: Device allocation and parallelism configuration for inference on the reference LLM.
+        This configuration can differ from the training allocation.
+        A larger data parallel degree with additional pipelining can improve inference performance.
     :type ref_inf: MFCConfig
-    :param dataset: Dataset configuration. The same for reward modeling.
+    :param dataset: Configuration for the dataset, which is the same as for reward modeling.
     :type dataset: PairedComparisonDatasetConfig
     :param beta: KL regularization coefficient.
     :type beta: float
-    :param actor_train_n_mbs: Number of microbatches for training the primary LLM.
-    :type actor_train_n_mbs: int
-    :param ref_inf_n_mbs: Number of microbatches for inference on the reference LLM.
-    :type ref_inf_n_mbs: int
     """
 
     is_sft_lora: bool = False

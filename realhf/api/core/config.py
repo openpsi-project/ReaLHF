@@ -53,11 +53,13 @@ class ModelInterfaceType(enum.Enum):
 class ModelName:
     """A unique identifier for a model.
 
-    :param role: The role of the model, e.g. "actor", "critic".
+    :param role: The role of the model, e.g., "actor" or "critic".
     :type role: str
-    :param replica_id: The replica id of the model. Different replicas
-        of the same role have the same set of parameters with different
-        memory locations.
+    :param replica_id: The replica ID of the model. Different replicas
+        of the same role have the same set of parameters but different
+        memory locations. For example, if actor generation and training
+        in PPO use different parallel strategies, they will have the
+        same role but different replica IDs.
     :type replica_id: int
     """
 
@@ -71,17 +73,17 @@ class ModelName:
 
 @dataclasses.dataclass(unsafe_hash=True)
 class ModelFamily:
-    """An identifier for the HF model type, e.g., llama, gpt2, etc.
+    """An identifier for the HF model type, such as llama, gpt2, etc.
 
-    :param _class: The class of the model, e.g. "llama".
-        It's the registered name in the ``register_hf_family`` function.
-        Please check files in ``realhf/api/from_hf`` for all supported models.
+    :param _class: The class of the model, e.g., "llama". This is the registered
+        name in the ``register_hf_family`` function. Please refer to the files
+        in ``realhf/api/from_hf`` for a list of all supported models.
     :type _class: str
-    :param size: The size of the model. Only be used by the ``search``
-        allocation mode. Will be ignored otherwise.
+    :param size: The size of the model. This parameter is only used by the ``search``
+        allocation mode and will be ignored otherwise.
     :type size: int
-    :param is_critic: Whether the model is a critic or reward
-        instead of a normal LLM.
+    :param is_critic: Indicates whether the model is a critic or reward model,
+        as opposed to a standard LLM.
     :type is_critic: bool
     """
 
@@ -98,6 +100,30 @@ class ModelFamily:
 
 @dataclasses.dataclass
 class ModelShardID:
+    """The ID of a model shard in a specific model worker.
+
+    This ID is essentially a combination of the model name and the 3D
+    parallelism rank, and can be used as a dictionary key. It represents
+    the identity of a "model handler". The master worker maintains a
+    lookup table mapping the ModelShardID to the model worker index,
+    which can be a many-to-one mapping. Requests are created with the
+    ModelShardID; for example, actors with ranks (dp=*, mp=0, pp=0)
+    should transfer data to the critics. The ModelShardID is then mapped
+    to the model worker index, and the requests are sent to the
+    corresponding model workers.
+
+    :param model_name: The name of the model.
+    :type model_name: ModelName
+    :param dp_rank: The data parallel rank.
+    :type dp_rank: int
+    :param mp_rank: The tensor-model parallel rank.
+    :type mp_rank: int
+    :param pp_rank: The pipeline-model parallel rank.
+    :type pp_rank: int
+    :param topo: The 3D parallelism topology of this model.
+    :type topo: PipeModelDataParallelTopology
+    """
+
     model_name: ModelName
     dp_rank: int
     mp_rank: int
