@@ -48,7 +48,7 @@ python3 -m realhf.apps.quickstart dpo \
     ref_inf.parallel.model_parallel_size=1 \
     ref_inf.parallel.data_parallel_size=2 \
     ref_inf.parallel.use_sequence_parallel=True \
-    dataset.train_path=/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl \
+    dataset.train_path=.data/rm_paired-train.jsonl \
     dataset.max_pairs_per_prompt=2 \
     dataset.max_seqlen=1024 \
     dataset.train_bs_n_seqs=512 \

@@ -23,7 +23,7 @@ python3 examples/new_algorithms/grpo/grpo_exp.py grpo \
     rew.path=$RW_MODEL_PATH \
     ref.type._class=$MODEL_FAMILY \
     ref.path=$SFT_MODEL_PATH \
-    dataset.path=/lustre/fw/datasets/imdb/rl/ppo_prompt.jsonl \
+    dataset.path=.data/ppo_prompt.jsonl \
     dataset.max_prompt_len=128 \
     dataset.train_bs_n_seqs=32 \
     allocation_mode=heuristic \
