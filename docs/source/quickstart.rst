@@ -33,6 +33,9 @@ PPO.
    If you want to find more details about the configuration options,
    please check :doc:`expconfig`.
 
+Suppose the dataset has been placed under the ``.data/`` folder, now you
+are ready to run the RLHF process!
+
 Stage 1: Supervised Fine-Tuning
 ===============================
 
