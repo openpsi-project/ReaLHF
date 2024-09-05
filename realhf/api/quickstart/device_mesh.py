@@ -59,6 +59,7 @@ class DeviceMesh:
             self.name = device_mesh_name_from_mapping(
                 self.global_mesh_name, self.mapping
             )
+        assert self._is_valid_mapping()
 
     def __eq__(self, other: "DeviceMesh"):
         assert (
@@ -156,7 +157,11 @@ class DeviceMesh:
         ]
         if self.mapping.sum() < self.n_gpus_per_node:
             if not any(self.mapping.sum() == g for g in one_node_valid_gpus):
-                raise RuntimeError(f"Invalid mapping sum {self.mapping}")
+                raise RuntimeError(
+                    f"Invalid mapping {self.mapping}. "
+                    "If using GPUs less than an entire node, "
+                    "only 1, 2, 4, 8, ... GPUs are allowed."
+                )
         else:
             if not (
                 self.mapping.sum() % self.n_gpus_per_node == 0
@@ -167,7 +172,11 @@ class DeviceMesh:
                     )
                 )
             ):
-                raise RuntimeError(f"Invalid mapping sum {self.mapping}")
+                raise RuntimeError(
+                    f"Invalid mapping sum {self.mapping}. "
+                    "If using GPUs more than an entire node, "
+                    "only several complete nodes are allowed."
+                )
         if not are_ones_contiguous(self.mapping.flatten()):
             raise RuntimeError(f"mapping devices are not contiguous {self.mapping}")
         return True

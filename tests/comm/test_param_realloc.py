@@ -15,6 +15,7 @@ from realhf.api.core.config import ModelFamily, ModelName, ModelShardID
 from realhf.api.core.data_api import SequenceSample
 from realhf.api.core.model_api import HF_MODEL_FAMILY_REGISTRY, ReaLModelConfig
 from realhf.base import constants, logging, topology
+from realhf.base.datapack import flat2d
 from realhf.base.testing import (
     LocalMultiProcessTest,
     clear_name_resolve,
@@ -33,7 +34,7 @@ def compute_critic_loss(
 ) -> torch.Tensor:
     from realhf.impl.model.utils.functional import build_shift_one_indices
 
-    input_lens = torch.cat(input_.seqlens["packed_input_ids"])
+    input_lens = torch.tensor(flat2d(input_.seqlens["packed_input_ids"]))
     cu_seqlens = torch.nn.functional.pad(input_lens.cumsum(0), (1, 0)).int()
     shift_one_indices = build_shift_one_indices(logits, cu_seqlens)
     prompt_mask = input_.data["prompt_mask"][shift_one_indices]
@@ -139,6 +140,7 @@ def setup_constants_and_param_realloc(
         sequence_parallel=False,
         gradient_checkpointing=False,
         max_prompt_len=None,
+        gradient_accumulation_fusion=True,
     )
     to_topo = topology.PipeModelDataParallelTopology(
         num_dp=to_num_dp,
@@ -147,6 +149,7 @@ def setup_constants_and_param_realloc(
         sequence_parallel=False,
         gradient_checkpointing=False,
         max_prompt_len=None,
+        gradient_accumulation_fusion=True,
     )
 
     model_topos = {from_model_name: from_topo, to_model_name: to_topo}
@@ -269,7 +272,7 @@ class ParamRedistributer:
             pg_info=self.pg_info,
         )
         if m2 is not None and is_trainable(n1):
-            m2.patch_reparallelization((a, b))
+            m2.patch_reparallelization((a, b), eta=1.0)
 
         # if m1 is not None:
         #     assert m1.layers is None
@@ -485,7 +488,6 @@ def _test_para_realloc(
                             if not is_critic
                             else compute_critic_loss
                         ),
-                        num_micro_batches=constants.pipe_parallel_world_size() * 2,
                         version_steps=i,
                     )
 

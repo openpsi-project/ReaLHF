@@ -6,6 +6,7 @@ from typing import *
 import torch
 import torch.utils.data
 import transformers
+from packaging.version import Version
 
 import realhf.base.logging as logging
 from realhf.api.core.config import (
@@ -84,6 +85,13 @@ class GenerationHyperparameters:
             raise ValueError("top_p must be in (0.0, 1.0].")
         if self.top_k <= 0:
             raise ValueError("top_k must be a positive integer.")
+
+        if self.use_cuda_graph and Version(
+            Version(torch.__version__).base_version
+        ) < Version("2.3.0"):
+            raise ValueError(
+                f"To use CUDAGraph, ReaL's PyTorch version should be at least 2.3.0."
+            )
 
 
 @dataclasses.dataclass

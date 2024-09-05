@@ -17,30 +17,39 @@
 
 ***ReaL*** (short for *<ins>ReaL</ins>location*) is a distributed system designed for efficient RLHF training with LLMs. This is the library used to run experiments for the ICML 2024 Oral Paper [Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study](https://arxiv.org/pdf/2404.10719). 
 
-ReaL introduces a novel approach called *parameter reallocation*, which dynamically redistributes LLM parameters across the cluster and adapts parallelization strategies during training. By optimizing allocations and parallelism for each computation workload, ReaL minimizes redundant communication while maximizing GPU utilization.
-
-ReaL achieves significantly higher PPO training throughput compared to state-of-the-art open-source systems.
+ReaL introduces a novel approach called *parameter reallocation*, which dynamically redistributes LLM parameters across the cluster and adapts parallelization strategies during training. By optimizing allocations and parallelism for each computation workload, ReaL achieves significantly higher PPO training throughput compared to state-of-the-art open-source systems.
 
 (In the following figure, as the number of GPUs increases, the model size scales up from LLaMA 7B, LLaMA 13B, and CodeLLaMA 34B, to the largest LLaMA 70B.)
 
 ![Throughput Comparison](docs/source/images/vws.svg)
 
+## News 📢
+
+- **[2024/09/05]** Releasing ReaL v0.3.0 - MoE RLHF, CUDAGraph generation, mini-batched execution, and more customized algorithms.
+
+## Features
+
+- Large-scale and high-throughput SFT/reward modeling/DPO/PPO/generation.
+- MoE model training and generation.
+- PPO tricks, e.g. GAE, advantage/value normalization, and reference EMA.
+- State-of-the-art RLHF algorithms, e.g., [GRPO](https://github.com/openpsi-project/ReaLHF/tree/main/examples/new_algorithms/grpo).
+
 ## Highlights
 
-### Efficiency
+### 🚀 Efficiency
 
 - Achieves state-of-the-art training throughput for RLHF using **parameter reallocation**.
-- Supports large-scale training with 3D parallelism, ZeRO optimization, and sequence parallelism.
+- Supports high-throughput generation with CUDAGraph and large-scale training with 3D parallelism.
 - Enables memory-efficient training with parameter and optimizer offloading.
 
-### Ease of Use
+### ✨ Ease of Use
 
 - Seamlessly integrates with HuggingFace checkpoints and inference frameworks like vLLM. No checkpoint conversion required.
 - Allows launching local or distributed experiments via [Ray](https://docs.ray.io/en/latest/index.html) or [SLURM](https://slurm.schedmd.com/documentation.html) with a single command.
 
 Check out our [tutorial](https://openpsi-project.github.io/ReaLHF/quickstart.html) to reproduce the full RLHF procedure (SFT/RW/PPO) with 4×LLaMA-7B in just **30 minutes**.
 
-### Flexibility
+### 🎯 Flexibility
 
 - Offers versatile configuration customization with Hydra structured config.
 - Supports many commonly used RLHF algorithms, including DPO, PPO, RAFT, and more.
@@ -61,7 +70,7 @@ export MAX_JOBS=8
 # GPU dependencies, not required on the launcher node.
 pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.8 --no-deps --no-build-isolation
 pip install flash_attn==2.4.2 --no-build-isolation 
-pip install grouped_gemm  # For MoE
+pip3 install git+https://github.com/tgale96/grouped_gemm.git@v0.1.4 --no-build-isolation --no-deps  # For MoE
 
 REAL_CUDA=1 pip install -e . --no-build-isolation
 ```

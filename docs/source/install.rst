@@ -15,43 +15,24 @@ To pull the images, run:
 
 .. code:: console
 
-   $ docker pull docker.io/garrett4wade/real-cpu:22.04-${REAL_VERSION}
-   $ docker pull docker.io/garrett4wade/real-gpu:23.10-py3-${REAL_VERSION}
+   $ docker pull docker.io/garrett4wade/real-cpu:22.04-0.3.0
+   $ docker pull docker.io/garrett4wade/real-gpu:24.03-py3-0.3.0
 
 The CPU image is built from "ubuntu:22.04" and the GPU image is built
-from "nvcr.io/nvidia/pytorch:23.10-py3". You can check the latest
-package version `here
-<https://github.com/openpsi-project/ReaLHF/releases>`_.
+from "nvcr.io/nvidia/pytorch:24.03-py3". You can check the latest docker
+image version `here
+<https://hub.docker.com/r/garrett4wade/real-gpu/tags>`_.
 
 After pulling the Docker images, run your Docker container locally on a
 GPU node with the following command:
 
 .. code:: console
 
-   $ docker run -it --rm --gpus all garrett4wade/real-gpu:23.10-py3-${REAL_VERSION} bash
+   $ docker run -it --rm --gpus all --mount type=bind,src=/path/outside/container,dst=/realhf garrett4wade/real-gpu:24.03-py3-0.3.0 bash
 
-The source code is available at ``/realhf`` inside the container. This
-is an editable installation, so you can modify the code or run
-experiments directly.
-
-If you want to develop the code outside a Docker container, you should
-mount the code directory to the container, e.g.,
-
-.. code:: console
-
-   $ docker run -it --rm --gpus all --mount type=bind,src=/path/outside/container,dst=/realhf garrett4wade/real-gpu:23.10-py3-${REAL_VERSION} bash
-
-If your destination path is not ``/realhf``, remember to rerun the
-editable installation command after mounting:
-
-.. code:: console
-
-   $ REAL_CUDA=1 pip install -e /your/mounted/code/path --no-build-isolation
-
-.. note::
-
-   The ``REAL_CUDA`` environment variable is used to install the CUDA
-   extension.
+There is an editable installation at ``/realhf`` inside the container,
+so your change to the code outside the container should automatically
+takes effect.
 
 *****************************
  Install From PyPI or Source
@@ -59,7 +40,7 @@ editable installation command after mounting:
 
 If you prefer not to use the provided Docker image, you can also start
 with an image provided by NVIDA (e.g.,
-``nvcr.io/nvidia/pytorch:23.10-py3``) and install ReaL from PyPI or from
+``nvcr.io/nvidia/pytorch:24.03-py3``) and install ReaL from PyPI or from
 the source.
 
 .. note::
@@ -89,9 +70,9 @@ On a GPU machine, also install the required runtime packages:
 .. code:: console
 
    $ export MAX_JOBS=8  # Set the number of parallel jobs for compilation.
-   $ pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.4 --no-deps --no-build-isolation
+   $ pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.8 --no-deps --no-build-isolation
    $ pip install flash_attn==2.4.2 --no-build-isolation
-   $ pip install grouped_gemm  # For MoE
+   $ pip3 install git+https://github.com/tgale96/grouped_gemm.git@v0.1.4 --no-build-isolation --no-deps  # For MoE
 
 .. note::
 

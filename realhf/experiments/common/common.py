@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import os
 import pprint
 import re
 from collections import defaultdict
@@ -177,6 +178,9 @@ class CommonExperimentConfig(Experiment):
         default_factory=ExperimentSaveEvalControl
     )
 
+    def __post_init__(self):
+        self.__run_model_sanity_check()
+
     @property
     def models(self) -> Dict[str, ModelTrainEvalConfig]:
         """A dict mapping from model roles to model configurations.
@@ -324,7 +328,6 @@ class CommonExperimentConfig(Experiment):
 
         self.__check_legal_allocation_options()
 
-        para3d_pattern = r"d(\d+)p(\d+)m(\d+)"
         rpcs = self.rpcs
         if self.allocation_mode == "search":
             # assert self.mode == "slurm"
@@ -541,4 +544,40 @@ class CommonExperimentConfig(Experiment):
             if rpc.model_name.role not in self.models.keys():
                 raise ValueError(
                     f"RPC {rpc.name} model name {rpc.model_name.role} is not in models."
+                )
+
+    def __run_model_sanity_check(self):
+        for role, model in self.models.items():
+            if model.enable_bf16 and model.enable_fp16:
+                raise ValueError(
+                    f"For model `{role}`, enable_bf16 and"
+                    " enable_fp16 cannot be both True."
+                )
+            if (
+                model.offload or model.optimizer.offload
+            ) and model.backend != "deepspeed":
+                raise ValueError(
+                    f"For model `{role}`, offload is only"
+                    " valid for the deepspeed backend."
+                )
+            if model.backend == "megatron" and model.zero_stage in [3]:
+                raise ValueError(
+                    f"For model `{role}`, the Megatron backend"
+                    " only supports zero stage 0, 1 or 2."
+                )
+            if not os.path.exists(model.path):
+                raise FileNotFoundError(
+                    f"The model path `{model.path}` for `{role}` does not exist locally. "
+                    "You must download the HuggingFace checkpoint before loading it."
+                )
+            if model.optimizer.min_lr_ratio < 0.0 or model.optimizer.min_lr_ratio > 1.0:
+                raise ValueError(
+                    f"Invalid min_lr_ratio: {model.optimizer.min_lr_ratio}"
+                )
+            if (
+                model.optimizer.warmup_steps_proportion < 0.0
+                or model.optimizer.warmup_steps_proportion > 1.0
+            ):
+                raise ValueError(
+                    f"Invalid warmup_steps_proportion: {model.optimizer.warmup_steps_proportion}"
                 )

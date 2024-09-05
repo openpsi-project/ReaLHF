@@ -33,6 +33,9 @@ PPO.
    If you want to find more details about the configuration options,
    please check :doc:`expconfig`.
 
+Suppose the dataset has been placed under the ``.data/`` folder, now you
+are ready to run the RLHF process!
+
 Stage 1: Supervised Fine-Tuning
 ===============================
 
@@ -50,29 +53,9 @@ entry is a dictionary with two keys: "prompt" and "answer". For example:
    ``sft_pos-valid.jsonl`` are the training and validation sets for SFT,
    respectively.
 
-Run the following command to fine-tune the model on your dataset:
-
-.. code:: shell
-
-   $ python3 -m realhf.apps.quickstart sft \
-       experiment_name=quickstart-sft \
-       trial_name=release \
-       allocation_mode=manual \
-       mode=local \
-       n_nodes=1 \
-       exp_ctrl.total_train_epochs=8 \
-       exp_ctrl.save_freq_steps=50 \
-       exp_ctrl.eval_freq_epochs=1 \
-       model.type._class=llama \
-       model.path=/path/of/llama-7b \
-       dataset.train_path=/path/to/train/dataset.jsonl \
-       dataset.valid_path=/path/to/valid/dataset.jsonl \
-       dataset.max_seqlen=1024 \
-       allocation.parallel.pipeline_parallel_size=1 \
-       allocation.parallel.model_parallel_size=2 \
-       allocation.parallel.data_parallel_size=4 \
-       dataset.train_bs_n_seqs=512 \
-       dataset.valid_bs_n_seqs=512
+Run the command in `examples/local/sft.sh
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/sft.sh>`_
+to fine-tune the model on your dataset.
 
 .. note::
 
@@ -106,7 +89,7 @@ training logs in the console like this:
 
 The above output shows the log and checkpoint paths of this experiment,
 according to the given ``experiment_name`` and ``trial_name``. You can
-check the logs:
+check the logs and overrided configurations:
 
 .. code:: console
 
@@ -117,6 +100,8 @@ check the logs:
    $ cat /lustre/aigc/llm/logs/fw/quickstart-sft/release/master_worker-0
    $ # Check the runtime system metrics in the model worker.
    $ cat /lustre/aigc/llm/logs/fw/quickstart-sft/release/model_worker-0
+   $ # Check the adopoted configurations.
+   $ cat /lustre/aigc/llm/logs/fw/quickstart-sft/release/hydra-outputs/.hydra/overrides.yaml
 
 You can also check the checkpoints:
 
@@ -137,8 +122,9 @@ models. SFT has a single model named ``default``.
 
 The directory suffix indicates the step of this checkpoint. It's the
 checkpoint after 50 training steps at step 5 of epoch 7 (we have set
-``save_freq_steps=50``). You can change the save frequency by modifying
-the ``exp_ctrl`` attribute in :class:`realhf.SFTConfig`.
+``save_freq_steps=50``). You can change the save and evaluation
+frequency by modifying the ``exp_ctrl`` attribute in
+:class:`realhf.SFTConfig`.
 
 .. note::
 
@@ -171,11 +157,12 @@ Stage 2.1: Reward Modeling (RM)
 ===============================
 
 Prepare your customized dataset in a JSON or JSONL format, where each
-entry is a dictionary with three keys: "prompt", "pos_answer", and
+entry is a dictionary with three keys: "prompt", "pos_answers", and
 "neg_answers".
 
-"prompt" should be a string, while "pos_answer" and "neg_answers" should
-be lists of strings of the same size, forming pairwise comparisons.
+"prompt" should be a string, while "pos_answers" and "neg_answers"
+should be lists of strings of the same size, forming pairwise
+comparisons.
 
 .. note::
 
@@ -183,30 +170,16 @@ be lists of strings of the same size, forming pairwise comparisons.
    ``rm_paired-valid.jsonl`` are the training and validation sets for
    reward modeling, respectively.
 
-Run the following command to train the reward model:
+.. note::
 
-.. code:: shell
+   "pos_answers" and "neg_answers" may contain duplicated data. For
+   example, if a prompt has four answers and they have pairwise
+   comparisons, the length of "pos_answers" and "neg_answers" should be
+   six, and each answer will appear in three pairs.
 
-   $ python3 -m realhf.apps.quickstart rw \
-       experiment_name=quickstart-rw \
-       trial_name=release \
-       mode=local \
-       allocation_mode=manual \
-       exp_ctrl.total_train_epochs=1 \
-       exp_ctrl.save_freq_steps=5 \
-       exp_ctrl.eval_freq_epochs=1 \
-       model.type._class=llama \
-       model.type.is_critic=True \
-       model.path=/saved/sft/model/path \
-       allocation.parallel.pipeline_parallel_size=2 \
-       allocation.parallel.model_parallel_size=2 \
-       allocation.parallel.data_parallel_size=2 \
-       dataset.train_path=/path/to/train/dataset.jsonl \
-       dataset.valid_path=/path/to/valid/dataset.jsonl \
-       dataset.max_pairs_per_prompt=2 \
-       dataset.max_seqlen=1024 \
-       dataset.train_bs_n_seqs=512 \
-       dataset.valid_bs_n_seqs=512
+Run `examples/local/rw.sh
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/rw.sh>`_
+to train the reward model.
 
 It's a common practice to use the SFT model to initialize the reward
 model. Therefore, we can pass the path of the saved SFT model as
@@ -234,8 +207,10 @@ experiment name and trial name can be changed. Note that the saved RW
 checkpoint is not loadable by HuggingFace or vLLM, because the
 projection head has been changed.
 
-Please check ``examples/load_and_eval_rw.py`` as an example to load and
-use the trained reward model in a standalone script.
+Please check `examples/load_and_eval_rw.py
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/load_and_eval_rw.py>`_
+as an example to load and use the trained reward model in a standalone
+script.
 
 .. image:: images/rw_loss.svg
    :align: center
@@ -255,35 +230,10 @@ Besides the ordinary RLHF procedure with PPO, ReaL also supports the
 `DPO algorithm <https://arxiv.org/abs/2305.18290>`_, which avoids reward
 modeling.
 
-The dataset for DPO is exactly the same as for reward modeling.
-
-Run the following command to train using DPO:
-
-.. code:: shell
-
-   $ python3 -m realhf.apps.quickstart dpo \
-       experiment_name=quickstart-dpo \
-       trial_name=release \
-       allocation_mode=manual \
-       mode=local \
-       exp_ctrl.total_train_epochs=2 \
-       exp_ctrl.save_freq_steps=5 \
-       actor.type._class=llama \
-       actor.path=/saved/sft/model/path \
-       actor_train.parallel.pipeline_parallel_size=1 \
-       actor_train.parallel.model_parallel_size=4 \
-       actor_train.parallel.data_parallel_size=2 \
-       actor_train.parallel.use_sequence_parallel=True \
-       ref.type._class=llama \
-       ref.path=/saved/sft/model/path \
-       ref_inf.parallel.pipeline_parallel_size=1 \
-       ref_inf.parallel.model_parallel_size=2 \
-       ref_inf.parallel.data_parallel_size=4 \
-       ref_inf.parallel.use_sequence_parallel=True \
-       dataset.train_path=/path/to/train/dataset.jsonl \
-       dataset.max_seqlen=1024 \
-       dataset.train_bs_n_seqs=512 \
-       dataset.valid_bs_n_seqs=512
+The dataset for DPO is exactly the same as for reward modeling. Run
+`examples/local/dpo.sh
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/dpo.sh>`_
+to train DPO.
 
 Note that there's a major difference between DPO and SFT/RM. DPO
 involves **two** different models, the *actor* and the *reference*. The
@@ -302,9 +252,9 @@ A training iteration of DPO is composed of two steps:
 In ReaL, these two steps can run with different parallel strategies,
 maximizing the efficiency of the individual workloads. These parallel
 strategies can be specified in the ``ref_inf`` and ``actor_train``
-fields. Specifically, pipelined inference can be faster than
-tensor-paralleled inference due to the reduced communication overhead,
-so assigning a relatively large ``pipeline_parallel_size`` for
+fields. Under a moderate batch size, pipelined inference can be faster
+than tensor-paralleled inference due to the reduced communication
+overhead, so assigning a relatively large ``pipeline_parallel_size`` for
 ``ref_inf`` can be favorable.
 
 Moreover, ReaL can automatically *offload* the parameters of the
@@ -325,50 +275,26 @@ dictionary with a single key "prompt".
    In our provided sample, ``ppo_prompt.jsonl`` is the training set for
    PPO.
 
-Run the following command to train using PPO:
-
-.. code:: shell
-
-   $ python3 -m realhf.apps.quickstart ppo \
-       experiment_name=quickstart-ppo \
-       trial_name=release \
-       exp_ctrl.total_train_epochs=1 \
-       exp_ctrl.save_freq_steps=null \
-       allocation_mode=heuristic \
-       actor.type._class=llama \
-       actor.path=/saved/sft/model/path \
-       critic.type._class=llama \
-       critic.type.is_critic=True \
-       critic.path=/saved/rw/model/path \
-       critic.gradient_checkpointing=True \
-       ref.type._class=llama \
-       ref.path=/saved/sft/model/path \
-       rew.type._class=llama \
-       rew.type.is_critic=True \
-       rew.path=/saved/rw/model/path \
-       dataset.path=/path/to/prompt/dataset.jsonl \
-       dataset.max_prompt_len=256 \
-       dataset.train_bs_n_seqs=128 \
-       ppo.gen.max_new_tokens=256 \
-       ppo.gen.min_new_tokens=256 \
-       ppo.ppo_n_minibatches=4 \
-       ppo.kl_ctl=0.1 \
-       ppo.value_eps_clip=0.2 \
-       ppo.reward_output_scaling=10.0 \
-       ppo.adv_norm=True ppo.value_norm=True \
-       ppo.top_p=0.9 ppo.top_k=1000
+Run `examples/local/ppo.sh
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/ppo.sh>`_
+to train PPO.
 
 .. note::
 
    You can also pass in the trained DPO checkpoint to initialize the PPO
    actor.
 
-   If you want to direct initialize the critic model from a pre-trained
-   actor model instead of the reward model, you can set
-   ``critic.init_critic_from_actor=True`` and
-   ``reward.init_critic_from_actor=True``. This is also beneficial for
+   If you want to direct initialize the critic model with a random
+   projection head, you can set ``critic.init_critic_from_actor=True``
+   and ``reward.init_critic_from_actor=True``. This is helpful for
    benchmarking throughputs since checkpoints of SFT and reward modeling
    are not required.
+
+.. note::
+
+   The provided PPO command sets ``ppo.gen.min_new_tokens=512``. This is
+   for benchmarking purposes and should be changed to 0 for normal
+   training.
 
 The configuration options of PPO are the most complex among the three
 stages. PPO involves four different models: *Actor*, *Critic*,
@@ -391,18 +317,13 @@ function calls upon the same model, ReaL will automatically re-allocate
 model parameters between source and destination locations and properly
 remap parallel strategies.
 
-..
-   The reallocation also includes GPU-to-CPU reallocation, referred to as *offloading*.
-
-This technique can substantially reduce communication overhead caused by
-parallelization and improve GPU utilization. Please check :doc:`intro`
-for more details.
-
-In the above command, fields ``actor``, ``critic``, ``ref``, and ``rew``
+In provided command, fields ``actor``, ``critic``, ``ref``, and ``rew``
 specify the configurations of the four models. The allocations and
 parallel strategies for function calls are automatically handled by the
 ``heuristic`` allocation mode. This is a near-optimal execution strategy
-found by the search engine in ReaL.
+found by the search engine in ReaL. Relative code can be found in the
+``_heuristic_rpc_allocation`` method of `experiments/common/ppo_exp.py
+<https://github.com/openpsi-project/ReaLHF/blob/main/realhf/experiments/common/ppo_exp.py>`_.
 
 For the details of PPO hyperparameters in the ``ppo`` field, please
 check :class:`realhf.PPOHyperparameters` for a detailed explanation.
@@ -423,6 +344,25 @@ process **within half an hour!** This efficiency can largely help
 algorithm developers to search for the best hyperparameters and iterate
 on the algorithm design.
 
+We also provide additional PPO examples to use `symmetric
+parallelization
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/ppo_symm.sh>`_
+or `mini-batched training
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/ppo_minibatched.sh>`_
+when you encounter OOM issues.
+
+Stage 4: Evaluation
+===================
+
+After training, you can evaluate your trained model by generating
+responses for a given task. Although it is usally convinient to use
+external evaluation libraries, ReaL provides a build-in `generation
+script
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/scripts/local/gen.sh>`_.
+It also uses CUDAGraph, similar to vLLM, to reduce kernel launch
+overhead and accelerate the generation process. It's up to the user to
+decide whether to use the built-in script or external libraries.
+
 ***************
  The Next Step
 ***************
@@ -433,3 +373,10 @@ manage training hyperparameters, logs, and checkpoints within ReaL.
 Next, you can follow the :doc:`distributed` section to set up your
 experiments in a large cluster, or proceed to the :doc:`customization`
 section to learn how to customize the datasets, models, and algorithms.
+We provide examples for running PPO with reference EMA, the ReMax
+algorithm, and the GRPO algorithm under the `examples/
+<https://github.com/openpsi-project/ReaLHF/blob/main/examples/>`_
+directory.
+
+If you would like to deeply understand the implementation details of
+ReaL, please refer to :doc:`impl` and :doc:`arch`.

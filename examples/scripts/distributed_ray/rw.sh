@@ -46,8 +46,8 @@ python3 -m realhf.apps.quickstart rw \
     model.type._class=$MODEL_FAMILY \
     model.type.is_critic=True \
     model.path=$PRETRAINED_PATH \
-    dataset.train_path=/lustre/fw/datasets/imdb/rl/rm_paired-train.jsonl \
-    dataset.valid_path=/lustre/fw/datasets/imdb/rl/rm_paired-valid.jsonl \
+    dataset.train_path=.data/rm_paired-train.jsonl \
+    dataset.valid_path=.data/rm_paired-valid.jsonl \
     dataset.max_seqlen=1024 \
     dataset.train_bs_n_seqs=512 \
     dataset.valid_bs_n_seqs=512 \

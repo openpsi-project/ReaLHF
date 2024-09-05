@@ -16,7 +16,7 @@ sys.path.insert(0, (pathlib.Path(__file__).parents[2] / "realhf").resolve().as_p
 project = "ReaL"
 copyright = "2024, Wei Fu & Zhiyu Mei"
 author = "Wei Fu & Zhiyu Mei"
-release = "0.1.0"
+release = "0.3.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
