@@ -61,7 +61,7 @@ RUN pip3 install -r /requirements.txt && rm /requirements.txt
 RUN pip3 install git+https://github.com/NVIDIA/TransformerEngine.git@v1.8 --no-deps --no-build-isolation
 RUN pip3 install flash-attn==2.4.2 --no-build-isolation
 # Install grouped_gemm for MoE acceleration
-RUN pip3 install grouped_gemm
+RUN pip3 install git+https://github.com/tgale96/grouped_gemm.git@v0.1.4 --no-build-isolation --no-deps
 
 COPY . /realhf
 RUN REAL_CUDA=1 pip3 install -e /realhf --no-build-isolation

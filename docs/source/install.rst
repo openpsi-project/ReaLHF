@@ -72,7 +72,7 @@ On a GPU machine, also install the required runtime packages:
    $ export MAX_JOBS=8  # Set the number of parallel jobs for compilation.
    $ pip install git+https://github.com/NVIDIA/TransformerEngine.git@v1.8 --no-deps --no-build-isolation
    $ pip install flash_attn==2.4.2 --no-build-isolation
-   $ pip install grouped_gemm  # For MoE
+   $ pip3 install git+https://github.com/tgale96/grouped_gemm.git@v0.1.4 --no-build-isolation --no-deps  # For MoE
 
 .. note::
 

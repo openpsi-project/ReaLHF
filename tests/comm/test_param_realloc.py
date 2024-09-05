@@ -139,6 +139,7 @@ def setup_constants_and_param_realloc(
         sequence_parallel=False,
         gradient_checkpointing=False,
         max_prompt_len=None,
+        gradient_accumulation_fusion=True,
     )
     to_topo = topology.PipeModelDataParallelTopology(
         num_dp=to_num_dp,
@@ -147,6 +148,7 @@ def setup_constants_and_param_realloc(
         sequence_parallel=False,
         gradient_checkpointing=False,
         max_prompt_len=None,
+        gradient_accumulation_fusion=True,
     )
 
     model_topos = {from_model_name: from_topo, to_model_name: to_topo}
@@ -269,7 +271,7 @@ class ParamRedistributer:
             pg_info=self.pg_info,
         )
         if m2 is not None and is_trainable(n1):
-            m2.patch_reparallelization((a, b))
+            m2.patch_reparallelization((a, b), eta=1.0)
 
         # if m1 is not None:
         #     assert m1.layers is None

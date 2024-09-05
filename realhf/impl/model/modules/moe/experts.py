@@ -119,9 +119,7 @@ class GroupedMLP(torch.nn.Module):
         self.device = device
         self.num_experts = config.moe.num_experts
 
-        assert (
-            grouped_gemm is not None
-        ), "Grouped GEMM is not available. Please run `pip install grouped_gemm`."
+        assert grouped_gemm is not None, "Grouped GEMM is not available."
 
         self.activation_func = get_activation_fn(self.config.activation_function)
 
