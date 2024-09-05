@@ -9,10 +9,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="docsearch:name" content="ReaL" />
     <meta name="docsearch:package_type" content="" />
-    <meta name="docsearch:release" content="0.1.0" />
+    <meta name="docsearch:release" content="0.3.0" />
     <meta name="docsearch:version" content="" />
     
-      <title>Contributing &mdash; ReaL 0.1.0 documentation</title>
+      <title>Contributing &mdash; ReaL 0.3.0 documentation</title>
     
     <link rel="stylesheet" href="_static/bootstrap-icons.css" type="text/css" />
           <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments.css', priority=200, rel='stylesheet', type='text/css')" -->
@@ -29,7 +29,7 @@
           <link rel="stylesheet" type="text/css" href="_static/pygments_dark.css" />
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
-        <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
+        <link rel="top" title="ReaL 0.3.0 documentation" href="#" />
         <link rel="prev" title="Code Architecture" href="arch.html" />
     <style>
       :root {
@@ -236,6 +236,15 @@ pytest
 </pre></div>
 </div>
 </section>
+<section id="building-docker-images">
+<h2>Building Docker Images<a class="headerlink" href="#building-docker-images" title="Link to this heading">¶</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Build the GPU image</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>real-gpu:24.03-0.3.0<span class="w"> </span>-f<span class="w"> </span>Dockerfile<span class="w"> </span>--target<span class="w"> </span>gpu<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">REAL_GPU_BASE_IMAGE</span><span class="o">=</span>nvcr.io/nvidia/pytorch:24.03-py3<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">REAL_CPU_BASE_IMAGE</span><span class="o">=</span>ubuntu:22.04<span class="w"> </span>.
+<span class="c1"># Build the CPU image</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>real-cpu:22.04-0.3.0<span class="w"> </span>-f<span class="w"> </span>Dockerfile<span class="w"> </span>--target<span class="w"> </span>cpu<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">REAL_GPU_BASE_IMAGE</span><span class="o">=</span>nvcr.io/nvidia/pytorch:24.03-py3<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">REAL_CPU_BASE_IMAGE</span><span class="o">=</span>ubuntu:22.04<span class="w"> </span>.
+</pre></div>
+</div>
+</section>
 </section>
 
 </article>
@@ -254,6 +263,7 @@ pytest
 <li><a class="reference internal" href="#documentation">Documentation</a></li>
 <li><a class="reference internal" href="#formatting">Formatting</a></li>
 <li><a class="reference internal" href="#testing">Testing</a></li>
+<li><a class="reference internal" href="#building-docker-images">Building Docker Images</a></li>
 </ul>
 </li>
 </ul>
@@ -307,7 +317,7 @@ pytest
   </div>
 </div>
     </footer>
-    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/documentation_options.js?v=e259d695"></script>
     <script src="_static/doctools.js?v=9a2dae69"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
 

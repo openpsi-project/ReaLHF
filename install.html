@@ -9,10 +9,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="docsearch:name" content="ReaL" />
     <meta name="docsearch:package_type" content="" />
-    <meta name="docsearch:release" content="0.1.0" />
+    <meta name="docsearch:release" content="0.3.0" />
     <meta name="docsearch:version" content="" />
     
-      <title>Installation &mdash; ReaL 0.1.0 documentation</title>
+      <title>Installation &mdash; ReaL 0.3.0 documentation</title>
     
     <link rel="stylesheet" href="_static/bootstrap-icons.css" type="text/css" />
           <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments.css', priority=200, rel='stylesheet', type='text/css')" -->
@@ -29,7 +29,7 @@
           <link rel="stylesheet" type="text/css" href="_static/pygments_dark.css" />
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
-        <link rel="top" title="ReaL 0.1.0 documentation" href="#" />
+        <link rel="top" title="ReaL 0.3.0 documentation" href="#" />
         <link rel="next" title="Configurations" href="expconfig.html" />
         <link rel="prev" title="Introduction" href="intro.html" />
     <style>
@@ -204,42 +204,27 @@ offer a CPU-only image for launching experiments and a runtime GPU image
 for deployment in a cluster. The Dockerfile is also available in the
 repository.</p>
 <p>To pull the images, run:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-cpu:22.04-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span>
-<span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-gpu:23.10-py3-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-cpu:22.04-0.3.0
+<span class="gp">$ </span>docker<span class="w"> </span>pull<span class="w"> </span>docker.io/garrett4wade/real-gpu:24.03-py3-0.3.0
 </pre></div>
 </div>
 <p>The CPU image is built from “ubuntu:22.04” and the GPU image is built
-from “nvcr.io/nvidia/pytorch:23.10-py3”. You can check the latest
-package version <a class="reference external" href="https://github.com/openpsi-project/ReaLHF/releases">here</a>.</p>
+from “nvcr.io/nvidia/pytorch:24.03-py3”. You can check the latest docker
+image version <a class="reference external" href="https://hub.docker.com/r/garrett4wade/real-gpu/tags">here</a>.</p>
 <p>After pulling the Docker images, run your Docker container locally on a
 GPU node with the following command:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--rm<span class="w"> </span>--gpus<span class="w"> </span>all<span class="w"> </span>garrett4wade/real-gpu:23.10-py3-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span><span class="w"> </span>bash
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--rm<span class="w"> </span>--gpus<span class="w"> </span>all<span class="w"> </span>--mount<span class="w"> </span><span class="nv">type</span><span class="o">=</span>bind,src<span class="o">=</span>/path/outside/container,dst<span class="o">=</span>/realhf<span class="w"> </span>garrett4wade/real-gpu:24.03-py3-0.3.0<span class="w"> </span>bash
 </pre></div>
 </div>
-<p>The source code is available at <code class="docutils literal notranslate"><span class="pre">/realhf</span></code> inside the container. This
-is an editable installation, so you can modify the code or run
-experiments directly.</p>
-<p>If you want to develop the code outside a Docker container, you should
-mount the code directory to the container, e.g.,</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--rm<span class="w"> </span>--gpus<span class="w"> </span>all<span class="w"> </span>--mount<span class="w"> </span><span class="nv">type</span><span class="o">=</span>bind,src<span class="o">=</span>/path/outside/container,dst<span class="o">=</span>/realhf<span class="w"> </span>garrett4wade/real-gpu:23.10-py3-<span class="si">${</span><span class="nv">REAL_VERSION</span><span class="si">}</span><span class="w"> </span>bash
-</pre></div>
-</div>
-<p>If your destination path is not <code class="docutils literal notranslate"><span class="pre">/realhf</span></code>, remember to rerun the
-editable installation command after mounting:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">REAL_CUDA</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/your/mounted/code/path<span class="w"> </span>--no-build-isolation
-</pre></div>
-</div>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>The <code class="docutils literal notranslate"><span class="pre">REAL_CUDA</span></code> environment variable is used to install the CUDA
-extension.</p>
-</div>
+<p>There is an editable installation at <code class="docutils literal notranslate"><span class="pre">/realhf</span></code> inside the container,
+so your change to the code outside the container should automatically
+takes effect.</p>
 </section>
 <section id="install-from-pypi-or-source">
 <h2>Install From PyPI or Source<a class="headerlink" href="#install-from-pypi-or-source" title="Link to this heading">¶</a></h2>
 <p>If you prefer not to use the provided Docker image, you can also start
 with an image provided by NVIDA (e.g.,
-<code class="docutils literal notranslate"><span class="pre">nvcr.io/nvidia/pytorch:23.10-py3</span></code>) and install ReaL from PyPI or from
+<code class="docutils literal notranslate"><span class="pre">nvcr.io/nvidia/pytorch:24.03-py3</span></code>) and install ReaL from PyPI or from
 the source.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -261,9 +246,9 @@ Docker images.</p>
 </div>
 <p>On a GPU machine, also install the required runtime packages:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">MAX_JOBS</span><span class="o">=</span><span class="m">8</span><span class="w">  </span><span class="c1"># Set the number of parallel jobs for compilation.</span>
-<span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>git+https://github.com/NVIDIA/TransformerEngine.git@v1.4<span class="w"> </span>--no-deps<span class="w"> </span>--no-build-isolation
+<span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>git+https://github.com/NVIDIA/TransformerEngine.git@v1.8<span class="w"> </span>--no-deps<span class="w"> </span>--no-build-isolation
 <span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span><span class="nv">flash_attn</span><span class="o">==</span><span class="m">2</span>.4.2<span class="w"> </span>--no-build-isolation
-<span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>grouped_gemm<span class="w">  </span><span class="c1"># For MoE</span>
+<span class="gp">$ </span>pip3<span class="w"> </span>install<span class="w"> </span>git+https://github.com/tgale96/grouped_gemm.git@v0.1.4<span class="w"> </span>--no-build-isolation<span class="w"> </span>--no-deps<span class="w">  </span><span class="c1"># For MoE</span>
 </pre></div>
 </div>
 <div class="admonition note">
@@ -367,7 +352,7 @@ source code and install it from the source.</p>
   </div>
 </div>
     </footer>
-    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/documentation_options.js?v=e259d695"></script>
     <script src="_static/doctools.js?v=9a2dae69"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
 

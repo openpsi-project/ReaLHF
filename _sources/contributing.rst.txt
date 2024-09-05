@@ -77,3 +77,14 @@ The GitHub Pages will be updated automatically after the PR is merged.
    pytest -m "not distributed"
    # On a node with multiple GPUs, run all tests
    pytest
+
+************************
+ Building Docker Images
+************************
+
+.. code:: bash
+
+   # Build the GPU image
+   docker build -t real-gpu:24.03-0.3.0 -f Dockerfile --target gpu --build-arg REAL_GPU_BASE_IMAGE=nvcr.io/nvidia/pytorch:24.03-py3 --build-arg REAL_CPU_BASE_IMAGE=ubuntu:22.04 .
+   # Build the CPU image
+   docker build -t real-cpu:22.04-0.3.0 -f Dockerfile --target cpu --build-arg REAL_GPU_BASE_IMAGE=nvcr.io/nvidia/pytorch:24.03-py3 --build-arg REAL_CPU_BASE_IMAGE=ubuntu:22.04 .
