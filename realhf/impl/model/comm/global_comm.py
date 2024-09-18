@@ -121,9 +121,10 @@ def setup_global_comm(
     # This environment variable is used by DeepSpeed.
     os.environ["LOCAL_RANK"] = "0"
 
-    torch.distributed.init_process_group(
-        **torch_dist_kwargs, group_name=gpu_utils.GLOBAL_PROCESS_GROUP_NAME
-    )
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(
+            **torch_dist_kwargs, group_name=gpu_utils.GLOBAL_PROCESS_GROUP_NAME
+        )
 
     model_groups = {}
     for model_name, ranks in mw_ranks.items():
