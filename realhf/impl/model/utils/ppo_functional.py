@@ -123,37 +123,6 @@ def actor_loss_fn(
     return pg_loss, stat
 
 
-def memory_efficient_ppo_loss_fn(
-    logits,
-    cu_seqlens,
-    packed_input_ids,
-    ppo_loss_mask,
-    old_logprobs,
-    advantages,
-    eps_clip,
-):
-    if constants.model_parallel_world_size() == 1:
-        return _MemoryEfficientPPOActorLossFn.apply(
-            logits,
-            cu_seqlens,
-            packed_input_ids,
-            ppo_loss_mask,
-            old_logprobs,
-            advantages,
-            eps_clip,
-        )
-    else:
-        return _VocabParallelMemoryEfficientPPOLoss.apply(
-            logits,
-            cu_seqlens,
-            packed_input_ids,
-            ppo_loss_mask,
-            old_logprobs,
-            advantages,
-            eps_clip,
-        )
-
-
 def _huber_loss(x: torch.Tensor, y: torch.Tensor, delta: float):
     diff = torch.abs(x - y)
     return torch.where(diff < delta, 0.5 * diff**2, delta * (diff - 0.5 * delta))
