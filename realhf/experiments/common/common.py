@@ -434,6 +434,7 @@ class CommonExperimentConfig(Experiment):
                     model_path=model_cfg.path,
                     hf_model_family=model_cfg.type._class,
                     is_critic=model_cfg.type.is_critic,
+                    init_from_scratch=model_cfg.init_from_scratch,
                     init_critic_from_actor=model_cfg.init_critic_from_actor,
                     dtype="bf16" if model_cfg.enable_bf16 else "fp16",
                     lora=model_cfg.lora,

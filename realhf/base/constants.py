@@ -94,7 +94,7 @@ BASE_ENVIRONS = {
     # "NCCL_COMM_BLOCKING": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_COMM_BLOCKING is set to 1.
     # "NCCL_BLOCKING_WAIT": "1",  # NOTE: CUDAGraph Capturing will not work if NCCL_BLOCKING_WAIT is set to 1.
     # "TORCH_SHOW_CPP_STACKTRACES": "1",
-    "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
+    # "RAY_DEDUP_LOGS": "0",  # disable ray log deduplication
     "CUDA_DEVICE_MAX_CONNECTIONS": "1",
     "PYTHONUSERBASE": "/nonsense",  # a random PYTHONUSERBASE to avoid local user site-packages interference
     "OMP_NUM_THREADS": str(min(os.cpu_count(), 32)),

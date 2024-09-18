@@ -13,7 +13,6 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import colorama
-import deepspeed
 import numpy as np
 import torch
 import torch.distributed

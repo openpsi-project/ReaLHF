@@ -171,6 +171,7 @@ class ModelTrainEvalConfig:
     optimizer: Optional[OptimizerConfig] = dataclasses.field(
         default_factory=OptimizerConfig
     )
+    init_from_scratch: bool = False
     init_critic_from_actor: bool = False
 
 
@@ -178,6 +179,7 @@ def get_real_model_config(
     model_path: str,
     hf_model_family: str,
     is_critic: bool,
+    init_from_scratch: bool,
     init_critic_from_actor: bool,
     dtype: Optional[str] = None,
     # LoRA config
@@ -196,6 +198,7 @@ def get_real_model_config(
             init_critic_from_actor=init_critic_from_actor,
             dtype=dtype,
             hf_model_family=hf_model_family,
+            init_from_scratch=init_from_scratch,
         ),
     )
     if is_sft_lora:

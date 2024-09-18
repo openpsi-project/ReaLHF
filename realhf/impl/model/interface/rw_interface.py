@@ -4,7 +4,6 @@ import os
 from typing import Dict, Optional
 
 import colorama
-import deepspeed
 import torch
 import torch.distributed as dist
 import tqdm
