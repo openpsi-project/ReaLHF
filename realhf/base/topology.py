@@ -34,7 +34,9 @@ def destroy_all_comm_groups():
     for group in GLOBAL_PROCESS_GROUP_REGISTRY.values():
         dist.destroy_process_group(group)
     GLOBAL_PROCESS_GROUP_REGISTRY = {}
-    dist.destroy_process_group()
+    # Destroying the default group will raise an error
+    # for the latest pytorch release. Omit it as a workaround.
+    # dist.destroy_process_group()
 
 
 def decompose_to_three_factors(n: int) -> List[Tuple[int, int, int]]:
