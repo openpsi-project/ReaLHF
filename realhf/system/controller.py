@@ -481,6 +481,12 @@ class RayController:
                 self.__workers_ref[name] = job
                 self.__workers_request_comm[name] = c[0]
                 self.__workers_reply_comm[name] = c[1]
+            # Perform a poll step on remote jobs to let them raise setup errors,
+            # e.g., ImportError, ModuleNotFoundError, etc.
+            try:
+                ray.get(jobs, timeout=1)
+            except ray.exceptions.GetTimeoutError:
+                pass
             logger.info(f"Launched {count} {worker_type}.")
 
         panel = worker_control.make_control(
