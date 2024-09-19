@@ -413,7 +413,7 @@ class RayController:
         self.__workers_ref = None
 
     def _launch_workers(
-        self, workers_configs: List[Tuple[str, List, system_api.TasksGroup]]
+        self, worker_counts: List[Tuple[str, int, system_api.TasksGroup]]
     ):
         # Launch remote workers.
         logger.info("Launching remote workers using Ray...")
@@ -423,7 +423,7 @@ class RayController:
 
         # Count the total required resources and check whether Ray currently has enough of them.
         cpu = gpu = mem = 0.0
-        for worker_type, config, schedule in workers_configs:
+        for worker_type, _, schedule in worker_counts:
             if not isinstance(schedule, List):
                 schedule = [schedule]
             for s in schedule:
@@ -443,8 +443,7 @@ class RayController:
             )
 
         # Launch ray jobs.
-        for worker_type, config, schedule in workers_configs:
-            count = len(config)
+        for worker_type, count, schedule in worker_counts:
             all_schedules: List[system_api.TasksGroup] = []
             if isinstance(schedule, List):
                 for s in schedule:
@@ -457,7 +456,7 @@ class RayController:
                     s_ = copy.deepcopy(schedule)
                     s_.count = 1
                     all_schedules.append(s_)
-            assert len(all_schedules) == len(config)
+            assert len(all_schedules) == count
             comms = [(rq.Queue(maxsize=8), rq.Queue(maxsize=8)) for _ in all_schedules]
             world_size = len(all_schedules)
             jobs = [
@@ -504,20 +503,18 @@ class RayController:
     def start(self, experiment: system_api.Experiment, ignore_worker_error=False):
         scheduling: system_api.ExperimentScheduling = experiment.scheduling_setup()
         setup = experiment.initial_setup()
-        setup.set_worker_information(
-            experiment_name=self.__experiment_name, trial_name=self.__trial_name
-        )
-        workers_configs = [
-            (k, getattr(setup, k), getattr(scheduling, k)) for k in WORKER_TYPES
+        if not isinstance(setup, list):
+            setup = [setup]
+        worker_counts = [
+            (k, len(getattr(setup[0], k)), getattr(scheduling, k)) for k in WORKER_TYPES
         ]
-        workers_configs: List[Tuple[str, List, system_api.TasksGroup]]
 
         ray.init()
 
         logger.info("Ray initialized! Ready to run workers.")
 
         try:
-            self._launch_workers(workers_configs)
+            self._launch_workers(worker_counts)
             self.__base_controller.start(experiment, ignore_worker_error)
         except Exception as e:
             ray.shutdown()

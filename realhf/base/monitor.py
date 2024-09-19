@@ -29,24 +29,6 @@ logger = logging.getLogger("benchmark")
 IF_MARK = False
 
 
-def process_memory_mb(name):
-    process = psutil.Process()
-    memory_info = process.memory_info()
-    memory_usage_mb = memory_info.rss / 1024**2
-    pid = process.pid
-    logger.debug(f"Process PID {pid} memory usage @{name}: {memory_usage_mb}.")
-
-
-def gpu_memory_mb(name):
-    import torch.distributed as dist
-    from deepspeed.accelerator import get_accelerator
-
-    logger.debug(
-        f"{name} GPU rank {dist.get_rank()}: memory usage: {round(get_accelerator().memory_allocated() / 1024**2, 2)}MB, "
-        f"max memory usage: {round(get_accelerator().max_memory_allocated() / 1024**2, 2)}MB"
-    )
-
-
 def mock_time_mark(name, identifier, t, step):
     if IF_MARK:
         logger.debug(f"*{name}* #{identifier}#  ${t}$ ns step &{step}&")

@@ -859,6 +859,7 @@ def make_real_model(
     device: torch.device,
     model_path: str,
     is_critic: bool,
+    init_from_scratch: bool,
     init_critic_from_actor: bool,
     dtype: Optional[str] = None,
     hf_model_family: Optional[str] = None,
@@ -878,11 +879,12 @@ def make_real_model(
         is_critic=is_critic or init_critic_from_actor,
     )
     m = ReaLModel(mconfig, dtype=dtype, device=device)
-    m._instantiation_hooks.append(
-        lambda: getattr(m, f"from_{hf_model_family}")(
-            load_dir=model_path, init_critic_from_actor=init_critic_from_actor
+    if not init_from_scratch:
+        m._instantiation_hooks.append(
+            lambda: getattr(m, f"from_{hf_model_family}")(
+                load_dir=model_path, init_critic_from_actor=init_critic_from_actor
+            )
         )
-    )
 
     if constants.pipe_parallel_world_size() == 1:
         m = add_helper_functions(m)
