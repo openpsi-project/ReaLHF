@@ -4,6 +4,7 @@ import enum
 import getpass
 import json
 import os
+import re
 import time
 import traceback
 from dataclasses import asdict
@@ -459,22 +460,75 @@ class RayController:
             assert len(all_schedules) == count
             comms = [(rq.Queue(maxsize=8), rq.Queue(maxsize=8)) for _ in all_schedules]
             world_size = len(all_schedules)
-            jobs = [
-                ray.remote(
-                    num_cpus=sch.scheduling.cpu,
-                    num_gpus=sch.scheduling.gpu,
-                    memory=sch.scheduling.mem * 1024**2,
-                    name=f"{worker_type}/{idx}",
-                )(run_ray_worker).remote(
-                    worker_type,
-                    idx,
-                    world_size,
-                    self.__experiment_name,
-                    self.__trial_name,
-                    comm,
-                )
-                for idx, (comm, sch) in enumerate(zip(comms, all_schedules))
-            ]
+            if any(sch.scheduling.gpu > 0 for sch in all_schedules):
+                # For GPU jobs, use a customized packed scheduling method
+                # that sequentially allocates nodes.
+                if not all(
+                    sch.scheduling.gpu == all_schedules[0].scheduling.gpu == 1
+                    for sch in all_schedules
+                ):
+                    raise ValueError(
+                        "Ray scheduler only supports resource requirements where #GPU=1 or #GPU=0."
+                    )
+                available_nodes = [
+                    k
+                    for k in available_resources
+                    if re.match(r"node:(\b(?:\d{1,3}\.){3}\d{1,3}\b)", k)
+                ]
+                total_gpus = available_resources["GPU"]
+                if total_gpus % len(available_nodes) != 0:
+                    raise ValueError(
+                        "Cannot schedule Ray jobs to nodes with heterogeneous numbers of GPUs."
+                    )
+                n_gpus_per_node = int(total_gpus // len(available_nodes))
+                if total_gpus < count:
+                    raise RuntimeError(
+                        "Available GPUs is smaller than the number of scheduled GPU workers."
+                    )
+
+                jobs = []
+                for node_idx, i in enumerate(range(0, count, n_gpus_per_node)):
+                    _schedules = all_schedules[i : i + n_gpus_per_node]
+                    _comms = comms[i : i + n_gpus_per_node]
+                    for _idx, (comm, sch) in enumerate(zip(_comms, _schedules)):
+                        # Schedule jobs one-by-one to maintain the order on remote nodes.
+                        job = ray.remote(
+                            num_cpus=sch.scheduling.cpu,
+                            num_gpus=sch.scheduling.gpu,
+                            memory=sch.scheduling.mem * 1024**2,
+                            name=f"{worker_type}/{_idx + i}",
+                            resources={available_nodes[node_idx]: 1 / n_gpus_per_node},
+                        )(run_ray_worker).remote(
+                            worker_type,
+                            _idx + i,
+                            world_size,
+                            self.__experiment_name,
+                            self.__trial_name,
+                            comm,
+                        )
+                        try:
+                            ray.get(job, timeout=0.1)
+                        except ray.exceptions.GetTimeoutError:
+                            pass
+                        jobs.append(job)
+            else:
+                # Use the default Ray scheduler, which may have some randomness.
+                jobs = [
+                    ray.remote(
+                        num_cpus=sch.scheduling.cpu,
+                        num_gpus=sch.scheduling.gpu,
+                        memory=sch.scheduling.mem * 1024**2,
+                        name=f"{worker_type}/{idx}",
+                    )(run_ray_worker).remote(
+                        worker_type,
+                        idx,
+                        world_size,
+                        self.__experiment_name,
+                        self.__trial_name,
+                        comm,
+                    )
+                    for idx, (comm, sch) in enumerate(zip(comms, all_schedules))
+                ]
             for idx, (job, c) in enumerate(zip(jobs, comms)):
                 name = f"{worker_type}/{idx}"
                 self.__workers_ref[name] = job
