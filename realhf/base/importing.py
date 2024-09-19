@@ -17,7 +17,7 @@ def import_module(path: str, pattern: re.Pattern):
             continue
         module_path = os.path.splitext(os.path.join(dirname, x))[0]
         assert "realhf" in module_path
-        start_idx = path.index("realhf")
+        start_idx = path.rindex("realhf")
         module_path = module_path[start_idx:]
         module_path = "realhf." + module_path.replace(os.sep, ".").replace(
             "realhf.", ""
