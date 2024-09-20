@@ -45,7 +45,7 @@ class PromptDataset(torch.utils.data.Dataset):
             prompts_str,
             truncation=True,
             max_length=max_length,
-            padding=pad_to_max_length,
+            padding="max_length" if pad_to_max_length else False,
             return_length=True,
             return_attention_mask=False,
         )

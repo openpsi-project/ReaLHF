@@ -51,7 +51,7 @@ class PromptAnswerDataset(torch.utils.data.Dataset):
             max_length=max_length,
             return_length=True,
             return_attention_mask=False,
-            padding=pad_to_max_length,
+            padding="max_length" if pad_to_max_length else False,
         )
         prompt_tokens = tokenizer(
             prompts,
