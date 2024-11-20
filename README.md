@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-| <a href="https://openpsi-project.github.io/ReaLHF/"><b>Documentation</b></a> | <a href="https://arxiv.org/abs/2406.14088"><b>Paper</b></a> | <a href="assets/16ac3b40b751b780dfdae0b1ef84c34.svg"><b>WeChat Group</b></a> |
+| <a href="https://openpsi-project.github.io/ReaLHF/"><b>Documentation</b></a> | <a href="https://arxiv.org/abs/2406.14088"><b>Paper</b></a> | <a href="assets/16ac3b40b751b780dfdae0b1ef84c34.jpg"><b>WeChat Group</b></a> |
 </p>
 
 <h1 align="center">
@@ -24,6 +24,8 @@ ReaL introduces a novel approach called *parameter reallocation*, which dynamica
 ![Throughput Comparison](docs/source/images/vws.svg)
 
 ## News 📢
+
+- **[2024/11/20]** We have created a WeChat group (linked at the top of this page) for technical discussions. Join us to stay updated with the latest information!
 
 - **[2024/09/05]** Releasing ReaL v0.3.0 - MoE RLHF, CUDAGraph generation, mini-batched execution, and more customized algorithms.
 
