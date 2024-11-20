@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-| <a href="https://openpsi-project.github.io/ReaLHF/"><b>Documentation</b></a> | <a href="https://arxiv.org/abs/2406.14088"><b>Paper</b></a> | <a href="assets/1ab3496d7cf274b9c9083550a97c529.jpg"><b>WeChat (微信) Group</b></a> |
+| <a href="https://openpsi-project.github.io/ReaLHF/"><b>Documentation</b></a> | <a href="https://arxiv.org/abs/2406.14088"><b>Paper</b></a> | <a href="assets/16ac3b40b751b780dfdae0b1ef84c34.svg"><b>WeChat Group</b></a> |
 </p>
 
 <h1 align="center">
