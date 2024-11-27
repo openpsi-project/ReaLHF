@@ -1,5 +1,4 @@
 
-
 <!DOCTYPE html>
 <html class="no-js" lang="en">
   <head>
@@ -7,6 +6,8 @@
       <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    
     <meta name="docsearch:name" content="ReaL" />
     <meta name="docsearch:package_type" content="" />
     <meta name="docsearch:release" content="0.3.0" />
@@ -14,19 +15,15 @@
     
       <title>Customization &mdash; ReaL 0.3.0 documentation</title>
     
+    <link rel="canonical" href="customization" />
     <link rel="stylesheet" href="_static/bootstrap-icons.css" type="text/css" />
-          <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments.css', priority=200, rel='stylesheet', type='text/css')" -->
-          <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8e8a900e" />
-          <!-- add (1) pathto "_CascadingStyleSheet('_static/custom.css', priority=500, rel='stylesheet', type='text/css')" -->
-          <link rel="stylesheet" type="text/css" href="_static/custom.css?v=97da1bf0" />
-          <!-- add (1) pathto "_CascadingStyleSheet('_static/colorsets/sphinx-nefertiti-default-0.4.2.min.css', priority=500, rel='stylesheet', type='text/css')" -->
-          <link rel="stylesheet" type="text/css" href="_static/colorsets/sphinx-nefertiti-default-0.4.2.min.css" />
-          <!-- add (1) pathto "_CascadingStyleSheet('_static/fonts/nunito/stylesheet.css', priority=500, rel='stylesheet', type='text/css')" -->
-          <link rel="stylesheet" type="text/css" href="_static/fonts/nunito/stylesheet.css" />
-          <!-- add (1) pathto "_CascadingStyleSheet('_static/fonts/red-hat-mono/stylesheet.css', priority=500, rel='stylesheet', type='text/css')" -->
-          <link rel="stylesheet" type="text/css" href="_static/fonts/red-hat-mono/stylesheet.css" />
-          <!-- add (1) pathto "_CascadingStyleSheet('_static/pygments_dark.css', priority=500, rel='stylesheet', type='text/css')" -->
-          <link rel="stylesheet" type="text/css" href="_static/pygments_dark.css" />
+          <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8e8a900e" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/custom.css?v=97da1bf0" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/sphinx-nefertiti-default.min.css?v=b9bf16a8" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/fonts/nunito/stylesheet.css?v=0ed606bc" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/fonts/red-hat-mono/stylesheet.css?v=4eee5046" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/pygments-dark.css?v=589f9147" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/pygments-light.css?v=1620426e" /><!-- add (1) -->
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
         <link rel="top" title="ReaL 0.3.0 documentation" href="#" />
@@ -43,7 +40,10 @@
     </style>
   </head>
   <body>
-    <header class="navbar navbar-expand-xl navbar-dark nftt-navbar flex-column fixed-top">
+    <div id="back-to-top-container" class="position-fixed start-50 translate-middle-x">
+      <button id="back-to-top" type="button" class="d-none btn btn-neutral btn-sm shadow px-4" data-bs-toggle="button">Back to top</button>
+    </div>
+    <header id="snftt-nav-bar" class="navbar navbar-expand-xl navbar-dark nftt-navbar flex-column fixed-top">
       <div class="skip-links container-fluid visually-hidden-focusable overflow-hidden justify-content-start flex-grow-1">
         <div class="border-bottom mb-2 pb-2 w-100">
           <a class="d-none d-md-inline-flex p-2 m-1" href="#sidebar-filter">Skip to docs navigation</a>
@@ -58,8 +58,9 @@
         </div>
           <a href="index.html"
               
-              class="navbar-brand p-0 me-0 md-lg-2"
+              class="navbar-brand p-0 me-0 md-lg-2 pe-lg-4"
           ><span class="brand-text">ReaL</span></a>
+        
         
         <div class="d-flex d-xl-none">
           <button class="navbar-toggler p-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#nfttSearch" aria-controls="nfttSearch" aria-label="Search">
@@ -75,13 +76,13 @@
     <h5 class="offcanvas-title fw-bold" id="nfttSearchOffcanvasLabel">Search the documentation</h5>
     <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close" data-bs-target="#nfttSearch"></button>
   </div>
-  <div class="offcanvas-body p-4 pt-0 p-xl-0 px-xl-3">
+  <div class="offcanvas-body p-4 pt-0 p-xl-0 ps-xl-4">
     <hr class="d-xl-none text-white-50">
     <ul class="navbar-nav flex-row align-items-center flex-wrap ms-md-auto">
       <li class="nav-item col-12 col-xl-auto">
         <form id="nftt-search-form" action="search.html" method="get">
           <div class="input-group">
-            <input type="text" name="q" class="form-control" placeholder="Search docs" aria-label="Search" aria-describedby="button-search">
+            <input type="text" name="q" class="form-control search-input" placeholder="Search docs" aria-label="Search" aria-describedby="button-search">
             <input type="hidden" name="check_keywords" value="yes" />
             <input type="hidden" name="area" value="default" />
             <button class="btn btn-primary" type="submit" id="button-search" aria-label="Search"><i class="bi bi-search"></i></button>
@@ -94,12 +95,13 @@
 
         <div class="offcanvas-xl offcanvas-end" tabindex="-1" id="nfttNavbar" aria-labelledby="nfttNavbarOffcanvasLabel" data-bs-scroll="true">
           <div class="offcanvas-header px-4 pb-0">
-            <div class="offcanvas-title navbar-brand" id="nfttNavbarOffcanvasLabel"><span class="brand-text">Nefertiti for Sphinx</span></div>
+            <div class="offcanvas-title navbar-brand" id="nfttNavbarOffcanvasLabel"><span class="brand-text">ReaL</span></div>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close" data-bs-target="#nfttNavbar"></button>
           </div>
           <div class="offcanvas-body p-4 pt-0 p-xl-0 px-xl-3">
             <hr class="d-xl-none text-white-50">
             <ul class="navbar-nav flex-row align-items-center flex-wrap ms-lg-auto">
+              
               
               <!-- version_dropdown.html -->
 
@@ -108,7 +110,7 @@
 <li class="nav-item dropdown">
   <a class="nav-link d-flex py-2 px-0 px-xl-2 dropdown-toggle align-items-center" id="snftt-luz" href="#" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false" aria-label="Toggle light/dark">
     <i class="bi bi-circle-half" data-snftt-luz-icon-active></i>
-    <span id="snftt-luz-text" class="d-xl-none small ms-2">Toggle light/dark</span>
+    <span id="snftt-luz-text" class="d-xl-none ms-2">Toggle light/dark</span>
   </a>
   <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="snftt-luz-text">
     <li>
@@ -116,28 +118,28 @@
     </li>
     <li>
       <a class="dropdown-item d-flex align-items-center" data-snftt-luz="light" href="#" aria-pressed="false">
-        <span class="small">
+        <span>
           <i class="bi bi-sun" data-snftt-luz-icon="light"></i>
         </span>
-        <span class="small ms-3">Light</span>
+        <span class="ms-3">Light</span>
         <i class="bi bi-check ms-auto"></i>
       </a>
     </li>
     <li>
       <a class="dropdown-item d-flex align-items-center" data-snftt-luz="dark" href="#" aria-pressed="false">
-        <span class="small">
+        <span>
           <i class="bi bi-moon-stars" data-snftt-luz-icon="dark"></i>
         </span>
-        <span class="small ms-3">Dark</span>
+        <span class="ms-3">Dark</span>
         <i class="bi bi-check ms-auto"></i>
       </a>
     </li>
     <li>
       <a class="dropdown-item current d-flex align-items-center" data-snftt-luz="default" href="#" aria-pressed="false">
-        <span class="small">
+        <span>
           <i class="bi bi-circle-half" data-snftt-luz-icon="default"></i>
         </span>
-        <span class="small ms-3">Default</span>
+        <span class="ms-3">Default</span>
         <i class="bi bi-check ms-auto"></i>
       </a>
     </li>
@@ -147,6 +149,7 @@
           </div>
         </div>
       </nav>
+      
     </header>
 
     <div class="container-fluid flex-grow-1">
@@ -158,7 +161,7 @@
               <i class="bi bi-book"></i>&nbsp;&nbsp;<span>Index</span>
             </div>
             <div id="sidebar" tabindex="-1" class="offcanvas-xl offcanvas-start" aria-labelledby="nfttSidebarOffcanvasLabel">
-                <!-- danirus sidebartemplate: "globaltoc.html" --><div class="offcanvas-header border-bottom">
+                <!-- sidebartemplate: "globaltoc.html" --><div class="offcanvas-header border-bottom">
   <h5 class="offcanvas-title fw-bold" id="nfttSidebarOffcanvasLabel">
     Table of contents
   </h5>
@@ -195,6 +198,12 @@
           </div>
         </aside>
         <article id="content" class="nftt-content" role="main">
+          <nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="index.html">Start</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Customization</li>
+  </ol>
+</nav>
     <section id="customization">
 <h1>Customization<a class="headerlink" href="#customization" title="Link to this heading">¶</a></h1>
 <section id="customizing-datasets">
@@ -656,7 +665,7 @@ automatic evaluations.</p>
         
         
         <div class="built-with pt-2">
-          Built with <a href="http://sphinx-doc.org">Sphinx 7.3.7</a> and <a href="https://github.com/danirus/sphinx-nefertiti">Nefertiti 0.4.2</a>
+          Built with <a href="http://sphinx-doc.org">Sphinx 7.3.7</a> and <a href="https://github.com/danirus/sphinx-nefertiti">Nefertiti 0.5.2</a>
         </div>
         
       </div>
@@ -667,10 +676,8 @@ automatic evaluations.</p>
     <script src="_static/documentation_options.js?v=e259d695"></script>
     <script src="_static/doctools.js?v=9a2dae69"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
-
-    <script type="text/javascript" src="_static/sphinx-nefertiti-0.4.2.min.js"></script>
-    <script type="text/javascript" src="_static/bootstrap.bundle-0.4.2.min.js"></script>
-    
-    <script type="text/javascript" src="_static/doc_versions.js"></script>
+    <script src="_static/docs-versions.js?v=096e97ef"></script>
+    <script src="_static/sphinx-nefertiti.min.js?v=3d58cee3"></script>
+    <script src="_static/bootstrap.bundle.min.js?v=ff4e7878"></script>
   </body>
 </html>
