@@ -31,9 +31,13 @@ struct Signal {
   alignas(128) uint32_t end[kMaxBlocks][8];
 };
 
-struct __align__(16) RankData { const void *__restrict__ ptrs[8]; };
+struct __align__(16) RankData {
+  const void *__restrict__ ptrs[8];
+};
 
-struct __align__(16) RankSignals { volatile Signal *signals[8]; };
+struct __align__(16) RankSignals {
+  volatile Signal *signals[8];
+};
 
 // like std::array, but aligned
 template<typename T, int sz>
@@ -130,7 +134,8 @@ DINLINE void start_sync(const RankSignals &sg, volatile Signal *self_sg, int ran
     // Latency = 1 p2p write
     sg.signals[threadIdx.x]->start[blockIdx.x][rank] = 1;
     // wait until we got true from all ranks
-    while (!self_sg->start[blockIdx.x][threadIdx.x]);
+    while (!self_sg->start[blockIdx.x][threadIdx.x])
+      ;
   }
   __syncthreads();
 }
@@ -153,7 +158,8 @@ DINLINE void end_sync(const RankSignals &sg, volatile Signal *self_sg, int rank)
     // Latency = 1 p2p write
     sg.signals[threadIdx.x]->end[blockIdx.x][rank] = 1;
     // wait until we got true from all ranks
-    while (!self_sg->end[blockIdx.x][threadIdx.x]);
+    while (!self_sg->end[blockIdx.x][threadIdx.x])
+      ;
   }
   if constexpr (!final_sync) __syncthreads();
 }
