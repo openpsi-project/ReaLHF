@@ -31,9 +31,13 @@ struct Signal {
   alignas(128) uint32_t end[kMaxBlocks][8];
 };
 
-struct __align__(16) RankData { const void *__restrict__ ptrs[8]; };
+struct __align__(16) RankData {
+  const void *__restrict__ ptrs[8];
+};
 
-struct __align__(16) RankSignals { volatile Signal *signals[8]; };
+struct __align__(16) RankSignals {
+  volatile Signal *signals[8];
+};
 
 // like std::array, but aligned
 template<typename T, int sz>
