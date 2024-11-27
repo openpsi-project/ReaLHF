@@ -6,7 +6,7 @@
 #include <iomanip>
 
 RPC::RPC(std::string model_name, std::string rpc_name, std::string interface_type)
-    : model_name(model_name), rpc_name(rpc_name), interface_type(interface_type){};
+    : model_name(model_name), rpc_name(rpc_name), interface_type(interface_type) {};
 
 RPCExecution::RPCExecution(RPC *rpc_ptr, DeviceMesh &device_mesh,
                            ModelParallelStrategy &model_parallel_strategy, uint64_t time_cost,
@@ -16,7 +16,7 @@ RPCExecution::RPCExecution(RPC *rpc_ptr, DeviceMesh &device_mesh,
       model_parallel_strategy(model_parallel_strategy),
       time_cost(time_cost),
       mem(mem),
-      static_mem(static_mem){};
+      static_mem(static_mem) {};
 
 bool OverlapGroup::maybe_add(RPCExecution *rpc_exe) {
   if (rpc_executions.empty()) {
@@ -64,7 +64,7 @@ void GroupedRPCExecutions::resolve(RPCExecution *rpc_exe) {}
 
 void GroupedRPCExecutions::add(RPCExecution *rpc_exe) { group.add_to_groups(rpc_exe); };
 
-void GroupedRPCExecutions::offload(std::string model_name){};
+void GroupedRPCExecutions::offload(std::string model_name) {};
 
 uint64_t GroupedRPCExecutions::total_mem_cost() {
   uint64_t max_mem = 0;
@@ -80,7 +80,7 @@ uint64_t GroupedRPCExecutions::total_mem_cost() {
 };
 
 RPCInstance::RPCInstance(RPC *rpc_ptr, int id, std::string name)
-    : rpc_ptr(rpc_ptr), id(id), name(name){};
+    : rpc_ptr(rpc_ptr), id(id), name(name) {};
 
 void RPCInstance::remove_parent(RPCInstance *parent) {
   auto it = std::find(parents.begin(), parents.end(), parent);
@@ -220,7 +220,7 @@ CommStats::CommStats(uint64_t local_send, uint64_t local_recv, uint64_t remote_s
       remote_send(remote_send),
       remote_recv(remote_recv),
       offload_store(offload_store),
-      offload_load(offload_load){};
+      offload_load(offload_load) {};
 
 // ModelConfig::ModelConfig(std::string model_name,
 //                          uint64_t param_size_bytes)

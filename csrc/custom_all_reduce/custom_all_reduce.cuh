@@ -134,8 +134,7 @@ DINLINE void start_sync(const RankSignals &sg, volatile Signal *self_sg, int ran
     // Latency = 1 p2p write
     sg.signals[threadIdx.x]->start[blockIdx.x][rank] = 1;
     // wait until we got true from all ranks
-    while (!self_sg->start[blockIdx.x][threadIdx.x])
-      ;
+    while (!self_sg->start[blockIdx.x][threadIdx.x]);
   }
   __syncthreads();
 }
@@ -158,8 +157,7 @@ DINLINE void end_sync(const RankSignals &sg, volatile Signal *self_sg, int rank)
     // Latency = 1 p2p write
     sg.signals[threadIdx.x]->end[blockIdx.x][rank] = 1;
     // wait until we got true from all ranks
-    while (!self_sg->end[blockIdx.x][threadIdx.x])
-      ;
+    while (!self_sg->end[blockIdx.x][threadIdx.x]);
   }
   if constexpr (!final_sync) __syncthreads();
 }

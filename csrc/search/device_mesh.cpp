@@ -67,7 +67,7 @@ bool DeviceMesh::overlap(const DeviceMesh &other) {
 };
 
 ModelParallelStrategy::ModelParallelStrategy(int num_pp, int num_dp, int num_mp)
-    : num_pp(num_pp), num_dp(num_dp), num_mp(num_mp){};
+    : num_pp(num_pp), num_dp(num_dp), num_mp(num_mp) {};
 
 bool ModelParallelStrategy::operator==(const ModelParallelStrategy &other) const {
   return num_pp == other.num_pp && num_dp == other.num_dp && num_mp == other.num_mp;
