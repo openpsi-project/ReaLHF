@@ -1,1 +1,1 @@
-const docs_versions = []
+window.docs_versions = [];
