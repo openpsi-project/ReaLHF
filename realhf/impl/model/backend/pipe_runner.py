@@ -12,7 +12,7 @@ import realhf.base.logging as logging
 import realhf.impl.model.parallelism.pipeline_parallel.p2p as p2p
 import realhf.impl.model.parallelism.pipeline_parallel.static_schedule as schedule
 import realhf.impl.model.utils.cuda_graph as cuda_graph
-from realhf.api.core.data_api import SequenceSample
+from realhf.api.core.data_api import SequenceSample, TokenizerLike
 from realhf.api.core.model_api import GenerationHyperparameters
 from realhf.base.datapack import flat2d
 from realhf.impl.model.nn.real_llm_api import ReaLModel
@@ -847,7 +847,7 @@ class PipelineRunner:
     def generate(
         self,
         input_: SequenceSample,
-        tokenizer: transformers.PreTrainedTokenizerFast,
+        tokenizer: TokenizerLike,
         gconfig: GenerationHyperparameters = dataclasses.field(
             default_factory=GenerationHyperparameters
         ),

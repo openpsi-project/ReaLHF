@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.utils.checkpoint
 import transformers
 
-from realhf.api.core import model_api
+from realhf.api.core import data_api, model_api
 from realhf.api.core.config import ModelName
 from realhf.base import constants, logging, topology
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
@@ -788,7 +788,7 @@ class ReaLModel(nn.Module):
 # a helper function to make real_model look like huggingface model
 def generate_helper(
     self: ReaLModel,
-    tokenizer: transformers.PreTrainedTokenizerFast,
+    tokenizer: data_api.TokenizerLike,
     input_ids: Optional[torch.Tensor] = None,
     attention_mask: Optional[torch.Tensor] = None,
     packed_input_ids: Optional[torch.Tensor] = None,
@@ -863,6 +863,7 @@ def make_real_model(
     init_critic_from_actor: bool,
     dtype: Optional[str] = None,
     hf_model_family: Optional[str] = None,
+    tokenizer_kwargs: Optional[Dict[str, Any]] = None,
 ) -> model_api.Model:
     if dtype == "fp16" or dtype == None:
         dtype = torch.float16
@@ -873,7 +874,9 @@ def make_real_model(
     else:
         raise NotImplementedError(f"Unsupported dtype {dtype}")
 
-    tokenizer = model_api.load_hf_tokenizer(model_path)
+    if tokenizer_kwargs is None:
+        tokenizer_kwargs = {}
+    tokenizer = model_api.load_hf_tokenizer(model_path, **tokenizer_kwargs)
     mconfig = getattr(ReaLModel, f"config_from_{hf_model_family}")(
         model_path=model_path,
         is_critic=is_critic or init_critic_from_actor,

@@ -5,6 +5,7 @@ import torch
 import torch.distributed as dist
 import transformers
 
+from realhf.api.core import data_api
 from realhf.base import constants, logging
 from realhf.impl.model.utils.padding import pad_input, unpad_input
 
@@ -295,7 +296,7 @@ def masked_normalization(
 
 def get_eos_indices(
     input_ids: torch.LongTensor,
-    tokenizer: transformers.PreTrainedTokenizerFast,
+    tokenizer: data_api.TokenizerLike,
 ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
     if torch.any(input_ids[:, 0] == tokenizer.eos_token_id):
         indices = (input_ids[:, 0] == tokenizer.eos_token_id).nonzero().flatten()

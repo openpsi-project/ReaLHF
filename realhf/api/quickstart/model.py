@@ -152,6 +152,10 @@ class ModelTrainEvalConfig:
     :type optimizer: Optional[OptimizerConfig]
     :param init_critic_from_actor: Whether to initialize a critic/reward model from a saved LM checkpoint.
     :type init_critic_from_actor: bool
+    :param init_from_scratch: Whether to initialize the model from scratch.
+    :type init_from_scratch: bool
+    :param tokenizer_kwargs: Additional kwargs for the HuggingFace tokenizer/processor.
+    :type tokenizer_kwargs: Optional[Dict[str, Any]]
     """
 
     type: ModelFamily = dataclasses.field(default=ModelFamily("llama", 7, False))
@@ -173,6 +177,7 @@ class ModelTrainEvalConfig:
     )
     init_from_scratch: bool = False
     init_critic_from_actor: bool = False
+    tokenizer_kwargs: Optional[Dict[str, Any]] = dataclasses.field(default_factory=dict)
 
 
 def get_real_model_config(
@@ -182,6 +187,7 @@ def get_real_model_config(
     init_from_scratch: bool,
     init_critic_from_actor: bool,
     dtype: Optional[str] = None,
+    tokenizer_kwargs: Optional[Dict[str, Any]] = None,
     # LoRA config
     lora: Optional[LoRAConfig] = None,
     is_sft_lora: bool = False,
@@ -199,6 +205,7 @@ def get_real_model_config(
             dtype=dtype,
             hf_model_family=hf_model_family,
             init_from_scratch=init_from_scratch,
+            tokenizer_kwargs=tokenizer_kwargs,
         ),
     )
     if is_sft_lora:

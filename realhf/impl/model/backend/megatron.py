@@ -31,7 +31,7 @@ except (ModuleNotFoundError, ImportError):
         pass
 
 
-from realhf.api.core import model_api
+from realhf.api.core import data_api, model_api
 from realhf.api.core.data_api import SequenceSample
 from realhf.base import constants, logging
 from realhf.base.datapack import flat2d
@@ -810,7 +810,7 @@ class ReaLMegatronEngine(model_api.PipelinableEngine):
     def generate(
         self,
         input_: SequenceSample,
-        tokenizer: transformers.PreTrainedTokenizerFast,
+        tokenizer: data_api.TokenizerLike,
         gconfig: model_api.GenerationHyperparameters = dataclasses.field(
             default_factory=model_api.GenerationHyperparameters
         ),

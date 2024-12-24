@@ -16,7 +16,7 @@ from realhf.api.core.config import (
     ModelName,
     ModelWrapperAbstraction,
 )
-from realhf.api.core.data_api import SequenceSample, load_hf_tokenizer
+from realhf.api.core.data_api import SequenceSample, TokenizerLike, load_hf_tokenizer
 
 logger = logging.getLogger("model_api")
 
@@ -428,7 +428,7 @@ class PipelinableEngine(abc.ABC):
     def generate(
         self,
         input_: SequenceSample,
-        tokenizer: transformers.PreTrainedTokenizerFast,
+        tokenizer: TokenizerLike,
         gconfig: GenerationHyperparameters = dataclasses.field(
             default_factory=GenerationHyperparameters
         ),
@@ -440,7 +440,7 @@ class PipelinableEngine(abc.ABC):
             which includes the concatenated prompts.
         :type input_: SequenceSample
         :param tokenizer: The tokenizer for the model.
-        :type tokenizer: transformers.PreTrainedTokenizerFast
+        :type tokenizer: TokenizerLike
         :param gconfig: The generation hyperparameters.
         :type gconfig: GenerationHyperparameters
         :param num_micro_batches: The number of micro-batches to split the batch into.
@@ -472,7 +472,7 @@ class Model:
         sharded by tensor or pipeline parallelism.
     :type module: PipelinableEngine | torch.nn.Module
     :param tokenizer: The tokenizer associated with the model.
-    :type tokenizer: transformers.PreTrainedTokenizerFast
+    :type tokenizer: TokenizerLike
     :param device: The device on which to run the model.
     :type device: Union[str, torch.device]
     :param dtype: The data type of the model. Defaults to torch.float16
@@ -487,7 +487,7 @@ class Model:
 
     name: ModelName
     module: PipelinableEngine | torch.nn.Module
-    tokenizer: transformers.PreTrainedTokenizerFast
+    tokenizer: TokenizerLike
     device: Union[str, torch.device]
     dtype: Optional[torch.dtype] = None
     version: ModelVersion = dataclasses.field(default_factory=ModelVersion)

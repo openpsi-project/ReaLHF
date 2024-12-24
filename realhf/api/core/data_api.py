@@ -38,19 +38,30 @@ from realhf.base.cluster import spec as cluster_spec
 
 logger = logging.getLogger("api.data")
 
+TokenizerLike = Union[transformers.PreTrainedTokenizerFast, transformers.ProcessorMixin]
+
 
 def load_hf_tokenizer(
     model_name_or_path: str,
-    fast_tokenizer=True,
-    padding_side: Optional[str] = None,
-) -> transformers.PreTrainedTokenizerFast:
-    kwargs = {}
-    if padding_side is not None:
-        kwargs["padding_side"] = padding_side
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
+    **kwargs,
+) -> TokenizerLike:
+    """Load a HuggingFace processor.
+
+    It could be a text processor, which is
+    a duck type of tokenizer, or a multi-modal
+    processor, which also has image/audio/video
+    processing capabilities.
+
+    This function also sets the pad_token_id.
+
+    :param model_name_or_path: The HF model name or path.
+    :type model_name_or_path: str
+    :param kwargs: Additional keyword arguments passed to HF.
+    :type kwargs: Dict[str, Any]
+    """
+    kwargs.update(trust_remote_code=True, fast_tokenizer=True)
+    tokenizer = transformers.AutoProcessor.from_pretrained(
         model_name_or_path,
-        fast_tokenizer=fast_tokenizer,
-        trust_remote_code=True,
         **kwargs,
     )
     if tokenizer.pad_token_id is None:
@@ -608,7 +619,7 @@ class DatasetUtility:
     seed: int
     dp_rank: int
     world_size: int
-    tokenizer: transformers.PreTrainedTokenizerFast
+    tokenizer: TokenizerLike
 
     def __post_init__(self):
         if self.tokenizer.pad_token_id is None:
@@ -679,7 +690,7 @@ def make_dataset(
     seed: int,
     dp_rank: int,
     world_size: int,
-    tokenizer_or_tokenizer_name: Union[transformers.PreTrainedTokenizerFast, str],
+    tokenizer_or_tokenizer_name: Union[TokenizerLike, str],
     experiment_name: str,
     trial_name: str,
     cache_root: Optional[str] = None,

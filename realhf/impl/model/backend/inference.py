@@ -6,9 +6,9 @@ import torch
 import torch.distributed as dist
 import transformers
 
-import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
+from realhf.api.core import data_api, model_api
 from realhf.api.core.data_api import SequenceSample
 from realhf.base.datapack import flat2d
 from realhf.impl.model.backend.pipe_runner import PipelineRunner
@@ -127,7 +127,7 @@ class PipelinableInferenceEngine(model_api.PipelinableEngine):
     def generate(
         self,
         input_: SequenceSample,
-        tokenizer: transformers.PreTrainedTokenizerFast,
+        tokenizer: data_api.TokenizerLike,
         gconfig: model_api.GenerationHyperparameters = dataclasses.field(
             default_factory=model_api.GenerationHyperparameters
         ),

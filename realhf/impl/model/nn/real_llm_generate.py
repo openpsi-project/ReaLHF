@@ -10,6 +10,7 @@ import torch.utils.checkpoint
 import transformers
 
 import realhf.impl.model.utils.cuda_graph as cuda_graph
+from realhf.api.core import data_api
 from realhf.api.core.model_api import GenerationHyperparameters, ReaLModelConfig
 from realhf.base import constants, logging
 from realhf.impl.model.nn.real_llm_base import PipeCacheData, PipeTransferData
@@ -25,7 +26,7 @@ logger = logging.getLogger("ReaLModel Generation")
 
 def genstep(
     next_token_logits: torch.Tensor,
-    tokenizer: transformers.PreTrainedTokenizerFast,
+    tokenizer: data_api.TokenizerLike,
     unfinished_sequences: torch.Tensor,
     generated_idx: Union[torch.IntTensor, int],
     gconfig: GenerationHyperparameters,
@@ -34,7 +35,7 @@ def genstep(
 
     Args:
         next_token_logits (torch.Tensor): Shape [bs, vocab_size].
-        tokenizer (transformers.PreTrainedTokenizerFast): .
+        tokenizer (data_api.TokenizerLike): .
         unfinished_sequences (torch.Tensor): Bool tensor indicator of whether a sequence is finished.
             Shape [bs].
         generated_idx (int): The token index to be generated.
@@ -251,7 +252,7 @@ def maybe_capture_cudagraph(
 @torch.no_grad()
 def generate(
     model: "ReaLModel",
-    tokenizer: transformers.PreTrainedTokenizerFast,
+    tokenizer: data_api.TokenizerLike,
     packed_input_ids: Optional[torch.LongTensor] = None,
     cu_seqlens: Optional[torch.LongTensor] = None,
     max_seqlen: Optional[int] = None,
@@ -533,7 +534,7 @@ def concat_prompt_to_generation_output(
 @torch.no_grad()
 def vanilla_packed_generate(
     model: "ReaLModel",
-    tokenizer: transformers.PreTrainedTokenizerFast,
+    tokenizer: data_api.TokenizerLike,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
     gconfig: GenerationHyperparameters = dataclasses.field(
@@ -600,7 +601,7 @@ def vanilla_packed_generate(
 @torch.no_grad()
 def vanilla_cpu_generate(
     model: "ReaLModel",
-    tokenizer: transformers.PreTrainedTokenizerFast,
+    tokenizer: data_api.TokenizerLike,
     input_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
     gconfig: GenerationHyperparameters = dataclasses.field(
@@ -668,7 +669,7 @@ class InflightBatchingGenerator:
         inqueue: queue.Queue,
         outqueue: queue.Queue,
         model: "ReaLModel",
-        tokenizer: transformers.PreTrainedTokenizerFast,
+        tokenizer: data_api.TokenizerLike,
         gconfig: GenerationHyperparameters,
         batch_size: int,
         max_prompt_len: int,

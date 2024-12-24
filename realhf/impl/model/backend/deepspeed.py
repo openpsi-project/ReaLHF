@@ -21,9 +21,9 @@ from deepspeed.runtime.zero.config import ZeroStageEnum
 from deepspeed.runtime.zero.stage3 import DeepSpeedZeroOptimizer_Stage3
 from deepspeed.runtime.zero.stage_1_and_2 import DeepSpeedZeroOptimizer
 
-import realhf.api.core.model_api as model_api
 import realhf.base.constants as constants
 import realhf.base.logging as logging
+from realhf.api.core import data_api, model_api
 from realhf.api.core.data_api import SequenceSample
 from realhf.base.datapack import flat2d
 from realhf.base.monitor import CUDATimeMarkType, cuda_tmark, cuda_tmarked
@@ -264,7 +264,7 @@ class ReaLDeepSpeedEngine(model_api.PipelinableEngine):
     def generate(
         self,
         input_: SequenceSample,
-        tokenizer: transformers.PreTrainedTokenizerFast,
+        tokenizer: data_api.TokenizerLike,
         gconfig: model_api.GenerationHyperparameters = dataclasses.field(
             default_factory=model_api.GenerationHyperparameters
         ),

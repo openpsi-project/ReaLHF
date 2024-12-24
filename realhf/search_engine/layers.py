@@ -13,6 +13,7 @@ import realhf.api.core.model_api as model_api
 import realhf.api.core.system_api as config_package
 import realhf.base.constants as constants
 import realhf.base.logging as logging
+from realhf.api.core import data_api
 from realhf.api.core.model_api import ReaLModelConfig
 from realhf.impl.model.utils.padding import unpad_input
 
@@ -59,7 +60,7 @@ class ProfileLayers:
         self,
         model_name: str,
         config: ReaLModelConfig,
-        tokenizer: transformers.PreTrainedTokenizerFast = None,
+        tokenizer: data_api.TokenizerLike = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ):

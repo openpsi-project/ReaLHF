@@ -438,6 +438,7 @@ class CommonExperimentConfig(Experiment):
                     init_critic_from_actor=model_cfg.init_critic_from_actor,
                     dtype="bf16" if model_cfg.enable_bf16 else "fp16",
                     lora=model_cfg.lora,
+                    tokenizer_kwargs=model_cfg.tokenizer_kwargs,
                 )
                 mapping = rpc_alloc.device_mesh.mapping
                 gradient_checkpointing = model_cfg.gradient_checkpointing and any(
