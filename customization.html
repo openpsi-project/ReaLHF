@@ -18,11 +18,11 @@
     <link rel="canonical" href="customization" />
           <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8e8a900e" /><!-- add (1) -->
           <link rel="stylesheet" type="text/css" href="_static/custom.css?v=97da1bf0" /><!-- add (1) -->
-          <link rel="stylesheet" type="text/css" href="_static/sphinx-nefertiti-default.min.css?v=5aefbef3" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/sphinx-nefertiti-default.min.css?v=0f5ffd77" /><!-- add (1) -->
           <link rel="stylesheet" type="text/css" href="_static/fonts/nunito/stylesheet.css?v=0ed606bc" /><!-- add (1) -->
           <link rel="stylesheet" type="text/css" href="_static/fonts/red-hat-mono/stylesheet.css?v=4eee5046" /><!-- add (1) -->
-          <link rel="stylesheet" type="text/css" href="_static/pygments-dark.css?v=589f9147" /><!-- add (1) -->
-          <link rel="stylesheet" type="text/css" href="_static/pygments-light.css?v=1620426e" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/pygments-dark.css?v=2de69186" /><!-- add (1) -->
+          <link rel="stylesheet" type="text/css" href="_static/pygments-light.css?v=970f37b1" /><!-- add (1) -->
           <link rel="stylesheet" type="text/css" href="_static/bootstrap-icons.min.css?v=44730005" /><!-- add (1) -->
         <link rel="index" title="Index" href="genindex.html" />
         <link rel="search" title="Search" href="search.html" />
@@ -254,7 +254,7 @@ represents the number of sequences for each key.</p></li>
 </ul>
 <p>Below is an example implementation of the dataset used for reward
 modeling:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
      <span class="o">...</span>
      <span class="k">return</span> <span class="n">data_api</span><span class="o">.</span><span class="n">SequenceSample</span><span class="p">(</span>
          <span class="n">keys</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;packed_input_ids&quot;</span><span class="p">,</span> <span class="s2">&quot;prompt_lens&quot;</span><span class="p">],</span>
@@ -290,7 +290,7 @@ to a dataset configuration under the system API, specifically
 dataset name (in this case, “prompt_answer”) and corresponding arguments
 that are passed to the dataset class’s constructor:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@property</span>
- <span class="k">def</span> <span class="nf">datasets</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+ <span class="k">def</span><span class="w"> </span><span class="nf">datasets</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
      <span class="k">return</span> <span class="p">[</span>
          <span class="n">DatasetAbstraction</span><span class="p">(</span>
              <span class="s2">&quot;prompt_answer&quot;</span><span class="p">,</span>
@@ -473,9 +473,9 @@ BERT-like sentiment analysis model from HuggingFace.</p>
 <p>First, we need to implement a new model interface class for our
 customized use:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
-<span class="k">class</span> <span class="nc">SentimentScoringInterface</span><span class="p">(</span><span class="n">model_api</span><span class="o">.</span><span class="n">ModelInterface</span><span class="p">):</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SentimentScoringInterface</span><span class="p">(</span><span class="n">model_api</span><span class="o">.</span><span class="n">ModelInterface</span><span class="p">):</span>
 
-    <span class="k">def</span> <span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
         <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">__post_init__</span><span class="p">()</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">score_model</span> <span class="o">=</span> <span class="p">(</span>
             <span class="n">transformers</span><span class="o">.</span><span class="n">AutoModelForSequenceClassification</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span>
@@ -488,7 +488,7 @@ customized use:</p>
         <span class="p">)</span>
 
     <span class="nd">@torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">()</span>
-    <span class="k">def</span> <span class="nf">inference</span><span class="p">(</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">inference</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">:</span> <span class="n">model_api</span><span class="o">.</span><span class="n">Model</span><span class="p">,</span> <span class="n">input_</span><span class="p">:</span> <span class="n">SequenceSample</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SequenceSample</span><span class="p">:</span>
         <span class="c1"># Re-tokenize the texts.</span>
@@ -528,9 +528,9 @@ compute the score, and return it.</p></li>
 <p>To use our customized interface implementation in PPO, we need to change
 the <code class="docutils literal notranslate"><span class="pre">interface_impl</span></code> field of the reward model in the MFC nodes of
 PPO:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">MyPPOConfig</span><span class="p">(</span><span class="n">PPOConfig</span><span class="p">):</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">MyPPOConfig</span><span class="p">(</span><span class="n">PPOConfig</span><span class="p">):</span>
 
-    <span class="k">def</span> <span class="nf">initial_setup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ExperimentConfig</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">initial_setup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ExperimentConfig</span><span class="p">:</span>
         <span class="o">...</span>
         <span class="k">for</span> <span class="n">mw</span> <span class="ow">in</span> <span class="n">cfg</span><span class="o">.</span><span class="n">model_worker</span><span class="p">:</span>
             <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">mw</span><span class="o">.</span><span class="n">shards</span><span class="p">:</span>
@@ -664,7 +664,7 @@ automatic evaluations.</p>
         
         
         <div class="built-with pt-2">
-          Built with <a href="http://sphinx-doc.org">Sphinx 7.3.7</a> and <a href="https://github.com/danirus/sphinx-nefertiti">Nefertiti 0.7.3</a>
+          Built with <a href="http://sphinx-doc.org">Sphinx 7.3.7</a> and <a href="https://github.com/danirus/sphinx-nefertiti">Nefertiti 0.7.4</a>
         </div>
         
       </div>
@@ -676,7 +676,7 @@ automatic evaluations.</p>
     <script src="_static/doctools.js?v=9a2dae69"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/docs-versions.js?v=08b0cbfb"></script>
-    <script src="_static/sphinx-nefertiti.min.js?v=dfd9d24d"></script>
+    <script src="_static/sphinx-nefertiti.min.js?v=de1d41e1"></script>
     <script src="_static/bootstrap.bundle.min.js?v=ff4e7878"></script>
   </body>
 </html>
