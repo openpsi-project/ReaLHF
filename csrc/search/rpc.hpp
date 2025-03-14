@@ -1,6 +1,7 @@
 #ifndef RPC_HPP
 #define RPC_HPP
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <unordered_map>
