@@ -8,8 +8,12 @@ CLUSTER_SPEC_PATH = os.environ.get("CLUSTER_SPEC_PATH", "")
 
 
 def get_user_tmp():
-    user = getpass.getuser()
-    user_tmp = os.path.join("/home", user, ".cache", "realhf")
+    home_dir = os.environ.get('HOME', '')
+    if not home_dir:
+        user = getpass.getuser()
+        user_tmp = os.path.join("/home", user, ".cache", "realhf")
+    else:
+        user_tmp = os.path.join(home_dir, ".cache", "realhf")
     os.makedirs(user_tmp, exist_ok=True)
     return user_tmp
 
