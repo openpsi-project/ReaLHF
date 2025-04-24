@@ -1,3 +1,5 @@
+## This repository has been archived. Our development has been moved to [AReaL](https://github.com/inclusionAI/AReaL).
+
 
 
 <p align="center">
