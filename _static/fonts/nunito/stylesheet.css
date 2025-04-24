@@ -8,7 +8,7 @@
     font-family: 'Nunito';
     src: url('Nunito-VariableFont_wght.ttf') format("woff2-variations"),
          url('Nunito-VariableFont_wght.ttf') format("woff2");
-    font-weight: 400 700;
+    font-weight: 300 400 700;
   }
 }
 
