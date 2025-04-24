@@ -16,14 +16,11 @@ from realhf.impl.model.utils.functional import (
 from .mlp import LayerNormQKVLinear
 from .rotary import RotaryEmbedding
 
-try:
-    from flash_attn import (
-        flash_attn_func,
-        flash_attn_varlen_func,
-        flash_attn_with_kvcache,
-    )
-except ModuleNotFoundError:
-    pass
+from flash_attn import (
+    flash_attn_func,
+    flash_attn_varlen_func,
+    flash_attn_with_kvcache,
+)
 
 logger = logging.getLogger("Attention")
 
